@@ -193,6 +193,15 @@ DOMAIN_TEXT_RE = re.compile(
 )
 NON_ALNUM_RE = re.compile(r"[^a-z0-9]+")
 TITLE_SPLIT_RE = re.compile(r"\s*[|\-:\u2013\u2014]\s*")
+CONFERENCE_NOISE_RE = re.compile(
+    r"\b(?:see more links?|search(?:\s+for)?\s+all\s+"
+    r"(?:exhibitors?|vendors?|companies?|sponsors?))\b",
+    re.IGNORECASE,
+)
+CONFERENCE_DIRECTORY_RE = re.compile(
+    r"\b(?:exhibitor|vendor|company|sponsor)\s+directory\b",
+    re.IGNORECASE,
+)
 META_TAG_RE = re.compile(r"<meta\b([^>]+)>", re.IGNORECASE)
 META_ATTR_RE = re.compile(
     r"([A-Za-z_:][A-Za-z0-9_.:-]*)\s*=\s*([\"'])(.*?)\2",
@@ -285,6 +294,81 @@ EVENT_NAME_HINTS = {
     "summit",
     "trade",
 }
+REGION_NAME_TO_ABBR = {
+    "alabama": "AL",
+    "alaska": "AK",
+    "arizona": "AZ",
+    "arkansas": "AR",
+    "california": "CA",
+    "colorado": "CO",
+    "connecticut": "CT",
+    "delaware": "DE",
+    "district of columbia": "DC",
+    "florida": "FL",
+    "georgia": "GA",
+    "hawaii": "HI",
+    "idaho": "ID",
+    "illinois": "IL",
+    "indiana": "IN",
+    "iowa": "IA",
+    "kansas": "KS",
+    "kentucky": "KY",
+    "louisiana": "LA",
+    "maine": "ME",
+    "maryland": "MD",
+    "massachusetts": "MA",
+    "michigan": "MI",
+    "minnesota": "MN",
+    "mississippi": "MS",
+    "missouri": "MO",
+    "montana": "MT",
+    "nebraska": "NE",
+    "nevada": "NV",
+    "new hampshire": "NH",
+    "new jersey": "NJ",
+    "new mexico": "NM",
+    "new york": "NY",
+    "north carolina": "NC",
+    "north dakota": "ND",
+    "ohio": "OH",
+    "oklahoma": "OK",
+    "oregon": "OR",
+    "pennsylvania": "PA",
+    "rhode island": "RI",
+    "south carolina": "SC",
+    "south dakota": "SD",
+    "tennessee": "TN",
+    "texas": "TX",
+    "utah": "UT",
+    "vermont": "VT",
+    "virginia": "VA",
+    "washington": "WA",
+    "west virginia": "WV",
+    "wisconsin": "WI",
+    "wyoming": "WY",
+    "alberta": "AB",
+    "british columbia": "BC",
+    "manitoba": "MB",
+    "new brunswick": "NB",
+    "newfoundland and labrador": "NL",
+    "nova scotia": "NS",
+    "ontario": "ON",
+    "prince edward island": "PE",
+    "quebec": "QC",
+    "saskatchewan": "SK",
+}
+REGION_ABBR_SET = set(REGION_NAME_TO_ABBR.values())
+CITY_STATE_RE = re.compile(
+    r"\b([A-Z][A-Za-z.'-]*(?:\s+[A-Z][A-Za-z.'-]*){0,4})\s*,\s*"
+    r"([A-Z]{2}|[A-Z][A-Za-z.'-]*(?:\s+[A-Z][A-Za-z.'-]*){0,3})\b"
+)
+LOCATION_CONTEXT_HINTS = (
+    "location",
+    "venue",
+    "show location",
+    "held in",
+    "city",
+)
 MYS_FILTER_PARAMS = {
     "featured",
     "alpha",
@@ -661,6 +745,30 @@ class BrowserFallbackOptions:
     @property
     def prefer_browser(self) -> bool:
         return self.mode == "prefer"
+
+
+@dataclass(frozen=True)
+class ScrapeOptions:
+    directory_url: str
+    output_path: Path | None = None
+    workers: int = DEFAULT_WORKERS
+    max_pages: int = DEFAULT_MAX_PAGES
+    sample_size: int = DEFAULT_SAMPLE_SIZE
+    start_page: int | None = None
+    end_page: int | None = None
+    browser_mode: str = DEFAULT_BROWSER_MODE
+    browser_timeout_ms: int = DEFAULT_BROWSER_TIMEOUT_MS
+    conference_name: str = ""
+    conference_location: str = ""
+
+
+@dataclass(frozen=True)
+class ScrapeResult:
+    output_path: Path
+    company_count: int
+    failures: int
+    conference_name: str
+    conference_location: str
 
 
 class BrowserRenderer:
@@ -1375,6 +1483,141 @@ def infer_conference_name(seed_url: str, seed_page: ParsedPage) -> str:
     if host_parts:
         return " ".join(part.capitalize() for part in host_parts)
     return "conference_directory"
+
+
+def normalize_conference_label(text: str) -> str:
+    normalized = normalize_text(text)
+    if not normalized:
+        return ""
+
+    def cleaned(value: str) -> str:
+        cleaned_value = CONFERENCE_DIRECTORY_RE.sub("", value)
+        cleaned_value = CONFERENCE_NOISE_RE.sub("", cleaned_value)
+        cleaned_value = re.sub(r"\s+", " ", cleaned_value).strip(" -|:,")
+        return cleaned_value
+
+    candidates = [normalized]
+    candidates.extend(
+        normalize_text(part)
+        for part in TITLE_SPLIT_RE.split(normalized)
+        if normalize_text(part)
+    )
+
+    best_label = ""
+    best_score = float("-inf")
+    for candidate in candidates:
+        candidate_label = cleaned(candidate)
+        if not candidate_label:
+            continue
+        score = score_conference_name_candidate(candidate_label)
+        if score > best_score:
+            best_label = candidate_label
+            best_score = score
+
+    if best_label:
+        return best_label
+    return cleaned(normalized)
+
+
+def normalize_region_abbreviation(text: str) -> str:
+    normalized = canonical_label(text)
+    if not normalized:
+        return ""
+    compact = normalized.replace(" ", "")
+    if len(compact) == 2 and compact.upper() in REGION_ABBR_SET:
+        return compact.upper()
+    return REGION_NAME_TO_ABBR.get(normalized, "")
+
+
+def normalize_location_city(text: str) -> str:
+    normalized = normalize_text(text).strip(" ,")
+    if not normalized:
+        return ""
+    if normalized.isupper() or normalized.islower():
+        normalized = " ".join(part.capitalize() for part in normalized.split())
+    return normalized
+
+
+def extract_city_region_pairs(text: str) -> list[tuple[str, str]]:
+    if not text:
+        return []
+    pairs: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for match in CITY_STATE_RE.finditer(text):
+        city_raw = match.group(1)
+        region_raw = match.group(2)
+        region_abbr = normalize_region_abbreviation(region_raw)
+        city_name = normalize_location_city(city_raw)
+        if not city_name or not region_abbr:
+            continue
+        key = (city_name.lower(), region_abbr)
+        if key in seen:
+            continue
+        seen.add(key)
+        pairs.append((city_name, region_abbr))
+    return pairs
+
+
+def infer_conference_location(
+    seed_page: ParsedPage,
+    seed_html: str,
+    conference_name: str = "",
+) -> str:
+    scored: dict[str, float] = {}
+    conference_label = canonical_label(conference_name)
+
+    def add_candidate(city: str, region: str, score: float, context: str = "") -> None:
+        location_value = f"{city}, {region}"
+        weighted = score
+        lowered_context = context.lower()
+        if any(hint in lowered_context for hint in LOCATION_CONTEXT_HINTS):
+            weighted += 20.0
+        if conference_label and canonical_label(city) in conference_label:
+            weighted += 20.0
+        scored[location_value] = scored.get(location_value, 0.0) + weighted
+
+    for city, region in extract_city_region_pairs(seed_page.title):
+        add_candidate(city, region, 120.0, seed_page.title)
+
+    for heading in seed_page.h1_texts:
+        for city, region in extract_city_region_pairs(heading):
+            add_candidate(city, region, 110.0, heading)
+
+    for match in META_TAG_RE.finditer(seed_html):
+        attrs = {
+            key.lower(): html_unescape(value)
+            for key, _, value in META_ATTR_RE.findall(match.group(1))
+        }
+        content = normalize_text(attrs.get("content", ""))
+        if not content:
+            continue
+
+        meta_name = normalize_text(attrs.get("name") or attrs.get("property") or "").lower()
+        meta_score = 95.0
+        if "location" in meta_name:
+            meta_score = 115.0
+        elif "description" in meta_name:
+            meta_score = 85.0
+        for city, region in extract_city_region_pairs(content):
+            add_candidate(city, region, meta_score, f"{meta_name} {content}")
+
+    for match in CITY_STATE_RE.finditer(seed_html):
+        city_raw = match.group(1)
+        region_raw = match.group(2)
+        city = normalize_location_city(city_raw)
+        region = normalize_region_abbreviation(region_raw)
+        if not city or not region:
+            continue
+        start = max(0, match.start() - 80)
+        end = min(len(seed_html), match.end() + 80)
+        add_candidate(city, region, 40.0, seed_html[start:end])
+
+    if not scored:
+        return ""
+    best_location, best_score = max(scored.items(), key=lambda item: item[1])
+    if best_score < 60.0:
+        return ""
+    return best_location
 
 
 def resolve_output_path(
@@ -4497,7 +4740,12 @@ def collect_company_records(
     return records, failures
 
 
-def write_csv(output_path: Path, records: list[CompanyRecord]) -> None:
+def write_csv(
+    output_path: Path,
+    records: list[CompanyRecord],
+    conference_name: str,
+    conference_location: str,
+) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with output_path.open("w", newline="", encoding="utf-8") as csv_file:
         writer = csv.DictWriter(
@@ -4505,8 +4753,8 @@ def write_csv(output_path: Path, records: list[CompanyRecord]) -> None:
             fieldnames=[
                 "company_name",
                 "website_url",
-                "profile_url",
-                "directory_page",
+                "Location",
+                "Conference",
             ],
         )
         writer.writeheader()
@@ -4515,8 +4763,8 @@ def write_csv(output_path: Path, records: list[CompanyRecord]) -> None:
                 {
                     "company_name": record.company_name,
                     "website_url": record.website_url,
-                    "profile_url": record.profile_url,
-                    "directory_page": record.directory_page,
+                    "Location": conference_location,
+                    "Conference": conference_name,
                 }
             )
 
@@ -4600,30 +4848,27 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def main() -> int:
-    args = parse_args()
-
-    if args.workers < 1:
+def run_scrape(options: ScrapeOptions) -> ScrapeResult:
+    if options.workers < 1:
         print("--workers must be 1 or greater.", file=sys.stderr)
-        return 1
-    if args.max_pages < 1:
+        raise ValueError("--workers must be 1 or greater.")
+    if options.max_pages < 1:
         print("--max-pages must be 1 or greater.", file=sys.stderr)
-        return 1
-    if args.sample_size < 1:
+        raise ValueError("--max-pages must be 1 or greater.")
+    if options.sample_size < 1:
         print("--sample-size must be 1 or greater.", file=sys.stderr)
-        return 1
-    if args.browser_timeout_ms < 1:
+        raise ValueError("--sample-size must be 1 or greater.")
+    if options.browser_timeout_ms < 1:
         print("--browser-timeout-ms must be 1 or greater.", file=sys.stderr)
-        return 1
+        raise ValueError("--browser-timeout-ms must be 1 or greater.")
 
-    seed_url = normalize_http_url(args.directory_url)
+    seed_url = normalize_http_url(options.directory_url)
     if not seed_url:
-        print("Please provide a valid http(s) directory URL.", file=sys.stderr)
-        return 1
+        raise ValueError("Please provide a valid http(s) directory URL.")
 
     browser_options = BrowserFallbackOptions(
-        mode=args.browser_mode,
-        timeout_ms=args.browser_timeout_ms,
+        mode=options.browser_mode,
+        timeout_ms=options.browser_timeout_ms,
     )
     browser_renderer: BrowserRenderer | None = None
     browser_install_hint = (
@@ -4659,10 +4904,10 @@ def main() -> int:
                 seed_url=seed_url,
                 seed_html=seed_html,
                 seed_page=seed_page,
-                sample_size=args.sample_size,
-                start_page=args.start_page,
-                end_page=args.end_page,
-                max_pages=args.max_pages,
+                sample_size=options.sample_size,
+                start_page=options.start_page,
+                end_page=options.end_page,
+                max_pages=options.max_pages,
                 page_loader=browser_loader,
                 profile_website_scraper=(
                     lambda profile_url: scrape_profile_website_with_browser(
@@ -4679,10 +4924,10 @@ def main() -> int:
                     seed_url=seed_url,
                     seed_html=seed_html,
                     seed_page=seed_page,
-                    sample_size=args.sample_size,
-                    start_page=args.start_page,
-                    end_page=args.end_page,
-                    max_pages=args.max_pages,
+                    sample_size=options.sample_size,
+                    start_page=options.start_page,
+                    end_page=options.end_page,
+                    max_pages=options.max_pages,
                 )
             except Exception as static_exc:
                 if browser_loader is None:
@@ -4700,10 +4945,10 @@ def main() -> int:
                     seed_url=seed_url,
                     seed_html=seed_html,
                     seed_page=seed_page,
-                    sample_size=args.sample_size,
-                    start_page=args.start_page,
-                    end_page=args.end_page,
-                    max_pages=args.max_pages,
+                    sample_size=options.sample_size,
+                    start_page=options.start_page,
+                    end_page=options.end_page,
+                    max_pages=options.max_pages,
                     page_loader=browser_loader,
                     profile_website_scraper=(
                         lambda profile_url: scrape_profile_website_with_browser(
@@ -4725,25 +4970,75 @@ def main() -> int:
 
         records, failures = collect_company_records(
             entries,
-            args.workers,
+            options.workers,
             browser_renderer=browser_renderer if used_browser_fallback else None,
         )
-        output_path = resolve_output_path(args.output, seed_url, seed_page)
-        write_csv(output_path, records)
+        output_path = resolve_output_path(
+            str(options.output_path) if options.output_path is not None else None,
+            seed_url,
+            seed_page,
+        )
+        conference_name = normalize_conference_label(options.conference_name)
+        if not conference_name:
+            conference_name = normalize_conference_label(
+                infer_conference_name(seed_url, seed_page)
+            )
+        conference_location = normalize_text(options.conference_location)
+        if not conference_location:
+            conference_location = infer_conference_location(
+                seed_page,
+                seed_html,
+                conference_name=conference_name,
+            )
+        write_csv(
+            output_path,
+            records,
+            conference_name=conference_name,
+            conference_location=conference_location,
+        )
+        result = ScrapeResult(
+            output_path=output_path,
+            company_count=len(records),
+            failures=failures,
+            conference_name=conference_name,
+            conference_location=conference_location,
+        )
     except Exception as exc:  # noqa: BLE001
-        print(f"Scrape failed: {exc}", file=sys.stderr)
-        return 1
+        raise RuntimeError(f"Scrape failed: {exc}") from exc
     finally:
         if browser_renderer is not None:
             browser_renderer.close()
 
-    print(f"Wrote {len(records)} companies to {output_path}.")
+    print(f"Wrote {result.company_count} companies to {result.output_path}.")
     if failures:
         print(
             f"Completed with {failures} profile failures. "
             "Those rows were written with blank website URLs.",
             file=sys.stderr,
         )
+    return result
+
+
+def main() -> int:
+    args = parse_args()
+
+    try:
+        run_scrape(
+            ScrapeOptions(
+                directory_url=args.directory_url,
+                output_path=Path(args.output).resolve() if args.output else None,
+                workers=args.workers,
+                max_pages=args.max_pages,
+                sample_size=args.sample_size,
+                start_page=args.start_page,
+                end_page=args.end_page,
+                browser_mode=args.browser_mode,
+                browser_timeout_ms=args.browser_timeout_ms,
+            )
+        )
+    except Exception as exc:  # noqa: BLE001
+        print(str(exc), file=sys.stderr)
+        return 1
     return 0
 
 

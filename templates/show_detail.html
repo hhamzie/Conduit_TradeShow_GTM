@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="panel">
+  <div class="panel-head">
+    <div>
+      <h1>{{ show.name }}</h1>
+      <p>{{ show.place }} · {{ show.event_date }}</p>
+    </div>
+    <a class="button secondary" href="/">Back</a>
+  </div>
+
+  <div class="detail-grid">
+    <div class="detail-card">
+      <h2>Status</h2>
+      <p><span class="status status-{{ show.status }}">{{ show.status }}</span></p>
+      <p class="muted">Scheduled run: {{ show.run_at }}</p>
+      <p class="muted">Approval required: {{ "yes" if show.approval_required else "no" }}</p>
+    </div>
+    <div class="detail-card">
+      <h2>Results</h2>
+      <p><strong>{{ show.company_count }}</strong> rows exported</p>
+      <p><strong>{{ show.failure_count }}</strong> profile failures</p>
+      {% if export_path %}
+      <p><a href="/shows/{{ show.id }}/export">{{ export_path.name }}</a></p>
+      <p class="muted">{{ export_path }}</p>
+      {% else %}
+      <p class="muted">No export yet</p>
+      {% endif %}
+    </div>
+    <div class="detail-card">
+      <h2>Provider Status</h2>
+      <p>Notification: {{ show.notification_status }}</p>
+      <p>Clay: {{ show.clay_status }}</p>
+      <p>HeyReach: {{ show.heyreach_status }}</p>
+      <p>Smartlead: {{ show.smartlead_status }}</p>
+      <p class="muted">Clay rows are sent from the scraper export into your Clay input table when webhook or session-cookie transport is configured.</p>
+    </div>
+  </div>
+
+  <div class="actions">
+    <form action="/shows/{{ show.id }}/run-now" method="post">
+      <button type="submit">Run Now</button>
+    </form>
+    {% if show.status == "ready_for_review" %}
+    <form action="/shows/{{ show.id }}/approve" method="post">
+      <button type="submit">Approve Outreach</button>
+    </form>
+    {% endif %}
+  </div>
+
+  <div class="detail-card detail-stack">
+    <h2>Source</h2>
+    <p><a href="{{ show.source_url }}" target="_blank" rel="noreferrer">{{ show.source_url }}</a></p>
+    {% if show.last_error %}
+    <h2>Last Error</h2>
+    <pre class="error-box">{{ show.last_error }}</pre>
+    {% endif %}
+  </div>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <div>
+      <h2>Run History</h2>
+      <p>{{ show.runs|length }} recorded attempt(s)</p>
+    </div>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Run</th>
+          <th>Status</th>
+          <th>Created</th>
+          <th>Started</th>
+          <th>Finished</th>
+          <th>Rows</th>
+          <th>Failures</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for run in show.runs %}
+        <tr>
+          <td>#{{ run.id }}</td>
+          <td><span class="status status-{{ run.status }}">{{ run.status }}</span></td>
+          <td>{{ run.created_at }}</td>
+          <td>{{ run.started_at if run.started_at else "-" }}</td>
+          <td>{{ run.finished_at if run.finished_at else "-" }}</td>
+          <td>{{ run.company_count }}</td>
+          <td>{{ run.failure_count }}</td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="7" class="empty">No runs yet.</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

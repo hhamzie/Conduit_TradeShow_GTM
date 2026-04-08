@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="panel">
+  <div class="panel-head">
+    <div>
+      <h1>Dashboard</h1>
+      <p>Upload a trade-show CSV, queue the scrape at the right window, and review each run before outreach goes live.</p>
+    </div>
+  </div>
+  <form class="upload-form" action="/shows/import" method="post" enctype="multipart/form-data">
+    <label>
+      <span>Trade show CSV</span>
+      <input type="file" name="file" accept=".csv" required />
+    </label>
+    <label>
+      <span>Run days before show</span>
+      <input type="number" name="run_offset_days" value="{{ default_offset }}" min="0" max="60" required />
+    </label>
+    <button type="submit">Upload Schedule</button>
+  </form>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <div>
+      <h2>Shows</h2>
+      <p>{{ shows|length }} scheduled record(s)</p>
+    </div>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Show</th>
+          <th>Date</th>
+          <th>Place</th>
+          <th>Status</th>
+          <th>Run At</th>
+          <th>Leads</th>
+          <th>Action</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for show in shows %}
+        <tr>
+          <td>
+            <strong>{{ show.name }}</strong>
+            <div class="muted">{{ show.source_url }}</div>
+          </td>
+          <td>{{ show.event_date }}</td>
+          <td>{{ show.place }}</td>
+          <td><span class="status status-{{ show.status }}">{{ show.status }}</span></td>
+          <td>{{ show.run_at }}</td>
+          <td>{{ show.company_count }}</td>
+          <td><a class="button secondary" href="/shows/{{ show.id }}">Open</a></td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="7" class="empty">No shows imported yet.</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

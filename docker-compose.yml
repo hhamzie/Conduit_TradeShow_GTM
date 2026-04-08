@@ -1,0 +1,52 @@
+services:
+  web:
+    build: .
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://app:app@db:5432/tradeshow
+      EXPORT_DIR: /app/data/exports
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app
+      - app_exports:/app/data/exports
+    depends_on:
+      db:
+        condition: service_healthy
+
+  worker:
+    build: .
+    command: python -m app.worker
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://app:app@db:5432/tradeshow
+      EXPORT_DIR: /app/data/exports
+    volumes:
+      - .:/app
+      - app_exports:/app/data/exports
+    depends_on:
+      db:
+        condition: service_healthy
+
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: tradeshow
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: app
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U app -d tradeshow"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
+  app_exports:
