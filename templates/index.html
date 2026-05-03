@@ -1,11 +1,53 @@
 {% extends "base.html" %}
 
+{% macro show_card(item) %}
+{% set show = item.show %}
+<article class="show-card">
+  <div class="show-card-main">
+    <div class="show-title-row">
+      <div>
+        <h3>{{ show.name }}</h3>
+        <p class="show-subtitle">{{ show.place }} · {{ show.event_date }}</p>
+      </div>
+      <span class="status status-{{ show.status }}">{{ item.status_label }}</span>
+    </div>
+
+    <div class="simple-meta">
+      <p><strong>{{ item.step_label }}</strong> · {{ item.run_timing }}</p>
+      <p>{{ item.next_action }}</p>
+      <p>{{ show.company_count if show.company_count else "Not scraped yet" }} rows · {{ item.provider_summary }}</p>
+    </div>
+
+    {% if item.notice %}
+    <div class="show-notice show-notice-{{ item.notice.tone }}">
+      <strong>{{ item.notice.title }}</strong>
+      <p>{{ item.notice.detail }}</p>
+    </div>
+    {% elif item.error_summary %}
+    <p class="show-error">{{ item.error_summary }}</p>
+    {% endif %}
+  </div>
+
+  <div class="show-card-side">
+    <a class="button secondary" href="/shows/{{ show.id }}">Open</a>
+    {% if show.status in ["waiting", "failed", "ready_for_review", "approved", "live"] %}
+    <form action="/shows/{{ show.id }}/run-now" method="post">
+      <button type="submit">Run Immediately</button>
+    </form>
+    {% endif %}
+    <form action="/shows/{{ show.id }}/delete" method="post" onsubmit="return confirm('Delete this show from the dashboard?');">
+      <button class="button danger" type="submit">Delete</button>
+    </form>
+  </div>
+</article>
+{% endmacro %}
+
 {% block content %}
-<section class="panel">
+<section class="panel hero-panel">
   <div class="panel-head">
     <div>
-      <h1>Dashboard</h1>
-      <p>Upload a trade-show CSV, queue the scrape at the right window, and review each run before outreach goes live.</p>
+      <h1>Trade Show Dashboard</h1>
+      <p>Upload shows, let the worker handle timing, and review completed exports before Clay takes over.</p>
     </div>
   </div>
   <form class="upload-form" action="/shows/import" method="post" enctype="multipart/form-data">
@@ -19,49 +61,122 @@
     </label>
     <button type="submit">Upload Schedule</button>
   </form>
+  <form class="upload-form" action="/shows/add" method="post">
+    <label>
+      <span>Show name</span>
+      <input type="text" name="show_name" placeholder="High Point Market" required />
+    </label>
+    <label>
+      <span>Show date</span>
+      <input type="text" name="event_date" placeholder="2026-10-24 or Oct 24, 2026" required />
+    </label>
+    <label>
+      <span>Place</span>
+      <input type="text" name="place" placeholder="High Point, NC" required />
+    </label>
+    <label>
+      <span>Directory URL</span>
+      <input type="url" name="link" placeholder="https://example.com/exhibitors" required />
+    </label>
+    <label>
+      <span>Run days before show</span>
+      <input type="number" name="run_offset_days" value="{{ default_offset }}" min="0" max="60" required />
+    </label>
+    <button type="submit">Add Single Show</button>
+  </form>
 </section>
 
-<section class="panel">
-  <div class="panel-head">
-    <div>
-      <h2>Shows</h2>
-      <p>{{ shows|length }} scheduled record(s)</p>
-    </div>
-  </div>
-  <div class="table-wrap">
-    <table>
-      <thead>
-        <tr>
-          <th>Show</th>
-          <th>Date</th>
-          <th>Place</th>
-          <th>Status</th>
-          <th>Run At</th>
-          <th>Leads</th>
-          <th>Action</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for show in shows %}
-        <tr>
-          <td>
-            <strong>{{ show.name }}</strong>
-            <div class="muted">{{ show.source_url }}</div>
-          </td>
-          <td>{{ show.event_date }}</td>
-          <td>{{ show.place }}</td>
-          <td><span class="status status-{{ show.status }}">{{ show.status }}</span></td>
-          <td>{{ show.run_at }}</td>
-          <td>{{ show.company_count }}</td>
-          <td><a class="button secondary" href="/shows/{{ show.id }}">Open</a></td>
-        </tr>
-        {% else %}
-        <tr>
-          <td colspan="7" class="empty">No shows imported yet.</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
+<section class="stats-grid stats-grid-compact">
+  <article class="stat-card">
+    <span class="stat-label">Active</span>
+    <strong class="stat-value">{{ active_count }}</strong>
+  </article>
+  <article class="stat-card">
+    <span class="stat-label">Scheduled</span>
+    <strong class="stat-value">{{ scheduled_count }}</strong>
+  </article>
+  <article class="stat-card">
+    <span class="stat-label">Completed</span>
+    <strong class="stat-value">{{ completed_section_count }}</strong>
+  </article>
+  <article class="stat-card">
+    <span class="stat-label">Review Ready</span>
+    <strong class="stat-value">{{ ready_count }}</strong>
+  </article>
 </section>
+
+<details class="panel section-dropdown" open>
+  <summary class="section-summary single-line">
+    <span class="section-title">Active / Up Next</span>
+    <span class="section-meta">{{ active_count }} shows · {{ active_lead_count }} leads</span>
+  </summary>
+  <div class="section-toolbar compact">
+    {% if active_count %}
+    <form action="/shows/delete-all" method="post" onsubmit="return confirm('Delete all shows in Active / Up Next?');">
+      <input type="hidden" name="section" value="active" />
+      <button class="button danger subtle" type="submit">Delete All</button>
+    </form>
+    {% endif %}
+  </div>
+  <div class="show-list dropdown-body">
+    {% for item in active %}
+    {{ show_card(item) }}
+    {% else %}
+    <div class="empty-state">
+      <h3>No active shows</h3>
+      <p>Queued, scraping, failed, and due-now shows appear here first.</p>
+    </div>
+    {% endfor %}
+  </div>
+</details>
+
+<details class="panel section-dropdown">
+  <summary class="section-summary single-line">
+    <span class="section-title">Scheduled For Later</span>
+    <span class="section-meta">{{ scheduled_count }} shows · {{ scheduled_lead_count }} leads</span>
+  </summary>
+  <div class="section-toolbar compact">
+    {% if scheduled_count %}
+    <form action="/shows/delete-all" method="post" onsubmit="return confirm('Delete all shows in Scheduled For Later?');">
+      <input type="hidden" name="section" value="scheduled_later" />
+      <button class="button danger subtle" type="submit">Delete All</button>
+    </form>
+    {% endif %}
+  </div>
+  <div class="show-list dropdown-body">
+    {% for item in scheduled_later %}
+    {{ show_card(item) }}
+    {% else %}
+    <div class="empty-state">
+      <h3>No scheduled shows</h3>
+      <p>Future shows waiting for their trigger date will appear here.</p>
+    </div>
+    {% endfor %}
+  </div>
+</details>
+
+<details class="panel section-dropdown">
+  <summary class="section-summary single-line">
+    <span class="section-title">Completed / Ran Shows</span>
+    <span class="section-meta">{{ completed_section_count }} shows · {{ completed_lead_count }} leads</span>
+  </summary>
+  <div class="section-toolbar compact">
+    {% if completed_section_count %}
+    <form action="/shows/delete-all" method="post" onsubmit="return confirm('Delete all shows in Completed / Ran Shows?');">
+      <input type="hidden" name="section" value="completed" />
+      <button class="button danger subtle" type="submit">Delete All</button>
+    </form>
+    {% endif %}
+  </div>
+  <div class="show-list dropdown-body">
+    {% for item in completed %}
+    {{ show_card(item) }}
+    {% else %}
+    <div class="empty-state">
+      <h3>No completed shows</h3>
+      <p>Finished shows move here for review, approval, reruns, and cleanup.</p>
+    </div>
+    {% endfor %}
+  </div>
+</details>
 {% endblock %}

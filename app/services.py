@@ -96,6 +96,48 @@ def normalize_headers(fieldnames: list[str] | None) -> dict[str, str]:
     return normalized
 
 
+def create_or_update_show(
+    db: Session,
+    *,
+    show_name: str,
+    event_date_raw: str,
+    place: str,
+    link: str,
+    run_offset_days: int,
+) -> bool:
+    normalized_name = show_name.strip()
+    normalized_place = place.strip()
+    normalized_link = link.strip()
+    if not (normalized_name and event_date_raw.strip() and normalized_place and normalized_link):
+        raise ValueError("Show name, date, place, and directory URL are all required.")
+
+    event_date = parse_show_date(event_date_raw)
+    run_at = compute_run_at(event_date, run_offset_days)
+
+    existing = db.scalar(
+        select(Show).where(Show.source_url == normalized_link, Show.event_date == event_date)
+    )
+    if existing is None:
+        db.add(
+            Show(
+                name=normalized_name,
+                event_date=event_date,
+                place=normalized_place,
+                source_url=normalized_link,
+                run_offset_days=run_offset_days,
+                run_at=run_at,
+                status=ShowStatus.waiting.value,
+            )
+        )
+        return True
+
+    existing.name = normalized_name
+    existing.place = normalized_place
+    existing.run_offset_days = run_offset_days
+    existing.run_at = run_at
+    return False
+
+
 def import_shows_from_csv(db: Session, payload: bytes, run_offset_days: int) -> ImportSummary:
     text = payload.decode("utf-8-sig")
     reader = csv.DictReader(io.StringIO(text))
@@ -118,32 +160,17 @@ def import_shows_from_csv(db: Session, payload: bytes, run_offset_days: int) -> 
             skipped += 1
             continue
 
-        event_date = parse_show_date(event_date_raw)
-        run_at = compute_run_at(event_date, run_offset_days)
-
-        existing = db.scalar(
-            select(Show).where(Show.source_url == link, Show.event_date == event_date)
-        )
-        if existing is None:
-            db.add(
-                Show(
-                    name=show_name,
-                    event_date=event_date,
-                    place=place,
-                    source_url=link,
-                    run_offset_days=run_offset_days,
-                    run_at=run_at,
-                    status=ShowStatus.waiting.value,
-                )
-            )
+        if create_or_update_show(
+            db,
+            show_name=show_name,
+            event_date_raw=event_date_raw,
+            place=place,
+            link=link,
+            run_offset_days=run_offset_days,
+        ):
             created += 1
-            continue
-
-        existing.name = show_name
-        existing.place = place
-        existing.run_offset_days = run_offset_days
-        existing.run_at = run_at
-        updated += 1
+        else:
+            updated += 1
 
     db.commit()
     return ImportSummary(created=created, updated=updated, skipped=skipped)
@@ -188,8 +215,14 @@ def queue_due_shows(db: Session, now: datetime | None = None) -> int:
 
 
 def queue_show_now(db: Session, show: Show) -> None:
+    if show.status in {ShowStatus.queued.value, ShowStatus.scraping.value}:
+        return
     show.run_at = datetime.now()
     show.status = ShowStatus.queued.value
+    show.last_error = ""
+    show.failure_count = 0
+    show.clay_status = ProviderStatus.pending.value
+    show.notification_status = ProviderStatus.pending.value
     db.add(CampaignRun(show=show, status=RunStatus.queued.value))
     db.commit()
 
@@ -223,6 +256,7 @@ def run_next_campaign(db: Session) -> CampaignRun | None:
                 browser_timeout_ms=get_settings().default_browser_timeout_ms,
                 conference_name=show.name,
                 conference_location=show.place,
+                require_website=True,
             )
         )
     except Exception as exc:  # noqa: BLE001
@@ -239,17 +273,19 @@ def run_next_campaign(db: Session) -> CampaignRun | None:
     campaign_run.company_count = result.company_count
     campaign_run.failure_count = result.failures
     campaign_run.finished_at = datetime.now()
-
-    clay_result = push_to_clay(show)
-
-    show.status = ShowStatus.ready_for_review.value
     show.latest_export_path = str(result.output_path)
     show.company_count = result.company_count
     show.failure_count = result.failures
+    show.status = ShowStatus.ready_for_review.value
+    show.last_error = ""
+
+    clay_result = push_to_clay(show)
+    notify_result = notify_ready_for_review(show)
+
     show.clay_status = clay_result.status
     show.heyreach_status = ProviderStatus.pending.value
     show.smartlead_status = ProviderStatus.pending.value
-    show.notification_status = notify_ready_for_review(show).status
+    show.notification_status = notify_result.status
     if clay_result.status == ProviderStatus.failed.value:
         show.last_error = clay_result.message
     db.commit()

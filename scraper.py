@@ -17,9 +17,12 @@ import csv
 from functools import lru_cache
 from html import unescape as html_unescape
 import json
+import os
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from collections import defaultdict, deque
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -80,6 +83,20 @@ SOCIAL_HOST_MARKERS = (
     "wechat.com",
     "wa.me",
     "whatsapp.com",
+)
+NON_COMPANY_HOST_MARKERS = (
+    "acuityscheduling.com",
+    "calendly.com",
+    "eventbrite.com",
+    "linktr.ee",
+    "stan.store",
+    "taplink.cc",
+    "zendesk.com",
+)
+NON_COMPANY_PATH_MARKERS = (
+    "/hc/",
+    "/help",
+    "/schedule.php",
 )
 ASSET_EXTENSIONS = (
     ".jpg",
@@ -207,6 +224,9 @@ META_ATTR_RE = re.compile(
     r"([A-Za-z_:][A-Za-z0-9_.:-]*)\s*=\s*([\"'])(.*?)\2",
     re.IGNORECASE | re.DOTALL,
 )
+HTML_TABLE_ROW_RE = re.compile(r"<tr\b[^>]*>(.*?)</tr>", re.IGNORECASE | re.DOTALL)
+HTML_TABLE_CELL_RE = re.compile(r"<t[dh]\b[^>]*>(.*?)</t[dh]>", re.IGNORECASE | re.DOTALL)
+HTML_HREF_RE = re.compile(r"""href=(["'])(.*?)\1""", re.IGNORECASE | re.DOTALL)
 COMPANY_NAME_REGION_MARKERS = {
     "ca",
     "canada",
@@ -223,6 +243,13 @@ COMPANY_NAME_UI_NOISE_RE = re.compile(
     r"\b(?:search|cart|loader|close panel|chevron(?:-[a-z]+)?|"
     r"design trade(?:\s*&\s*contract sales)?|exclamation-circle|menu|open menu|x)\b.*$",
     re.IGNORECASE,
+)
+TEXT_ONLY_CONTAINER_TRAILING_NOISE_RE = re.compile(
+    r"\b(?:image|new exhibitor|featured exhibitor)\b.*$",
+    re.IGNORECASE,
+)
+TEXT_ONLY_CONTAINER_BOOTH_CODE_RE = re.compile(
+    r"^(?P<booth>[A-Z]{1,4}\d{1,4}[A-Z]?(?:[-/][A-Z0-9]+)?)\s+(?P<name>.+)$"
 )
 COMPANY_NAME_GENERIC_MARKERS = (
     "accessories",
@@ -468,6 +495,29 @@ EVENT_LINK_QUERY_KEYS = {
     "mapid",
     "shmode",
 }
+COMPANY_DOMAIN_STOPWORDS = {
+    "and",
+    "co",
+    "company",
+    "corp",
+    "corporation",
+    "group",
+    "home",
+    "homepage",
+    "inc",
+    "international",
+    "intl",
+    "llc",
+    "llp",
+    "ltd",
+    "official",
+    "site",
+    "store",
+    "the",
+    "usa",
+    "us",
+    "website",
+}
 EVENT_LINK_TEXT_MARKERS = (
     "booth",
     "event map",
@@ -481,6 +531,18 @@ EVENT_LINK_TEXT_MARKERS = (
 IFRAME_SRC_RE = re.compile(
     r"<iframe[^>]+\bsrc=[\"']([^\"']+)[\"']",
     re.IGNORECASE,
+)
+TRACKING_IFRAME_HOST_MARKERS = (
+    "adnxs.com",
+    "doubleclick.net",
+    "googleadservices.com",
+    "googlesyndication.com",
+    "googletagmanager.com",
+)
+TRACKING_IFRAME_PATH_MARKERS = (
+    "/activityi",
+    "/activity;",
+    "/pagead/",
 )
 NEXT_DATA_SCRIPT_RE = re.compile(
     r"<script[^>]+\bid=[\"']__NEXT_DATA__[\"'][^>]*>(.*?)</script>",
@@ -518,6 +580,14 @@ DISCOVERY_PARTICIPANT_WORDS = (
 )
 WIX_WARMUP_DATA_RE = re.compile(
     r"<script[^>]+\bid=[\"']wix-warmup-data[\"'][^>]*>(.*?)</script>",
+    re.IGNORECASE | re.DOTALL,
+)
+WIX_RICHTEXT_BLOCK_RE = re.compile(
+    r"<div[^>]+\bdata-testid=[\"']richTextElement[\"'][^>]*>(.*?)</div>",
+    re.IGNORECASE | re.DOTALL,
+)
+RICH_TEXT_LINE_RE = re.compile(
+    r"<(?:p|li)[^>]*>(.*?)</(?:p|li)>",
     re.IGNORECASE | re.DOTALL,
 )
 WIX_GALLERY_DATA_SUFFIX = "_galleryData"
@@ -613,6 +683,38 @@ PROFILE_URL_MARKERS = (
     "/vendor",
     "/vendors/",
 )
+IMAGE_DIRECTORY_HINTS = (
+    "brand",
+    "directory",
+    "exhibitor",
+    "lineup",
+    "list",
+    "participant",
+    "sponsor",
+    "vendor",
+)
+IMAGE_NOISE_HINTS = (
+    "banner",
+    "hero",
+    "icon",
+    "logo",
+    "nav",
+    "thumbnail",
+)
+OCR_SUPPORTED_IMAGE_EXTENSIONS = (
+    ".bmp",
+    ".gif",
+    ".jpeg",
+    ".jpg",
+    ".png",
+    ".tif",
+    ".tiff",
+    ".webp",
+)
+OCR_URL_RE = re.compile(
+    r"(?:https?://)?(?:www\.)?[a-z0-9][a-z0-9.-]+\.[a-z]{2,}(?:/[^\s]*)?",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)
@@ -698,6 +800,21 @@ class CompanyRecord:
 
 
 @dataclass(frozen=True)
+class ImageRecord:
+    src: str
+    absolute_url: str
+    alt_text: str
+    signature: tuple[str, ...]
+    order: int
+    in_header: bool
+    in_footer: bool
+    in_nav: bool
+    in_main: bool
+    width: int
+    height: int
+
+
+@dataclass(frozen=True)
 class ParsedPage:
     url: str
     anchors: tuple[AnchorRecord, ...]
@@ -706,6 +823,7 @@ class ParsedPage:
     json_ld_blocks: tuple[str, ...]
     actions: tuple[ActionRecord, ...] = ()
     containers: tuple[ContainerRecord, ...] = ()
+    images: tuple[ImageRecord, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -760,6 +878,7 @@ class ScrapeOptions:
     browser_timeout_ms: int = DEFAULT_BROWSER_TIMEOUT_MS
     conference_name: str = ""
     conference_location: str = ""
+    require_website: bool = False
 
 
 @dataclass(frozen=True)
@@ -929,6 +1048,7 @@ class HtmlSignalParser(HTMLParser):
         self.anchors: list[AnchorRecord] = []
         self.actions: list[ActionRecord] = []
         self.containers: list[ContainerRecord] = []
+        self.images: list[ImageRecord] = []
         self.title_parts: list[str] = []
         self.h1_texts: list[str] = []
         self.json_ld_blocks: list[str] = []
@@ -947,6 +1067,7 @@ class HtmlSignalParser(HTMLParser):
         self._anchor_counter = 0
         self._action_counter = 0
         self._container_counter = 0
+        self._image_counter = 0
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         attributes = {key: value or "" for key, value in attrs}
@@ -1025,6 +1146,26 @@ class HtmlSignalParser(HTMLParser):
 
         if tag == "img":
             alt_text = normalize_text(attributes.get("alt", ""))
+            absolute_url = normalize_http_url(urljoin(self.base_url, attributes.get("src", "")))
+            width = parse_positive_int(attributes.get("width", ""))
+            height = parse_positive_int(attributes.get("height", ""))
+            if absolute_url:
+                self.images.append(
+                    ImageRecord(
+                        src=attributes.get("src", ""),
+                        absolute_url=absolute_url,
+                        alt_text=alt_text,
+                        signature=tuple(frame["signature"]),  # type: ignore[arg-type]
+                        order=self._image_counter,
+                        in_header=bool(frame["in_header"]),
+                        in_footer=bool(frame["in_footer"]),
+                        in_nav=bool(frame["in_nav"]),
+                        in_main=bool(frame["in_main"]),
+                        width=width,
+                        height=height,
+                    )
+                )
+                self._image_counter += 1
             if alt_text:
                 for open_frame in self._stack:
                     open_frame["text_parts"].append(alt_text)  # type: ignore[index]
@@ -1160,9 +1301,26 @@ def normalize_text(text: str) -> str:
     return WHITESPACE_RE.sub(" ", text).strip()
 
 
+def parse_positive_int(value: str) -> int:
+    digits = re.sub(r"[^0-9]", "", value or "")
+    if not digits:
+        return 0
+    try:
+        return max(int(digits), 0)
+    except ValueError:
+        return 0
+
+
 def slugify_filename_part(text: str) -> str:
     slug = NON_ALNUM_RE.sub("_", text.lower()).strip("_")
     return slug[:80].strip("_")
+
+
+def is_page_param_name(key: str) -> bool:
+    normalized = normalize_text(key).lower().replace(" ", "_")
+    if normalized in COMMON_PAGE_PARAMS:
+        return True
+    return normalized.endswith("_page") or normalized.endswith("_page_num")
 
 
 def normalize_http_url(url: str) -> str | None:
@@ -1239,6 +1397,39 @@ def host_key(url: str) -> str:
     if host.startswith("www."):
         host = host[4:]
     return host
+
+
+def is_plausible_company_website_url(
+    url: str,
+    profile_url: str = "",
+    brand_candidates: tuple[str, ...] = (),
+) -> bool:
+    normalized = normalize_http_url(url)
+    if not normalized:
+        return False
+    if looks_like_asset(normalized) or is_social_url(normalized):
+        return False
+    if profile_url and same_site(normalized, profile_url):
+        return False
+
+    host = host_key(normalized)
+    path = urlparse(normalized).path.lower()
+    if not host or "." not in host:
+        return False
+    if any(marker in host for marker in NON_COMPANY_HOST_MARKERS):
+        return False
+    if any(marker in path for marker in NON_COMPANY_PATH_MARKERS):
+        return False
+    if any(marker in host for marker in EVENT_LINK_HOST_MARKERS):
+        return False
+
+    if brand_candidates:
+        if any(candidate_matches_website_brand(candidate, normalized) for candidate in brand_candidates):
+            return True
+        if host.startswith(("app.", "help.", "support.", "events.")):
+            return False
+
+    return True
 
 
 def same_site(url_a: str, url_b: str) -> bool:
@@ -1385,6 +1576,61 @@ def fetch_text_with_curl(
     return completed.stdout.decode("utf-8", errors="replace")
 
 
+def fetch_binary(url: str, extra_headers: dict[str, str] | None = None) -> bytes:
+    request_headers = {
+        "Accept": "*/*",
+        "User-Agent": USER_AGENT,
+    }
+    if extra_headers:
+        request_headers.update(extra_headers)
+
+    request = Request(url, headers=request_headers)
+    try:
+        with urlopen(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
+            return response.read()
+    except (HTTPError, URLError, TimeoutError, OSError) as exc:
+        try:
+            return fetch_binary_with_curl(url, request_headers)
+        except RuntimeError as curl_exc:
+            raise RuntimeError(f"{exc}; curl fallback failed: {curl_exc}") from exc
+
+
+def fetch_binary_with_curl(url: str, request_headers: dict[str, str]) -> bytes:
+    command = [
+        "curl",
+        "-L",
+        "--compressed",
+        "--silent",
+        "--show-error",
+        "--max-time",
+        str(REQUEST_TIMEOUT_SECONDS),
+        "--user-agent",
+        USER_AGENT,
+    ]
+
+    for key, value in request_headers.items():
+        if key.lower() == "user-agent":
+            continue
+        command.extend(["-H", f"{key}: {value}"])
+
+    command.append(url)
+
+    try:
+        completed = subprocess.run(
+            command,
+            capture_output=True,
+            check=False,
+        )
+    except OSError as exc:
+        raise RuntimeError(f"curl execution failed: {exc}") from exc
+
+    if completed.returncode != 0:
+        stderr_text = completed.stderr.decode("utf-8", errors="replace").strip()
+        raise RuntimeError(stderr_text or f"curl exited with status {completed.returncode}")
+
+    return completed.stdout
+
+
 def fetch_html(url: str, extra_headers: dict[str, str] | None = None) -> str:
     return fetch_text(url, extra_headers=extra_headers)
 
@@ -1411,6 +1657,7 @@ def parse_page(url: str, html_text: str) -> ParsedPage:
         json_ld_blocks=tuple(parser.json_ld_blocks),
         actions=tuple(parser.actions),
         containers=tuple(parser.containers),
+        images=tuple(parser.images),
     )
 
 
@@ -1730,8 +1977,14 @@ def find_embedded_directory_url(seed_url: str, seed_html: str) -> str | None:
         if not normalized:
             continue
 
-        score = 0
         lowered = normalized.lower()
+        host = host_key(normalized)
+        if any(marker in host for marker in TRACKING_IFRAME_HOST_MARKERS):
+            continue
+        if any(marker in lowered for marker in TRACKING_IFRAME_PATH_MARKERS):
+            continue
+
+        score = 0
         if any(marker in lowered for marker in ("exhibitor", "directory", "vendor", "sponsor")):
             score += 40
         if any(marker in lowered for marker in ("mapyourshow.com", "expofp.com", "swapcard.com")):
@@ -1757,6 +2010,12 @@ def resolve_seed_page(
     }
 
     for _ in range(3):
+        if (
+            is_mapyourshow_directory(current_url, current_html)
+            or is_expofp_directory(current_url, current_html)
+        ):
+            return current_url, current_html, current_page
+
         embedded_url = find_embedded_directory_url(current_url, current_html)
         normalized_embedded_url = (
             normalize_url_ignoring_fragment(embedded_url)
@@ -2266,7 +2525,11 @@ def extract_candidate_website_url(mapping: dict[str, object], seed_url: str) -> 
             continue
 
         normalized = normalize_http_url(urljoin(seed_url, value))
-        if normalized and not same_site(normalized, seed_url):
+        if (
+            normalized
+            and not same_site(normalized, seed_url)
+            and is_plausible_company_website_url(normalized, profile_url=seed_url)
+        ):
             return normalized
     return ""
 
@@ -2677,6 +2940,27 @@ def normalize_seed_company_name(text: str) -> str:
     return cleaned
 
 
+def brand_word_tokens(text: str) -> tuple[str, ...]:
+    tokens = canonical_label(normalize_seed_company_name(text)).split()
+    filtered_tokens: list[str] = []
+    for token in tokens:
+        if len(token) < 3:
+            continue
+        if token in COMPANY_DOMAIN_STOPWORDS:
+            continue
+        if token.isdigit():
+            continue
+        filtered_tokens.append(token)
+    return tuple(filtered_tokens)
+
+
+def brand_acronym(text: str) -> str:
+    tokens = brand_word_tokens(text)
+    if len(tokens) < 2:
+        return ""
+    return "".join(token[0] for token in tokens)
+
+
 def infer_wix_gallery_item_name(item: dict[str, object], website_url: str) -> str:
     meta = item.get("metaData")
     if not isinstance(meta, dict):
@@ -2721,7 +3005,11 @@ def wix_gallery_item_website_url(item: dict[str, object], seed_url: str) -> str:
 
     for value in values_to_try:
         normalized = normalize_http_url(urljoin(seed_url, value))
-        if normalized and not same_site(normalized, seed_url):
+        if (
+            normalized
+            and not same_site(normalized, seed_url)
+            and is_plausible_company_website_url(normalized, profile_url=seed_url)
+        ):
             return normalized
 
     return ""
@@ -2812,14 +3100,377 @@ def collect_wix_gallery_entries(
     return best_entries, ""
 
 
+def strip_tags(html_fragment: str) -> str:
+    return normalize_text(re.sub(r"<[^>]+>", " ", html_unescape(html_fragment or "")))
+
+
+def is_rich_text_company_line(text: str) -> bool:
+    cleaned = normalize_seed_company_name(text)
+    if not cleaned or not is_companyish_text(cleaned):
+        return False
+
+    label = canonical_label(cleaned)
+    if any(
+        marker in label
+        for marker in (
+            "exhibit",
+            "exhibitor",
+            "looking to exhibit",
+            "list will continue",
+            "secure your space",
+            "to date",
+        )
+    ):
+        return False
+    return True
+
+
+@lru_cache(maxsize=1)
+def tesseract_is_available() -> bool:
+    return shutil.which("tesseract") is not None
+
+
+def image_path_looks_ocr_worthy(image_url: str, alt_text: str) -> bool:
+    lowered = f"{image_url.lower()} {alt_text.lower()}".strip()
+    if any(noise in lowered for noise in IMAGE_NOISE_HINTS):
+        return False
+    return any(hint in lowered for hint in IMAGE_DIRECTORY_HINTS)
+
+
+def score_image_candidate(image: ImageRecord, seed_url: str) -> float:
+    if not image.absolute_url:
+        return float("-inf")
+    if image.in_header or image.in_footer or image.in_nav:
+        return float("-inf")
+    if not same_site(image.absolute_url, seed_url):
+        return float("-inf")
+
+    parsed = urlparse(image.absolute_url)
+    path = parsed.path.lower()
+    if not path.endswith(OCR_SUPPORTED_IMAGE_EXTENSIONS):
+        return float("-inf")
+
+    score = 0.0
+    if image.in_main:
+        score += 20.0
+    if image.width >= 600 or image.height >= 400:
+        score += 18.0
+    if image.width * image.height >= 250000:
+        score += 18.0
+    if image_path_looks_ocr_worthy(image.absolute_url, image.alt_text):
+        score += 35.0
+    if image.alt_text and len(image.alt_text.split()) >= 6:
+        score += 12.0
+    return score
+
+
+def extract_ocr_line_website(line: str) -> str:
+    match = OCR_URL_RE.search(line)
+    if match is None:
+        return ""
+    value = match.group(0)
+    if not value.startswith(("http://", "https://")):
+        value = "https://" + value
+    return normalize_http_url(value) or ""
+
+
+def ocr_image_text(image_url: str) -> str:
+    if not tesseract_is_available():
+        return ""
+
+    parsed = urlparse(image_url)
+    suffix = Path(parsed.path).suffix.lower()
+    if suffix not in OCR_SUPPORTED_IMAGE_EXTENSIONS:
+        return ""
+
+    binary = fetch_binary(image_url)
+    if not binary:
+        return ""
+
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as temp_image:
+        temp_image.write(binary)
+        temp_path = temp_image.name
+
+    try:
+        completed = subprocess.run(
+            ["tesseract", temp_path, "stdout", "--psm", "6"],
+            capture_output=True,
+            check=False,
+        )
+        if completed.returncode != 0:
+            return ""
+        return completed.stdout.decode("utf-8", errors="replace")
+    finally:
+        try:
+            os.unlink(temp_path)
+        except OSError:
+            pass
+
+
+def collect_image_ocr_entries(
+    seed_url: str,
+    seed_page: ParsedPage,
+) -> tuple[list[DirectoryEntry], str] | None:
+    scored_images = [
+        (score_image_candidate(image, seed_url), image)
+        for image in seed_page.images
+    ]
+    candidates = [
+        image
+        for score, image in sorted(scored_images, key=lambda item: item[0], reverse=True)
+        if score >= 30.0
+    ][:4]
+    if not candidates:
+        return None
+
+    entries: list[DirectoryEntry] = []
+    seen: set[str] = set()
+    for image in candidates:
+        ocr_text = ocr_image_text(image.absolute_url)
+        if not ocr_text:
+            continue
+
+        pending_name = ""
+        pending_index: int | None = None
+        accepted_from_image = 0
+        for raw_line in ocr_text.splitlines():
+            line = normalize_text(raw_line)
+            if not line:
+                continue
+
+            website_url = extract_ocr_line_website(line)
+            if website_url and pending_name and pending_index is not None:
+                entries[pending_index] = DirectoryEntry(
+                    sort_index=entries[pending_index].sort_index,
+                    directory_page=1,
+                    company_name=pending_name,
+                    profile_url="",
+                    website_url_hint=website_url,
+                )
+                seen.add(f"{pending_name.lower()}|{website_url.lower()}")
+                pending_name = ""
+                pending_index = None
+                continue
+
+            if is_rich_text_company_line(line):
+                pending_name = normalize_seed_company_name(line)
+                dedupe_key = pending_name.lower()
+                if dedupe_key in seen:
+                    pending_name = ""
+                    pending_index = None
+                    continue
+                seen.add(dedupe_key)
+                entries.append(
+                    DirectoryEntry(
+                        sort_index=len(entries),
+                        directory_page=1,
+                        company_name=pending_name,
+                        profile_url="",
+                    )
+                )
+                pending_index = len(entries) - 1
+                accepted_from_image += 1
+
+        if accepted_from_image >= 10:
+            print(
+                f"Recovered {accepted_from_image} exhibitor name(s) from OCR on {image.absolute_url}."
+            )
+
+    if len(entries) < 10:
+        return None
+    return entries, ""
+
+
+def collect_rich_text_name_entries(
+    seed_html: str,
+) -> tuple[list[DirectoryEntry], str] | None:
+    entries: list[DirectoryEntry] = []
+    seen: set[str] = set()
+    accepted_blocks = 0
+
+    for match in WIX_RICHTEXT_BLOCK_RE.finditer(seed_html):
+        block_html = match.group(1)
+        raw_lines = [strip_tags(item_html) for item_html in RICH_TEXT_LINE_RE.findall(block_html)]
+        raw_lines = [line for line in raw_lines if line]
+        if not raw_lines:
+            continue
+
+        valid_lines = [
+            normalize_seed_company_name(line)
+            for line in raw_lines
+            if is_rich_text_company_line(line)
+        ]
+        if len(valid_lines) < 10:
+            continue
+
+        accepted_blocks += 1
+        for company_name in valid_lines:
+            dedupe_key = company_name.lower()
+            if dedupe_key in seen:
+                continue
+            seen.add(dedupe_key)
+            entries.append(
+                DirectoryEntry(
+                    sort_index=len(entries),
+                    directory_page=1,
+                    company_name=company_name,
+                    profile_url="",
+                )
+            )
+
+    if len(entries) < 10 or accepted_blocks == 0:
+        return None
+
+    print(
+        f"Recovered {len(entries)} exhibitor names from rich-text directory blocks."
+    )
+    return entries, ""
+
+
 def collect_direct_landing_entries(
     seed_url: str,
     seed_html: str,
+    seed_page: ParsedPage,
 ) -> tuple[list[DirectoryEntry], str] | None:
     wix_entries = collect_wix_gallery_entries(seed_url, seed_html)
     if wix_entries is not None:
         return wix_entries
+    rich_text_entries = collect_rich_text_name_entries(seed_html)
+    if rich_text_entries is not None:
+        return rich_text_entries
+    image_ocr_entries = collect_image_ocr_entries(seed_url, seed_page)
+    if image_ocr_entries is not None:
+        return image_ocr_entries
     return None
+
+
+def extract_table_row_entries(
+    seed_url: str,
+    html_text: str,
+    directory_page: int,
+) -> list[DirectoryEntry]:
+    entries: list[DirectoryEntry] = []
+    seen_profiles: set[str] = set()
+
+    for row_html in HTML_TABLE_ROW_RE.findall(html_text):
+        cell_fragments = HTML_TABLE_CELL_RE.findall(row_html)
+        if len(cell_fragments) < 2:
+            continue
+
+        cell_texts = [strip_tags(fragment) for fragment in cell_fragments]
+        company_name = normalize_seed_company_name(cell_texts[1])
+        if not company_name or not is_companyish_text(company_name):
+            continue
+
+        booth_code = normalize_text(cell_texts[0]) if cell_texts else ""
+        profile_url = ""
+        for _quote, raw_href in reversed(HTML_HREF_RE.findall(row_html)):
+            normalized = normalize_http_url(urljoin(seed_url, raw_href))
+            if normalized and same_site(normalized, seed_url):
+                profile_url = normalized
+                break
+
+        if not profile_url:
+            profile_url = build_text_only_fragment_url(seed_url, company_name, booth_code)
+
+        if profile_url in seen_profiles:
+            continue
+        seen_profiles.add(profile_url)
+        entries.append(
+            DirectoryEntry(
+                sort_index=len(entries),
+                directory_page=directory_page,
+                company_name=company_name,
+                profile_url=profile_url,
+            )
+        )
+
+    return entries
+
+
+def collect_table_directory_entries(
+    seed_url: str,
+    seed_html: str,
+    seed_page: ParsedPage,
+    start_page: int | None,
+    end_page: int | None,
+    max_pages: int,
+    page_loader: callable[[str], tuple[str, str, ParsedPage]] | None = None,
+) -> list[DirectoryEntry] | None:
+    if page_loader is None:
+        page_loader = load_static_page
+
+    seed_entries = extract_table_row_entries(seed_url, seed_html, directory_page=1)
+    if len(seed_entries) < 3:
+        return None
+
+    page_numbers = [
+        page_number
+        for anchor in seed_page.anchors
+        if (page_number := extract_page_number_from_url(anchor.absolute_url)) is not None
+    ]
+    total_pages = max(page_numbers, default=1)
+    page_param = discover_query_page_param(seed_url, seed_page)
+
+    requested_start = max(start_page or 1, 1)
+    requested_end = end_page or total_pages or max_pages
+    requested_end = min(requested_end, requested_start + max_pages - 1)
+    if total_pages > 1:
+        requested_end = min(requested_end, total_pages)
+    if requested_start > requested_end:
+        raise ValueError("--start-page cannot be greater than --end-page.")
+
+    entries: list[DirectoryEntry] = []
+    seen_profiles: set[str] = set()
+
+    for page_number in range(requested_start, requested_end + 1):
+        if page_number == 1:
+            current_url = seed_url
+            current_html = seed_html
+            current_page = seed_page
+        elif page_param:
+            current_url, current_html, current_page = page_loader(
+                build_query_page_url(seed_url, page_param, page_number)
+            )
+        else:
+            next_urls = [
+                url
+                for url in discover_pagination_links(seed_page, seed_url, seed_url)
+                if extract_page_number_from_url(url) == page_number
+            ]
+            if not next_urls:
+                break
+            current_url, current_html, current_page = page_loader(next_urls[0])
+
+        page_entries = extract_table_row_entries(
+            current_url,
+            current_html,
+            directory_page=page_number,
+        )
+        added = 0
+        for entry in page_entries:
+            if entry.profile_url in seen_profiles:
+                continue
+            seen_profiles.add(entry.profile_url)
+            entries.append(
+                DirectoryEntry(
+                    sort_index=len(entries),
+                    directory_page=page_number,
+                    company_name=entry.company_name,
+                    profile_url=entry.profile_url,
+                )
+            )
+            added += 1
+
+        print(
+            f"Collected directory page {page_number} "
+            f"(table mode) ({len(page_entries)} matches, {len(entries)} total, {added} new)."
+        )
+
+        if not page_entries and page_number > 1:
+            break
+
+    return entries or None
 
 
 def is_social_url(url: str) -> bool:
@@ -2868,7 +3519,7 @@ def url_group(url: str) -> str:
     query_keys = sorted(
         key.lower()
         for key, _ in parse_qsl(parsed.query, keep_blank_values=True)
-        if key.lower() not in COMMON_PAGE_PARAMS
+        if not is_page_param_name(key)
     )
 
     if any(key in ID_LIKE_QUERY_KEYS for key in query_keys):
@@ -3070,10 +3721,99 @@ def score_profile_action(action: ActionRecord, directory_url: str) -> float:
         score -= 80
     if extract_page_number_from_url(action.absolute_url) is not None:
         score -= 40
-    if query_keys & set(COMMON_PAGE_PARAMS):
+    if any(is_page_param_name(key) for key in query_keys):
         score -= 35
 
     return score
+
+
+def text_only_container_name_parts(text: str) -> tuple[str, str]:
+    cleaned = normalize_text(text)
+    if not cleaned or len(cleaned) > 140:
+        return "", ""
+
+    cleaned = TEXT_ONLY_CONTAINER_TRAILING_NOISE_RE.sub("", cleaned)
+    cleaned = normalize_text(cleaned.strip(" -|,"))
+    if not cleaned:
+        return "", ""
+
+    lower = cleaned.lower()
+    if any(
+        marker in lower
+        for marker in (
+            "clear filters",
+            "product category",
+            "destination sector",
+            "country please choose",
+            "newsletter",
+        )
+    ):
+        return "", ""
+
+    booth_code = ""
+    booth_match = TEXT_ONLY_CONTAINER_BOOTH_CODE_RE.match(cleaned)
+    if booth_match:
+        booth_code = normalize_text(booth_match.group("booth"))
+        cleaned = normalize_text(booth_match.group("name"))
+
+    cleaned = normalize_seed_company_name(cleaned)
+    if not cleaned or looks_generic_directory_label(cleaned):
+        return "", ""
+    if len(cleaned.split()) > 10:
+        return "", ""
+    if not is_companyish_text(cleaned):
+        return "", ""
+    return cleaned, booth_code
+
+
+def build_text_only_fragment_url(page_url: str, company_name: str, booth_code: str) -> str:
+    normalized = normalize_http_url(page_url) or page_url
+    parsed = urlparse(normalized)
+    query_items = [
+        (key, value)
+        for key, value in parse_qsl(parsed.query, keep_blank_values=True)
+        if not is_page_param_name(key)
+    ]
+    fragment_parts = [
+        slugify_filename_part(booth_code),
+        slugify_filename_part(company_name),
+    ]
+    fragment = "-".join(part for part in fragment_parts if part) or "company"
+    return urlunparse(parsed._replace(query=urlencode(query_items, doseq=True), fragment=fragment))
+
+
+def extract_text_only_container_candidate(
+    container: ContainerRecord,
+    page_url: str,
+) -> ContainerEntryCandidate | None:
+    if container.in_header or container.in_footer or container.in_nav or not container.in_main:
+        return None
+    if not container.text or len(container.text) > 140:
+        return None
+    if not container.actions or len(container.actions) > 4:
+        return None
+
+    if any(score_profile_action(action, page_url) >= 35.0 for action in container.actions):
+        return None
+
+    company_name = ""
+    booth_code = ""
+    for candidate_text in (*container.heading_texts, container.text):
+        candidate_name, candidate_booth = text_only_container_name_parts(candidate_text)
+        if candidate_name:
+            company_name = candidate_name
+            booth_code = candidate_booth
+            break
+
+    if not company_name:
+        return None
+
+    return ContainerEntryCandidate(
+        company_name=company_name,
+        profile_url=build_text_only_fragment_url(page_url, company_name, booth_code),
+        signature=container.signature,
+        order=container.order,
+    )
 
 
 def extract_container_candidate(
@@ -3084,8 +3824,6 @@ def extract_container_candidate(
         return None
 
     heading_candidates = dedupe_preserving_order(list(container.heading_texts))
-    if not heading_candidates:
-        return None
     if len(heading_candidates) > 5:
         return None
 
@@ -3096,6 +3834,11 @@ def extract_container_candidate(
         if score > best_name_score:
             best_name_score = score
             company_name = heading_text
+
+    if not company_name:
+        text_only_name, _booth_code = text_only_container_name_parts(container.text)
+        if text_only_name:
+            company_name = text_only_name
 
     if not company_name:
         return None
@@ -3201,6 +3944,76 @@ def build_container_listing_candidates(
     return strategies
 
 
+def build_text_container_listing_candidates(page: ParsedPage) -> list[ListingStrategy]:
+    grouped: dict[tuple[tuple[str, ...], str], list[ContainerEntryCandidate]] = defaultdict(list)
+    fallback_candidates: list[ContainerEntryCandidate] = []
+
+    for container in page.containers:
+        candidate = extract_text_only_container_candidate(container, page.url)
+        if candidate is None:
+            continue
+        fallback_candidates.append(candidate)
+        grouped[(candidate.signature, "#text")].append(candidate)
+
+    strategies: list[ListingStrategy] = []
+    for (signature, group), candidates in grouped.items():
+        by_url: dict[str, ContainerEntryCandidate] = {}
+        for candidate in candidates:
+            existing = by_url.get(candidate.profile_url)
+            if existing is None:
+                by_url[candidate.profile_url] = candidate
+            else:
+                by_url[candidate.profile_url] = choose_better_container_candidate(existing, candidate)
+
+        unique_urls = len(by_url)
+        if unique_urls < 3:
+            continue
+
+        texts = [candidate.company_name for candidate in by_url.values() if candidate.company_name]
+        if not texts:
+            continue
+
+        diversity = len({text.lower() for text in texts}) / unique_urls
+        score = unique_urls * 10 + diversity * 18 + 8
+        strategies.append(
+            ListingStrategy(
+                source_kind="text_container",
+                signature=signature,
+                url_group=group,
+                base_score=score,
+                unique_urls=unique_urls,
+                sample_names=tuple(texts[:3]),
+            )
+        )
+
+    unique_fallback_urls = {candidate.profile_url for candidate in fallback_candidates}
+    if len(unique_fallback_urls) >= 5:
+        fallback_texts = [
+            candidate.company_name
+            for candidate in fallback_candidates
+            if candidate.company_name
+        ]
+        diversity = (
+            len({text.lower() for text in fallback_texts}) / len(unique_fallback_urls)
+            if fallback_texts
+            else 0.0
+        )
+        strategies.append(
+            ListingStrategy(
+                source_kind="text_container",
+                signature=(),
+                url_group="*",
+                base_score=len(unique_fallback_urls) * 10 + diversity * 15,
+                unique_urls=len(unique_fallback_urls),
+                sample_names=tuple(
+                    candidate.company_name for candidate in fallback_candidates[:3]
+                ),
+            )
+        )
+
+    return strategies
+
+
 def build_listing_candidates(page: ParsedPage, directory_url: str) -> list[ListingStrategy]:
     strategies: list[ListingStrategy] = []
     strategies.extend(
@@ -3218,6 +4031,7 @@ def build_listing_candidates(page: ParsedPage, directory_url: str) -> list[Listi
         )
     )
     strategies.extend(build_container_listing_candidates(page, directory_url))
+    strategies.extend(build_text_container_listing_candidates(page))
     strategies.sort(key=lambda strategy: (strategy.base_score, strategy.unique_urls), reverse=True)
     return strategies[:12]
 
@@ -3319,6 +4133,44 @@ def extract_directory_entries_from_containers(
     return entries
 
 
+def extract_directory_entries_from_text_containers(
+    page: ParsedPage,
+    strategy: ListingStrategy,
+) -> list[tuple[str, str]]:
+    grouped: dict[str, ContainerEntryCandidate] = {}
+    candidates = [
+        candidate
+        for container in page.containers
+        if (candidate := extract_text_only_container_candidate(container, page.url)) is not None
+    ]
+
+    def matches(candidate: ContainerEntryCandidate) -> bool:
+        if strategy.signature and candidate.signature != strategy.signature:
+            return False
+        return True
+
+    matching_candidates = [candidate for candidate in candidates if matches(candidate)]
+    if len(matching_candidates) < 2 and strategy.signature:
+        matching_candidates = [
+            candidate for candidate in candidates if candidate.signature == strategy.signature
+        ]
+
+    for candidate in matching_candidates:
+        existing = grouped.get(candidate.profile_url)
+        if existing is None:
+            grouped[candidate.profile_url] = candidate
+        else:
+            grouped[candidate.profile_url] = choose_better_container_candidate(existing, candidate)
+
+    entries = [
+        (candidate.company_name, candidate.profile_url)
+        for candidate in grouped.values()
+        if candidate.company_name
+    ]
+    entries.sort(key=lambda item: item[0].lower())
+    return entries
+
+
 def extract_directory_entries(
     page: ParsedPage,
     strategy: ListingStrategy,
@@ -3342,6 +4194,11 @@ def extract_directory_entries(
             strategy=strategy,
             directory_url=directory_url,
         )
+    if strategy.source_kind == "text_container":
+        return extract_directory_entries_from_text_containers(
+            page,
+            strategy=strategy,
+        )
     return []
 
 
@@ -3364,6 +4221,8 @@ def parse_json_ld_urls(blocks: tuple[str, ...], directory_url: str) -> list[str]
         if not normalized:
             return
         if same_site(normalized, directory_url):
+            return
+        if not is_plausible_company_website_url(normalized, profile_url=directory_url):
             return
         if parent_key == "url":
             urls.append(normalized)
@@ -3440,6 +4299,15 @@ def score_external_link(
 
 
 def extract_company_website(page: ParsedPage, profile_url: str) -> str:
+    brand_candidates = tuple(
+        candidate
+        for candidate in (
+            *(normalize_seed_company_name(text) for text in page.h1_texts),
+            *(normalize_seed_company_name(part) for part in TITLE_SPLIT_RE.split(page.title or "")),
+        )
+        if candidate
+    )
+
     json_ld_urls = parse_json_ld_urls(page.json_ld_blocks, profile_url)
     if json_ld_urls:
         return json_ld_urls[0]
@@ -3469,8 +4337,21 @@ def extract_company_website(page: ParsedPage, profile_url: str) -> str:
 
     non_social_candidates.sort(key=lambda item: item[0], reverse=True)
 
-    if non_social_candidates and non_social_candidates[0][0] >= 35:
-        return non_social_candidates[0][1]
+    for score, candidate_url in non_social_candidates:
+        if score < 35:
+            break
+        if brand_candidates and not any(
+            candidate_matches_website_brand(candidate, candidate_url)
+            for candidate in brand_candidates
+        ):
+            if score < 55:
+                continue
+        if is_plausible_company_website_url(
+            candidate_url,
+            profile_url=profile_url,
+            brand_candidates=brand_candidates,
+        ):
+            return candidate_url
     return ""
 
 
@@ -3507,6 +4388,56 @@ def candidate_matches_website_brand(text: str, website_url: str) -> bool:
         or host_brand_key in candidate_brand_key
         or candidate_brand_key in host_brand_key
     )
+
+
+def company_name_matches_domain(company_name: str, website_url: str) -> bool:
+    company_tokens = brand_word_tokens(company_name)
+    host_name = infer_name_from_url(website_url)
+    host_brand_key = company_name_brand_key(host_name)
+    host_tokens = brand_word_tokens(host_name)
+    if not company_tokens or not host_brand_key:
+        return False
+    if any(token in host_tokens for token in company_tokens):
+        return True
+    if any(token in host_brand_key for token in company_tokens):
+        return True
+
+    for company_token in company_tokens:
+        if len(company_token) < 4:
+            continue
+        company_stem = company_token[:4]
+        if any(
+            company_stem in host_token or host_token in company_token
+            for host_token in host_tokens
+            if len(host_token) >= 4
+        ):
+            return True
+        if company_stem in host_brand_key:
+            return True
+
+    company_acronym = brand_acronym(company_name)
+    if company_acronym and len(company_acronym) >= 2:
+        if company_acronym in host_brand_key:
+            return True
+        if any(company_acronym == host_token for host_token in host_tokens):
+            return True
+
+    candidate_brand_key = company_name_brand_key(company_name)
+    if candidate_brand_key and host_brand_key:
+        shared_prefix = os.path.commonprefix([candidate_brand_key, host_brand_key])
+        if len(shared_prefix) >= 5:
+            return True
+
+    return False
+
+
+def validated_company_website_url(company_name: str, website_url: str) -> str:
+    normalized = normalize_http_url(website_url)
+    if not normalized:
+        return ""
+    if not company_name_matches_domain(company_name, normalized):
+        return ""
+    return normalized
 
 
 def extract_brandish_subcandidates(text: str) -> list[str]:
@@ -3730,6 +4661,10 @@ def evaluate_listing_strategy(
     sample_entries = entries[:sample_size]
 
     for company_name, profile_url in sample_entries:
+        parsed_profile = urlparse(profile_url) if profile_url else None
+        if parsed_profile and parsed_profile.fragment:
+            score += 5
+            continue
         try:
             website_url = profile_website_scraper(profile_url)
         except Exception:  # noqa: BLE001
@@ -3810,7 +4745,7 @@ def page_series_fingerprint(url: str) -> tuple[str, str, tuple[tuple[str, str], 
         sorted(
             (key.lower(), value)
             for key, value in parse_qsl(parsed.query, keep_blank_values=True)
-            if key.lower() not in COMMON_PAGE_PARAMS
+            if not is_page_param_name(key)
         )
     )
     return host_key(url), path, query_items
@@ -3819,7 +4754,7 @@ def page_series_fingerprint(url: str) -> tuple[str, str, tuple[tuple[str, str], 
 def extract_page_number_from_url(url: str) -> int | None:
     parsed = urlparse(url)
     for key, value in parse_qsl(parsed.query, keep_blank_values=True):
-        if key.lower() in COMMON_PAGE_PARAMS and value.isdigit():
+        if is_page_param_name(key) and value.isdigit():
             return int(value)
 
     path_match = PAGE_PATH_RE.search(parsed.path)
@@ -4177,7 +5112,7 @@ def collect_directory_entries_with_ajax_paginator(
 
 def discover_query_page_param(seed_url: str, page: ParsedPage) -> str | None:
     for key, _ in parse_qsl(urlparse(seed_url).query, keep_blank_values=True):
-        if key.lower() in COMMON_PAGE_PARAMS:
+        if is_page_param_name(key):
             return key
 
     counts: dict[str, int] = defaultdict(int)
@@ -4185,7 +5120,7 @@ def discover_query_page_param(seed_url: str, page: ParsedPage) -> str | None:
         if not anchor.absolute_url or not same_site(anchor.absolute_url, seed_url):
             continue
         for key, value in parse_qsl(urlparse(anchor.absolute_url).query, keep_blank_values=True):
-            if key.lower() in COMMON_PAGE_PARAMS and value.isdigit():
+            if is_page_param_name(key) and value.isdigit():
                 counts[key] += 1
 
     if not counts:
@@ -4220,7 +5155,7 @@ def discover_explicit_page_urls(
     builders: list[tuple[str, callable[[int], str]]] = []
     known_param = None
     for key, value in parse_qsl(urlparse(seed_url).query, keep_blank_values=True):
-        if key.lower() in COMMON_PAGE_PARAMS:
+        if is_page_param_name(key):
             known_param = key
             if value.isdigit():
                 break
@@ -4502,9 +5437,22 @@ def collect_entries_from_seed(
     landing_entries = collect_direct_landing_entries(
         seed_url=seed_url,
         seed_html=seed_html,
+        seed_page=seed_page,
     )
     if landing_entries is not None:
         return landing_entries
+
+    table_entries = collect_table_directory_entries(
+        seed_url=seed_url,
+        seed_html=seed_html,
+        seed_page=seed_page,
+        start_page=start_page,
+        end_page=end_page,
+        max_pages=max_pages,
+        page_loader=page_loader,
+    )
+    if table_entries is not None:
+        return table_entries, adapter_title
 
     try:
         strategy, _seed_entries = choose_listing_strategy(
@@ -4647,11 +5595,15 @@ def collect_company_records(
     for entry in entries:
         parsed_profile = urlparse(entry.profile_url) if entry.profile_url else None
         has_fragment_only_reference = bool(parsed_profile and parsed_profile.fragment)
+        website_url_hint = validated_company_website_url(
+            entry.company_name,
+            entry.website_url_hint,
+        )
 
-        if entry.website_url_hint or not entry.profile_url or has_fragment_only_reference:
+        if website_url_hint or not entry.profile_url or has_fragment_only_reference:
             final_company_name = maybe_enrich_company_name(
                 entry.company_name,
-                entry.website_url_hint,
+                website_url_hint,
             )
             records.append(
                 CompanyRecord(
@@ -4659,7 +5611,7 @@ def collect_company_records(
                     directory_page=entry.directory_page,
                     company_name=final_company_name,
                     profile_url=entry.profile_url,
-                    website_url=entry.website_url_hint,
+                    website_url=website_url_hint,
                 )
             )
         else:
@@ -4686,6 +5638,7 @@ def collect_company_records(
                     f"Profile scrape failed for {entry.profile_url}: {exc}",
                     file=sys.stderr,
                 )
+            website_url = validated_company_website_url(entry.company_name, website_url)
 
             records.append(
                 CompanyRecord(
@@ -4721,6 +5674,7 @@ def collect_company_records(
             except Exception:  # noqa: BLE001
                 browser_url = ""
 
+            browser_url = validated_company_website_url(record.company_name, browser_url)
             if browser_url:
                 records[index] = CompanyRecord(
                     sort_index=record.sort_index,
@@ -4767,6 +5721,10 @@ def write_csv(
                     "Conference": conference_name,
                 }
             )
+
+
+def filter_records_with_websites(records: list[CompanyRecord]) -> list[CompanyRecord]:
+    return [record for record in records if record.website_url]
 
 
 def parse_args() -> argparse.Namespace:
@@ -4844,6 +5802,11 @@ def parse_args() -> argparse.Namespace:
             "Navigation timeout for Playwright browser fallback, in milliseconds. "
             f"Default: {DEFAULT_BROWSER_TIMEOUT_MS}."
         ),
+    )
+    parser.add_argument(
+        "--require-website",
+        action="store_true",
+        help="Only keep companies where a website/domain was found.",
     )
     return parser.parse_args()
 
@@ -4973,6 +5936,14 @@ def run_scrape(options: ScrapeOptions) -> ScrapeResult:
             options.workers,
             browser_renderer=browser_renderer if used_browser_fallback else None,
         )
+        if options.require_website:
+            kept_records = filter_records_with_websites(records)
+            dropped_records = len(records) - len(kept_records)
+            if dropped_records:
+                print(
+                    f"Dropped {dropped_records} company record(s) without a website/domain."
+                )
+            records = kept_records
         output_path = resolve_output_path(
             str(options.output_path) if options.output_path is not None else None,
             seed_url,
@@ -5034,6 +6005,7 @@ def main() -> int:
                 end_page=args.end_page,
                 browser_mode=args.browser_mode,
                 browser_timeout_ms=args.browser_timeout_ms,
+                require_website=args.require_website,
             )
         )
     except Exception as exc:  # noqa: BLE001

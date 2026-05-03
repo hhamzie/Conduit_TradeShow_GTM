@@ -9,8 +9,15 @@
   <body>
     <div class="shell">
       <header class="topbar">
-        <a class="brand" href="/">{{ app_name if app_name else "Trade Show Outbound" }}</a>
-        <p class="tagline">Bulk trade-show ingestion, scheduled scraping, and review-ready outbound ops.</p>
+        <div>
+          <a class="brand" href="/">{{ app_name if app_name else "Trade Show Outbound" }}</a>
+          <p class="tagline">Bulk trade-show ingestion, scheduled scraping, and review-ready outbound ops.</p>
+        </div>
+        {% if request.session.get("authenticated") %}
+        <form action="/logout" method="post">
+          <button type="submit" class="button secondary">Log Out</button>
+        </form>
+        {% endif %}
       </header>
       <main>
         {% block content %}{% endblock %}

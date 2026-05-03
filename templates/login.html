@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="panel auth-panel">
+  <div class="panel-head">
+    <div>
+      <h1>Sign In</h1>
+      <p>Use the dashboard credentials from your local environment to access the trade-show pipeline.</p>
+    </div>
+  </div>
+
+  <form class="auth-form" action="/login" method="post">
+    <label>
+      <span>Username</span>
+      <input type="text" name="username" autocomplete="username" required />
+    </label>
+    <label>
+      <span>Password</span>
+      <input type="password" name="password" autocomplete="current-password" required />
+    </label>
+    {% if error %}
+    <p class="error-inline">{{ error }}</p>
+    {% endif %}
+    <button type="submit">Sign In</button>
+  </form>
+</section>
+{% endblock %}

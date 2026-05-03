@@ -38,6 +38,13 @@
     </div>
   </div>
 
+  {% if notice %}
+  <div class="detail-card detail-stack show-notice show-notice-{{ notice.tone }}">
+    <h2>{{ notice.title }}</h2>
+    <p>{{ notice.detail }}</p>
+  </div>
+  {% endif %}
+
   <div class="actions">
     <form action="/shows/{{ show.id }}/run-now" method="post">
       <button type="submit">Run Now</button>
@@ -47,14 +54,21 @@
       <button type="submit">Approve Outreach</button>
     </form>
     {% endif %}
+    <form action="/shows/{{ show.id }}/delete" method="post" onsubmit="return confirm('Delete this show from the dashboard?');">
+      <button class="button danger" type="submit">Delete Show</button>
+    </form>
   </div>
 
   <div class="detail-card detail-stack">
     <h2>Source</h2>
     <p><a href="{{ show.source_url }}" target="_blank" rel="noreferrer">{{ show.source_url }}</a></p>
     {% if show.last_error %}
-    <h2>Last Error</h2>
-    <pre class="error-box">{{ show.last_error }}</pre>
+    <h2>Latest Error Summary</h2>
+    <p class="show-error">{{ error_summary }}</p>
+    <details class="raw-error">
+      <summary>Show raw error details</summary>
+      <pre class="error-box">{{ show.last_error }}</pre>
+    </details>
     {% endif %}
   </div>
 </section>

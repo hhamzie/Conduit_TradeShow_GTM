@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import csv
+from datetime import datetime, timezone
 import logging
 from dataclasses import dataclass
+from email.message import EmailMessage
 import json
 from pathlib import Path
+import smtplib
+import time
 import uuid
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -49,6 +53,33 @@ def _post_json(url: str, payload: object, headers: dict[str, str] | None = None)
         return response.status, response.read().decode("utf-8", errors="replace")
 
 
+def _ordinal_day(day: int) -> str:
+    if 10 <= day % 100 <= 20:
+        suffix = "th"
+    else:
+        suffix = {1: "st", 2: "nd", 3: "rd"}.get(day % 10, "th")
+    return f"{day}{suffix}"
+
+
+def _pretty_event_day(show: Show) -> str:
+    return show.event_date.strftime("%B ") + _ordinal_day(show.event_date.day)
+
+
+def _show_payload_fields(show: Show, scraped_at: str) -> dict[str, str]:
+    pretty_day = _pretty_event_day(show)
+    return {
+        "show_id": str(show.id),
+        "show_name": show.name,
+        "show_date": show.event_date.isoformat(),
+        "show_day": pretty_day,
+        "show_year": str(show.event_date.year),
+        "show_date_pretty": f"{pretty_day}, {show.event_date.year}",
+        "show_place": show.place,
+        "scraped_at": scraped_at,
+        "source_url": show.source_url,
+    }
+
+
 def _push_rows_to_clay_webhook(show: Show) -> ProviderResult:
     settings = get_settings()
     if not settings.clay_webhook_url:
@@ -70,28 +101,37 @@ def _push_rows_to_clay_webhook(show: Show) -> ProviderResult:
         headers[settings.clay_webhook_auth_header] = settings.clay_webhook_auth_value
 
     sent = 0
+    scraped_at = datetime.now(timezone.utc).isoformat()
     try:
         for row in rows:
             payload = {
                 **row,
-                "show_id": show.id,
-                "source_url": show.source_url,
+                **_show_payload_fields(show, scraped_at),
             }
-            status_code, _body = _post_json(settings.clay_webhook_url, payload, headers=headers)
-            if status_code < 200 or status_code >= 300:
-                return ProviderResult(
-                    name="clay",
-                    status="failed",
-                    message=f"Clay webhook returned non-success status {status_code}.",
-                )
+            attempt = 0
+            while True:
+                try:
+                    status_code, _body = _post_json(settings.clay_webhook_url, payload, headers=headers)
+                    if status_code < 200 or status_code >= 300:
+                        return ProviderResult(
+                            name="clay",
+                            status="failed",
+                            message=f"Clay webhook returned non-success status {status_code}.",
+                        )
+                    break
+                except HTTPError as exc:
+                    body = exc.read().decode("utf-8", errors="replace")
+                    if exc.code == 429 and attempt < 5:
+                        time.sleep(1.5 * (attempt + 1))
+                        attempt += 1
+                        continue
+                    return ProviderResult(
+                        name="clay",
+                        status="failed",
+                        message=f"Clay webhook HTTP {exc.code}: {body[:200]}",
+                    )
             sent += 1
-    except HTTPError as exc:
-        body = exc.read().decode("utf-8", errors="replace")
-        return ProviderResult(
-            name="clay",
-            status="failed",
-            message=f"Clay webhook HTTP {exc.code}: {body[:200]}",
-        )
+            time.sleep(0.08)
     except URLError as exc:
         return ProviderResult(
             name="clay",
@@ -122,13 +162,13 @@ def _push_rows_to_clay_table_v3(show: Show) -> ProviderResult:
 
     rows = _load_export_rows(show.latest_export_path)
     url = f"https://api.clay.com/v3/tables/{settings.clay_input_table_id}/records"
+    scraped_at = datetime.now(timezone.utc).isoformat()
     records = [
         {
             "id": f"show-{show.id}-{uuid.uuid4().hex[:12]}",
             "cells": {
                 **row,
-                "show_id": str(show.id),
-                "source_url": show.source_url,
+                **_show_payload_fields(show, scraped_at),
             },
         }
         for row in rows
@@ -170,30 +210,63 @@ def _push_rows_to_clay_table_v3(show: Show) -> ProviderResult:
 
 def notify_ready_for_review(show: Show) -> ProviderResult:
     settings = get_settings()
-    if not settings.notify_to_numbers:
+    if not settings.notify_to_emails:
         return ProviderResult(
             name="notification",
             status="skipped",
-            message="No notify recipients configured.",
+            message="No email recipients configured.",
         )
 
-    if not (settings.twilio_account_sid and settings.twilio_auth_token and settings.twilio_from_number):
-        logger.info("Ready-for-review notification requested for show %s, but Twilio is not configured.", show.id)
+    if not (settings.smtp_host and settings.notify_from_email):
+        logger.info(
+            "Ready-for-review notification requested for show %s, but SMTP is not configured.",
+            show.id,
+        )
         return ProviderResult(
             name="notification",
             status="skipped",
-            message="Recipients are configured, but Twilio credentials are missing.",
+            message="Recipients are configured, but SMTP host/from-email are missing.",
         )
 
-    logger.info(
-        "Twilio notification placeholder for show %s to %s.",
-        show.id,
-        ", ".join(settings.notify_to_numbers),
+    message = EmailMessage()
+    message["Subject"] = f"[Trade Show Outbound] {show.name} is ready for review"
+    message["From"] = settings.notify_from_email
+    message["To"] = ", ".join(settings.notify_to_emails)
+    message.set_content(
+        "\n".join(
+            [
+                f"Show: {show.name}",
+                f"Date: {show.event_date}",
+                f"Place: {show.place}",
+                f"Source URL: {show.source_url}",
+                f"Rows exported: {show.company_count}",
+                f"Profile failures: {show.failure_count}",
+                f"Export path: {show.latest_export_path or 'not available'}",
+                "",
+                "The show has finished scraping and is ready for review in the dashboard.",
+            ]
+        )
     )
+
+    try:
+        with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=30) as smtp:
+            if settings.smtp_use_tls:
+                smtp.starttls()
+            if settings.smtp_username:
+                smtp.login(settings.smtp_username, settings.smtp_password)
+            smtp.send_message(message)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("SMTP notification failed for show %s.", show.id)
+        return ProviderResult(
+            name="notification",
+            status="failed",
+            message=f"SMTP notification failed: {exc}",
+        )
+
     return ProviderResult(
         name="notification",
-        status="skipped",
-        message="Twilio delivery placeholder reached; wire the exact SMS payload next.",
+        status="success",
+        message=f"Sent email notification to {', '.join(settings.notify_to_emails)}.",
     )
 
 

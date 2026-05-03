@@ -1,5 +1,6 @@
 .git
 .gitignore
+.venv/
 __pycache__/
 *.pyc
 *.pyo
@@ -9,3 +10,5 @@ __pycache__/
 data/*.db
 data/exports/
 *.csv
+*.tar
+*.tar.gz
