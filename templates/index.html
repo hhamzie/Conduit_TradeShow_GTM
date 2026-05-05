@@ -45,41 +45,57 @@
 {% block content %}
 <section class="panel hero-panel">
   <div class="hero-grid">
-    <div>
-      <p class="hero-kicker">Trade Show Ops</p>
-      <h1>Pick what you want back.</h1>
-      <p class="hero-copy">If you want one CSV now, use the single-show scraper. If you want many CSVs fast, use the bulk path. If you want the app to manage Clay and Smartlead for you, use the automation lane.</p>
+    <div class="hero-main">
+      <p class="hero-kicker">Trade Show Workflow</p>
+      <h1>Three clear ways to run the scraper.</h1>
+      <p class="hero-copy">Use the same booth-aware scraper in every path. Pick the lane based on the outcome you want: one CSV, a batch ZIP, or the full Clay to Smartlead workflow.</p>
+      <div class="hero-tags">
+        <span class="hero-tag">Booth numbers when available</span>
+        <span class="hero-tag">Domain-only guardrail</span>
+        <span class="hero-tag">Single or bulk input</span>
+      </div>
     </div>
     <div class="hero-aside">
-      <div class="hero-pill">3 ways in</div>
-      <p>All three flows keep the website/domain-only guardrail. The first two are immediate scrape tools. The third is the longer-running outbound workflow.</p>
+      <div class="hero-pill">What works now</div>
+      <ul class="hero-checklist">
+        <li>Option 1 returns one CSV immediately.</li>
+        <li>Option 2 returns a ZIP with one CSV per show.</li>
+        <li>Option 3 runs the automated Clay and Smartlead pipeline after setup.</li>
+      </ul>
     </div>
   </div>
 </section>
 
-<section class="panel quick-guide">
-  <div class="panel-head">
+<section class="home-overview">
+  <article class="overview-card">
+    <span class="overview-number">1</span>
     <div>
-      <h2>How To Choose</h2>
-      <p>Use the lane that matches the output you want, not just the input you have.</p>
+      <h2>Single scrape</h2>
+      <p>Best when you want one cleaned CSV back right now.</p>
     </div>
-  </div>
-  <div class="guide-grid">
-    <article class="guide-card">
-      <span class="guide-label">Fastest</span>
-      <h3>One show, one CSV</h3>
-      <p>Use this when you have a single directory URL and just want the cleaned company export back right away.</p>
-    </article>
-    <article class="guide-card">
-      <span class="guide-label">Batch</span>
-      <h3>Many shows, many CSVs</h3>
-      <p>Use this when you have a spreadsheet of trade shows and want a ZIP file with one CSV per show plus a manifest.</p>
-    </article>
-    <article class="guide-card">
-      <span class="guide-label">Outbound</span>
-      <h3>Clay plus Smartlead automation</h3>
-      <p>Use this when you want the app to own the pipeline after scraping: Clay enrichment, Smartlead campaign prep, and launch control.</p>
-    </article>
+  </article>
+  <article class="overview-card">
+    <span class="overview-number">2</span>
+    <div>
+      <h2>Bulk scrape</h2>
+      <p>Best when you have a CSV of shows and want a ZIP of outputs.</p>
+    </div>
+  </article>
+  <article class="overview-card">
+    <span class="overview-number">3</span>
+    <div>
+      <h2>Automation</h2>
+      <p>Best when you want Clay enrichment and Smartlead campaign handling.</p>
+    </div>
+  </article>
+</section>
+
+<section class="panel quick-guide">
+  <div class="panel-head compact-head">
+    <div>
+      <h2>Choose Your Lane</h2>
+      <p>All three options use the same core scraper. Option 3 uses that scraper first, then moves the result into the automation pipeline.</p>
+    </div>
   </div>
 </section>
 
@@ -92,12 +108,12 @@
       </div>
       <h2>Scrape One Trade Show</h2>
     </div>
-    <p class="lane-copy">Best for one-off links or messy directories where the browser-assisted agentic pass gives you the highest hit rate.</p>
-    <div class="lane-points">
-      <p><strong>Input:</strong> One directory or regular trade show link</p>
-      <p><strong>Output:</strong> One cleaned CSV download</p>
-      <p><strong>Best when:</strong> You want the highest-confidence scrape for a single event</p>
-    </div>
+    <p class="lane-copy">Paste one directory or show link and get one cleaned CSV back.</p>
+    <dl class="lane-meta">
+      <div><dt>Input</dt><dd>One trade show link</dd></div>
+      <div><dt>Output</dt><dd>One CSV download</dd></div>
+      <div><dt>Best for</dt><dd>Fast one-off scrapes</dd></div>
+    </dl>
     {% if single_scrape_error %}
     <p class="error-inline">{{ single_scrape_error }}</p>
     {% endif %}
@@ -120,7 +136,7 @@
       </label>
       <button type="submit">Scrape and Download CSV</button>
     </form>
-    <p class="mini-note">Returns one cleaned CSV right away.</p>
+    <p class="mini-note">Looks for booth numbers when the site exposes them.</p>
   </article>
 
   <article class="panel lane-card lane-card-bulk">
@@ -131,12 +147,12 @@
       </div>
       <h2>Scrape Many Trade Shows</h2>
     </div>
-    <p class="lane-copy">Upload a CSV of shows and get back a ZIP bundle with one CSV per show plus a manifest so failed rows are easy to spot.</p>
-    <div class="lane-points">
-      <p><strong>Input:</strong> CSV of trade shows</p>
-      <p><strong>Output:</strong> ZIP archive with one CSV per show plus `manifest.csv`</p>
-      <p><strong>Best when:</strong> You want batch scraping without turning on Clay or Smartlead</p>
-    </div>
+    <p class="lane-copy">Upload a CSV of shows and get a ZIP bundle back.</p>
+    <dl class="lane-meta">
+      <div><dt>Input</dt><dd>CSV of trade shows</dd></div>
+      <div><dt>Output</dt><dd>ZIP with one CSV per show</dd></div>
+      <div><dt>Best for</dt><dd>Quick batch scraping</dd></div>
+    </dl>
     {% if bulk_scrape_error %}
     <p class="error-inline">{{ bulk_scrape_error }}</p>
     {% endif %}
@@ -158,15 +174,15 @@
       </div>
       <h2>Automate Clay + Smartlead</h2>
     </div>
-    <p class="lane-copy">Queue one trade show or a whole CSV into the automated pipeline. The worker scrapes, provisions the Clay table, waits for enrichment, then builds the Smartlead campaign for launch.</p>
-    <div class="lane-points">
-      <p><strong>Input:</strong> One show or a CSV of shows</p>
-      <p><strong>Output:</strong> Show-specific Clay table, enriched CSVs, and a show-specific Smartlead campaign</p>
-      <p><strong>Best when:</strong> You want ongoing outbound ops instead of just scrape files</p>
-    </div>
+    <p class="lane-copy">Queue one show or a full CSV and let the app run the longer outbound workflow.</p>
+    <dl class="lane-meta">
+      <div><dt>Input</dt><dd>One show or a CSV of shows</dd></div>
+      <div><dt>Output</dt><dd>Clay table plus Smartlead campaign</dd></div>
+      <div><dt>Best for</dt><dd>Ongoing outbound operations</dd></div>
+    </dl>
     <div class="show-notice show-notice-warning compact-notice">
-      <strong>What still needs your setup</strong>
-      <p>Create the Clay template table, add the row status column, and set the real Clay and Smartlead env vars in Render before relying on this flow in production.</p>
+      <strong>Setup still required</strong>
+      <p>Create the Clay template table, add the row status column, and set the Clay and Smartlead Render env vars before using this in production.</p>
     </div>
     {% if automation_error %}
     <p class="error-inline">{{ automation_error }}</p>
