@@ -88,6 +88,18 @@ Basic flow:
 
 `DATABASE_URL` from Render is accepted directly; the app normalizes Render's Postgres URL format automatically.
 
+### Auto-deploy from GitHub Actions
+
+This repo now includes a GitHub Action at [.github/workflows/render-deploy.yml](/Users/hamzehhammad/Documents/Conduit/HPointScraper/.github/workflows/render-deploy.yml).
+
+To use it:
+
+1. In GitHub, open the repo settings.
+2. Add an Actions secret named `RENDER_DEPLOY_HOOK_URL`.
+3. Set it to your full Render deploy hook URL.
+
+After that, every push to `main` will trigger the Render deploy hook automatically.
+
 ## Handoff / deploy from image
 
 If you are handing this to someone else as a prebuilt image:
