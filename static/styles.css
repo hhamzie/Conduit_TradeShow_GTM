@@ -695,6 +695,29 @@ button.button.subtle {
   color: var(--muted);
 }
 
+.inline-status {
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: rgba(247, 250, 255, 0.92);
+  color: var(--ink-soft);
+  font-size: 0.92rem;
+  line-height: 1.5;
+}
+
+.inline-status[data-tone="success"] {
+  background: rgba(20, 122, 85, 0.08);
+  border-color: rgba(20, 122, 85, 0.16);
+  color: var(--success);
+}
+
+.inline-status[data-tone="error"] {
+  background: rgba(186, 60, 77, 0.08);
+  border-color: rgba(186, 60, 77, 0.16);
+  color: var(--danger);
+}
+
 .show-error {
   margin: 14px 0 0;
   color: var(--danger);

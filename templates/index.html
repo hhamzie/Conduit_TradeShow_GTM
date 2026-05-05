@@ -88,7 +88,14 @@
     {% if single_scrape_error %}
     <p class="error-inline">{{ single_scrape_error }}</p>
     {% endif %}
-    <form class="lane-form lane-form-single" action="/scrape/single" method="post">
+    <form
+      class="lane-form lane-form-single"
+      action="/scrape/single"
+      method="post"
+      data-direct-download-form
+      data-progress-target="single-scrape-status"
+      data-loading-label="Scraping..."
+    >
       <label>
         <span>Show name</span>
         <input type="text" name="show_name" placeholder="Luxe Pack" required />
@@ -107,6 +114,7 @@
       </label>
       <button type="submit">Scrape and Download CSV</button>
     </form>
+    <p id="single-scrape-status" class="inline-status" hidden></p>
     <p class="mini-note">Looks for booth numbers when the site exposes them.</p>
   </article>
 
@@ -127,13 +135,22 @@
     {% if bulk_scrape_error %}
     <p class="error-inline">{{ bulk_scrape_error }}</p>
     {% endif %}
-    <form class="lane-form lane-form-bulk" action="/scrape/bulk" method="post" enctype="multipart/form-data">
+    <form
+      class="lane-form lane-form-bulk"
+      action="/scrape/bulk"
+      method="post"
+      enctype="multipart/form-data"
+      data-direct-download-form
+      data-progress-target="bulk-scrape-status"
+      data-loading-label="Building ZIP..."
+    >
       <label class="lane-form-wide">
         <span>Trade show CSV</span>
         <input type="file" name="file" accept=".csv" required />
       </label>
       <button type="submit">Run Bulk Scrape and Download ZIP</button>
     </form>
+    <p id="bulk-scrape-status" class="inline-status" hidden></p>
     <p class="mini-note">Expected columns: <strong>Show</strong>, <strong>Date</strong>, <strong>Place</strong>, <strong>Link</strong>.</p>
   </article>
 
