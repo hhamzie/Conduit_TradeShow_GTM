@@ -256,6 +256,21 @@ TEXT_ONLY_CONTAINER_TRAILING_NOISE_RE = re.compile(
 TEXT_ONLY_CONTAINER_BOOTH_CODE_RE = re.compile(
     r"^(?P<booth>[A-Z]{1,4}\d{1,4}[A-Z]?(?:[-/][A-Z0-9]+)?)\s+(?P<name>.+)$"
 )
+PROFILE_BOOTH_LABEL_RE = re.compile(
+    r"\b(?:booth|stand|stall|space|suite|table)\s*"
+    r"(?:number|#|no\.?|num(?:ber)?)?\s*[:#-]?\s*"
+    r"(?P<booth>[A-Z0-9]{1,8}(?:[-/][A-Z0-9]{1,8})*)\b",
+    re.IGNORECASE,
+)
+PROFILE_BOOTH_REVERSE_LABEL_RE = re.compile(
+    r"\b(?P<booth>[A-Z0-9]{1,8}(?:[-/][A-Z0-9]{1,8})*)\s+"
+    r"(?:booth|stand|stall|space|suite|table)\b",
+    re.IGNORECASE,
+)
+SCRIPT_STYLE_RE = re.compile(
+    r"<(?:script|style)\b[^>]*>.*?</(?:script|style)>",
+    re.IGNORECASE | re.DOTALL,
+)
 COMPANY_NAME_GENERIC_MARKERS = (
     "accessories",
     "bedding",
@@ -4623,6 +4638,42 @@ def extract_company_website(page: ParsedPage, profile_url: str) -> str:
     return ""
 
 
+def normalize_booth_number_candidate(value: str) -> str:
+    cleaned = normalize_text(value).upper().strip(" :#,-")
+    if not cleaned:
+        return ""
+    if not re.fullmatch(r"(?=.*\d)[A-Z0-9]{1,8}(?:[-/][A-Z0-9]{1,8})*", cleaned):
+        return ""
+    return cleaned
+
+
+def extract_booth_number_from_profile(
+    page: ParsedPage,
+    html_text: str,
+) -> str:
+    searchable_texts = [
+        page.title,
+        *page.h1_texts,
+        *(container.text for container in page.containers[:80]),
+        *(anchor.display_text for anchor in page.anchors[:80]),
+        *(action.display_text for action in page.actions[:40]),
+        strip_tags(SCRIPT_STYLE_RE.sub(" ", html_text or "")),
+    ]
+
+    for raw_text in searchable_texts:
+        text = normalize_text(raw_text)
+        if not text:
+            continue
+        for pattern in (PROFILE_BOOTH_LABEL_RE, PROFILE_BOOTH_REVERSE_LABEL_RE):
+            match = pattern.search(text)
+            if not match:
+                continue
+            booth_number = normalize_booth_number_candidate(match.group("booth"))
+            if booth_number:
+                return booth_number
+    return ""
+
+
 def company_name_brand_key(text: str) -> str:
     tokens = canonical_label(normalize_seed_company_name(text)).split()
     filtered_tokens = [
@@ -5921,36 +5972,45 @@ def collect_entries_with_agent_fallback(
     return entries, adapter_title
 
 
-def scrape_profile_website(profile_url: str) -> str:
+def scrape_profile_details(profile_url: str) -> tuple[str, str]:
     profile_html = fetch_html(profile_url)
     embedded_url = extract_embedded_js_url(profile_html, MYS_WEBSITE_FIELDS)
-    if embedded_url:
-        return embedded_url
     profile_page = parse_page(profile_url, profile_html)
-    return extract_company_website(profile_page, profile_url)
+    booth_number = extract_booth_number_from_profile(profile_page, profile_html)
+    if embedded_url:
+        return embedded_url, booth_number
+    return extract_company_website(profile_page, profile_url), booth_number
+
+
+def scrape_profile_website(profile_url: str) -> str:
+    website_url, _booth_number = scrape_profile_details(profile_url)
+    return website_url
 
 
 def scrape_profile_website_with_browser(
     profile_url: str,
     browser_renderer: BrowserRenderer,
-) -> str:
+) -> tuple[str, str]:
     profile_html = fetch_html(profile_url)
     embedded_url = extract_embedded_js_url(profile_html, MYS_WEBSITE_FIELDS)
-    if embedded_url:
-        return embedded_url
-
     profile_page = parse_page(profile_url, profile_html)
+    booth_number = extract_booth_number_from_profile(profile_page, profile_html)
+    if embedded_url:
+        return embedded_url, booth_number
+
     website_url = extract_company_website(profile_page, profile_url)
-    if website_url:
-        return website_url
+    if website_url and booth_number:
+        return website_url, booth_number
 
     rendered_profile_url, rendered_html = browser_renderer.render(profile_url)
     embedded_url = extract_embedded_js_url(rendered_html, MYS_WEBSITE_FIELDS)
-    if embedded_url:
-        return embedded_url
-
     rendered_page = parse_page(rendered_profile_url, rendered_html)
-    return extract_company_website(rendered_page, rendered_profile_url)
+    rendered_booth_number = extract_booth_number_from_profile(rendered_page, rendered_html)
+    if embedded_url:
+        return embedded_url, booth_number or rendered_booth_number
+
+    rendered_website_url = extract_company_website(rendered_page, rendered_profile_url)
+    return rendered_website_url or website_url, booth_number or rendered_booth_number
 
 
 def collect_company_records(
@@ -5994,17 +6054,18 @@ def collect_company_records(
 
     with ThreadPoolExecutor(max_workers=workers) as executor:
         future_to_entry = {
-            executor.submit(scrape_profile_website, entry.profile_url): entry
+            executor.submit(scrape_profile_details, entry.profile_url): entry
             for entry in pending_entries
         }
 
         for future in as_completed(future_to_entry):
             entry = future_to_entry[future]
             try:
-                website_url = future.result()
+                website_url, scraped_booth_number = future.result()
             except Exception as exc:  # noqa: BLE001
                 failures += 1
                 website_url = ""
+                scraped_booth_number = ""
                 print(
                     f"Profile scrape failed for {entry.profile_url}: {exc}",
                     file=sys.stderr,
@@ -6018,7 +6079,7 @@ def collect_company_records(
                     company_name=entry.company_name,
                     profile_url=entry.profile_url,
                     website_url=website_url,
-                    booth_number=entry.booth_number,
+                    booth_number=entry.booth_number or scraped_booth_number,
                 )
             )
 
@@ -6039,22 +6100,23 @@ def collect_company_records(
         for position, index in enumerate(pending_browser_indices, start=1):
             record = records[index]
             try:
-                browser_url = scrape_profile_website_with_browser(
+                browser_url, browser_booth_number = scrape_profile_website_with_browser(
                     record.profile_url,
                     browser_renderer=browser_renderer,
                 )
             except Exception:  # noqa: BLE001
                 browser_url = ""
-
+                browser_booth_number = ""
             browser_url = validated_company_website_url(record.company_name, browser_url)
-            if browser_url:
+            resolved_booth_number = record.booth_number or browser_booth_number
+            if browser_url or resolved_booth_number != record.booth_number:
                 records[index] = CompanyRecord(
                     sort_index=record.sort_index,
                     directory_page=record.directory_page,
                     company_name=record.company_name,
                     profile_url=record.profile_url,
-                    website_url=browser_url,
-                    booth_number=record.booth_number,
+                    website_url=browser_url or record.website_url,
+                    booth_number=resolved_booth_number,
                 )
 
             if position == len(pending_browser_indices) or position % 10 == 0:

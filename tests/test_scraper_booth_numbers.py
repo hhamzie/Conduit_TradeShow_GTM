@@ -4,7 +4,13 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from scraper import CompanyRecord, extract_table_row_entries, write_csv
+from scraper import (
+    CompanyRecord,
+    extract_booth_number_from_profile,
+    extract_table_row_entries,
+    parse_page,
+    write_csv,
+)
 
 
 class BoothNumberTests(unittest.TestCase):
@@ -59,6 +65,23 @@ class BoothNumberTests(unittest.TestCase):
 
         self.assertIn("booth_number", text)
         self.assertIn("C21", text)
+
+    def test_extract_booth_number_from_profile_looks_for_labeled_value(self) -> None:
+        html = """
+        <html>
+          <head><title>Acme Packaging</title></head>
+          <body>
+            <main>
+              <h1>Acme Packaging</h1>
+              <p>Booth: C21</p>
+            </main>
+          </body>
+        </html>
+        """
+
+        page = parse_page("https://example.com/exhibitor/acme", html)
+        booth_number = extract_booth_number_from_profile(page, html)
+        self.assertEqual(booth_number, "C21")
 
 
 if __name__ == "__main__":
