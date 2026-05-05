@@ -44,46 +44,171 @@
 
 {% block content %}
 <section class="panel hero-panel">
-  <div class="panel-head">
+  <div class="hero-grid">
     <div>
-      <h1>Trade Show Dashboard</h1>
-      <p>Upload shows, let the worker handle timing, and review completed exports before Clay takes over.</p>
+      <p class="hero-kicker">Trade Show Ops</p>
+      <h1>Pick what you want back.</h1>
+      <p class="hero-copy">If you want one CSV now, use the single-show scraper. If you want many CSVs fast, use the bulk path. If you want the app to manage Clay and Smartlead for you, use the automation lane.</p>
+    </div>
+    <div class="hero-aside">
+      <div class="hero-pill">3 ways in</div>
+      <p>All three flows keep the website/domain-only guardrail. The first two are immediate scrape tools. The third is the longer-running outbound workflow.</p>
     </div>
   </div>
-  <form class="upload-form" action="/shows/import" method="post" enctype="multipart/form-data">
-    <label>
-      <span>Trade show CSV</span>
-      <input type="file" name="file" accept=".csv" required />
-    </label>
-    <label>
-      <span>Run days before show</span>
-      <input type="number" name="run_offset_days" value="{{ default_offset }}" min="0" max="60" required />
-    </label>
-    <button type="submit">Upload Schedule</button>
-  </form>
-  <form class="upload-form" action="/shows/add" method="post">
-    <label>
-      <span>Show name</span>
-      <input type="text" name="show_name" placeholder="High Point Market" required />
-    </label>
-    <label>
-      <span>Show date</span>
-      <input type="text" name="event_date" placeholder="2026-10-24 or Oct 24, 2026" required />
-    </label>
-    <label>
-      <span>Place</span>
-      <input type="text" name="place" placeholder="High Point, NC" required />
-    </label>
-    <label>
-      <span>Directory URL</span>
-      <input type="url" name="link" placeholder="https://example.com/exhibitors" required />
-    </label>
-    <label>
-      <span>Run days before show</span>
-      <input type="number" name="run_offset_days" value="{{ default_offset }}" min="0" max="60" required />
-    </label>
-    <button type="submit">Add Single Show</button>
-  </form>
+</section>
+
+<section class="panel quick-guide">
+  <div class="panel-head">
+    <div>
+      <h2>How To Choose</h2>
+      <p>Use the lane that matches the output you want, not just the input you have.</p>
+    </div>
+  </div>
+  <div class="guide-grid">
+    <article class="guide-card">
+      <span class="guide-label">Fastest</span>
+      <h3>One show, one CSV</h3>
+      <p>Use this when you have a single directory URL and just want the cleaned company export back right away.</p>
+    </article>
+    <article class="guide-card">
+      <span class="guide-label">Batch</span>
+      <h3>Many shows, many CSVs</h3>
+      <p>Use this when you have a spreadsheet of trade shows and want a ZIP file with one CSV per show plus a manifest.</p>
+    </article>
+    <article class="guide-card">
+      <span class="guide-label">Outbound</span>
+      <h3>Clay plus Smartlead automation</h3>
+      <p>Use this when you want the app to own the pipeline after scraping: Clay enrichment, Smartlead campaign prep, and launch control.</p>
+    </article>
+  </div>
+</section>
+
+<section class="lane-grid">
+  <article class="panel lane-card lane-card-single">
+    <div class="lane-head">
+      <div class="lane-topline">
+        <span class="lane-step">Option 1</span>
+        <span class="lane-state lane-state-live">Works now</span>
+      </div>
+      <h2>Scrape One Trade Show</h2>
+    </div>
+    <p class="lane-copy">Best for one-off links or messy directories where the browser-assisted agentic pass gives you the highest hit rate.</p>
+    <div class="lane-points">
+      <p><strong>Input:</strong> One directory or regular trade show link</p>
+      <p><strong>Output:</strong> One cleaned CSV download</p>
+      <p><strong>Best when:</strong> You want the highest-confidence scrape for a single event</p>
+    </div>
+    {% if single_scrape_error %}
+    <p class="error-inline">{{ single_scrape_error }}</p>
+    {% endif %}
+    <form class="lane-form lane-form-single" action="/scrape/single" method="post">
+      <label>
+        <span>Show name</span>
+        <input type="text" name="show_name" placeholder="Luxe Pack" required />
+      </label>
+      <label>
+        <span>Show date</span>
+        <input type="text" name="event_date" placeholder="2026-05-06" />
+      </label>
+      <label>
+        <span>Place</span>
+        <input type="text" name="place" placeholder="New York City, NY" required />
+      </label>
+      <label class="lane-form-wide">
+        <span>Directory or show link</span>
+        <input type="url" name="link" placeholder="https://example.com/exhibitors" required />
+      </label>
+      <button type="submit">Scrape and Download CSV</button>
+    </form>
+    <p class="mini-note">Returns one cleaned CSV right away.</p>
+  </article>
+
+  <article class="panel lane-card lane-card-bulk">
+    <div class="lane-head">
+      <div class="lane-topline">
+        <span class="lane-step">Option 2</span>
+        <span class="lane-state lane-state-live">Works now</span>
+      </div>
+      <h2>Scrape Many Trade Shows</h2>
+    </div>
+    <p class="lane-copy">Upload a CSV of shows and get back a ZIP bundle with one CSV per show plus a manifest so failed rows are easy to spot.</p>
+    <div class="lane-points">
+      <p><strong>Input:</strong> CSV of trade shows</p>
+      <p><strong>Output:</strong> ZIP archive with one CSV per show plus `manifest.csv`</p>
+      <p><strong>Best when:</strong> You want batch scraping without turning on Clay or Smartlead</p>
+    </div>
+    {% if bulk_scrape_error %}
+    <p class="error-inline">{{ bulk_scrape_error }}</p>
+    {% endif %}
+    <form class="lane-form lane-form-bulk" action="/scrape/bulk" method="post" enctype="multipart/form-data">
+      <label class="lane-form-wide">
+        <span>Trade show CSV</span>
+        <input type="file" name="file" accept=".csv" required />
+      </label>
+      <button type="submit">Run Bulk Scrape and Download ZIP</button>
+    </form>
+    <p class="mini-note">Expected columns: <strong>Show</strong>, <strong>Date</strong>, <strong>Place</strong>, <strong>Link</strong>.</p>
+  </article>
+
+  <article class="panel lane-card lane-card-automation">
+    <div class="lane-head">
+      <div class="lane-topline">
+        <span class="lane-step">Option 3</span>
+        <span class="lane-state lane-state-setup">Needs Clay + Smartlead setup</span>
+      </div>
+      <h2>Automate Clay + Smartlead</h2>
+    </div>
+    <p class="lane-copy">Queue one trade show or a whole CSV into the automated pipeline. The worker scrapes, provisions the Clay table, waits for enrichment, then builds the Smartlead campaign for launch.</p>
+    <div class="lane-points">
+      <p><strong>Input:</strong> One show or a CSV of shows</p>
+      <p><strong>Output:</strong> Show-specific Clay table, enriched CSVs, and a show-specific Smartlead campaign</p>
+      <p><strong>Best when:</strong> You want ongoing outbound ops instead of just scrape files</p>
+    </div>
+    <div class="show-notice show-notice-warning compact-notice">
+      <strong>What still needs your setup</strong>
+      <p>Create the Clay template table, add the row status column, and set the real Clay and Smartlead env vars in Render before relying on this flow in production.</p>
+    </div>
+    {% if automation_error %}
+    <p class="error-inline">{{ automation_error }}</p>
+    {% endif %}
+    <div class="stacked-forms">
+      <form class="lane-form lane-form-automation" action="/shows/add" method="post">
+        <label>
+          <span>Show name</span>
+          <input type="text" name="show_name" placeholder="High Point Market" required />
+        </label>
+        <label>
+          <span>Show date</span>
+          <input type="text" name="event_date" placeholder="2026-10-24 or Oct 24, 2026" required />
+        </label>
+        <label>
+          <span>Place</span>
+          <input type="text" name="place" placeholder="High Point, NC" required />
+        </label>
+        <label class="lane-form-wide">
+          <span>Directory or show link</span>
+          <input type="url" name="link" placeholder="https://example.com/exhibitors" required />
+        </label>
+        <label>
+          <span>Run days before show</span>
+          <input type="number" name="run_offset_days" value="{{ default_offset }}" min="0" max="60" required />
+        </label>
+        <button type="submit">Queue One Show for Automation</button>
+      </form>
+
+      <form class="lane-form lane-form-automation-bulk" action="/shows/import" method="post" enctype="multipart/form-data">
+        <label class="lane-form-wide">
+          <span>Trade show CSV</span>
+          <input type="file" name="file" accept=".csv" required />
+        </label>
+        <label>
+          <span>Run days before show</span>
+          <input type="number" name="run_offset_days" value="{{ default_offset }}" min="0" max="60" required />
+        </label>
+        <button type="submit">Queue CSV for Automation</button>
+      </form>
+    </div>
+  </article>
 </section>
 
 <section class="stats-grid stats-grid-compact">

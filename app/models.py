@@ -50,13 +50,28 @@ class Show(Base):
     approval_required: Mapped[bool] = mapped_column(Boolean(), default=True)
     approved_at: Mapped[datetime | None] = mapped_column(DateTime(), nullable=True)
     latest_export_path: Mapped[str] = mapped_column(Text(), default="")
+    enriched_export_path: Mapped[str] = mapped_column(Text(), default="")
+    smartlead_ready_export_path: Mapped[str] = mapped_column(Text(), default="")
     company_count: Mapped[int] = mapped_column(Integer(), default=0)
     failure_count: Mapped[int] = mapped_column(Integer(), default=0)
+    clay_table_id: Mapped[str] = mapped_column(Text(), default="")
+    clay_table_name: Mapped[str] = mapped_column(Text(), default="")
+    clay_table_url: Mapped[str] = mapped_column(Text(), default="")
+    clay_last_polled_at: Mapped[datetime | None] = mapped_column(DateTime(), nullable=True)
+    clay_last_imported_at: Mapped[datetime | None] = mapped_column(DateTime(), nullable=True)
+    clay_total_rows: Mapped[int] = mapped_column(Integer(), default=0)
+    clay_ready_rows: Mapped[int] = mapped_column(Integer(), default=0)
+    clay_failed_rows: Mapped[int] = mapped_column(Integer(), default=0)
+    clay_skipped_rows: Mapped[int] = mapped_column(Integer(), default=0)
     last_error: Mapped[str] = mapped_column(Text(), default="")
     notification_status: Mapped[str] = mapped_column(String(32), default=ProviderStatus.pending.value)
     clay_status: Mapped[str] = mapped_column(String(32), default=ProviderStatus.pending.value)
     heyreach_status: Mapped[str] = mapped_column(String(32), default=ProviderStatus.pending.value)
     smartlead_status: Mapped[str] = mapped_column(String(32), default=ProviderStatus.pending.value)
+    smartlead_campaign_id: Mapped[int | None] = mapped_column(Integer(), nullable=True)
+    smartlead_campaign_name: Mapped[str] = mapped_column(Text(), default="")
+    smartlead_imported_at: Mapped[datetime | None] = mapped_column(DateTime(), nullable=True)
+    smartlead_imported_rows: Mapped[int] = mapped_column(Integer(), default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(), server_default=func.now(), onupdate=func.now())
 
@@ -64,6 +79,11 @@ class Show(Base):
         back_populates="show",
         cascade="all, delete-orphan",
         order_by="CampaignRun.created_at.desc()",
+    )
+    clay_rows: Mapped[list["ClaySyncRow"]] = relationship(
+        back_populates="show",
+        cascade="all, delete-orphan",
+        order_by="ClaySyncRow.id.asc()",
     )
 
 
@@ -82,3 +102,24 @@ class CampaignRun(Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(), nullable=True)
 
     show: Mapped[Show] = relationship(back_populates="runs")
+
+
+class ClaySyncRow(Base):
+    __tablename__ = "clay_sync_rows"
+    __table_args__ = (
+        UniqueConstraint("show_id", "clay_row_id", name="uq_clay_sync_rows_show_row"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    show_id: Mapped[int] = mapped_column(ForeignKey("shows.id", ondelete="CASCADE"))
+    clay_row_id: Mapped[str] = mapped_column(String(255))
+    row_status: Mapped[str] = mapped_column(String(64), default="")
+    email: Mapped[str] = mapped_column(String(255), default="")
+    row_hash: Mapped[str] = mapped_column(String(64), default="")
+    imported_to_smartlead: Mapped[bool] = mapped_column(Boolean(), default=False)
+    imported_at: Mapped[datetime | None] = mapped_column(DateTime(), nullable=True)
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(), server_default=func.now(), onupdate=func.now())
+
+    show: Mapped[Show] = relationship(back_populates="clay_rows")

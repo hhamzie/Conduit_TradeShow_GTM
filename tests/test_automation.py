@@ -1,0 +1,238 @@
+from __future__ import annotations
+
+from datetime import date, datetime
+from pathlib import Path
+import tempfile
+import unittest
+import zipfile
+from unittest.mock import patch
+
+from sqlalchemy import create_engine, select
+from sqlalchemy.orm import sessionmaker
+
+from app.database import Base
+from app.models import ClaySyncRow, Show, ShowStatus
+from app.providers import ClayPollResult, ClayRecord, ProviderResult, SmartleadSyncResult
+from app.services import _build_prepared_lead, BulkDirectScrapeResult, DirectScrapeResult, launch_show, run_bulk_direct_scrape, sync_show_from_clay
+
+
+def make_show(**overrides) -> Show:
+    payload = {
+        "name": "Luxe Pack",
+        "event_date": date(2026, 5, 6),
+        "place": "New York City, NY",
+        "source_url": "https://example.com/exhibitors",
+        "run_offset_days": 14,
+        "run_at": datetime(2026, 5, 1, 9, 0),
+        "status": ShowStatus.ready_for_review.value,
+        "latest_export_path": "",
+        "clay_table_id": "tbl_123",
+    }
+    payload.update(overrides)
+    return Show(**payload)
+
+
+class AutomationTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.engine = create_engine("sqlite:///:memory:", future=True)
+        Base.metadata.create_all(self.engine)
+        self.Session = sessionmaker(bind=self.engine, expire_on_commit=False)
+
+    def tearDown(self) -> None:
+        self.engine.dispose()
+
+    def test_build_prepared_lead_uses_aliases_and_requires_domain(self) -> None:
+        show = make_show()
+        cells = {
+            "email_address": "Founder@Acme.com",
+            "first_name": "Ada",
+            "last_name": "Lovelace",
+            "company": "Acme",
+            "title": "Founder",
+            "company_url": "acme.com",
+            "linkedin_url": "https://linkedin.com/in/ada",
+            "phone": "123-456-7890",
+        }
+
+        prepared = _build_prepared_lead(show, "row-1", cells)
+
+        self.assertIsNotNone(prepared)
+        assert prepared is not None
+        self.assertEqual(prepared.csv_row["email"], "founder@acme.com")
+        self.assertEqual(prepared.csv_row["company_domain"], "acme.com")
+        self.assertEqual(prepared.csv_row["website"], "https://acme.com")
+        self.assertEqual(prepared.smartlead_row["company_name"], "Acme")
+        self.assertEqual(prepared.smartlead_row["custom_fields"]["job_title"], "Founder")
+
+        missing_domain = _build_prepared_lead(
+            show,
+            "row-2",
+            {"email": "hi@example.com", "company": "No Domain Inc"},
+        )
+        self.assertIsNone(missing_domain)
+
+    def test_sync_show_from_clay_imports_ready_rows_only_once(self) -> None:
+        with self.Session() as session, tempfile.TemporaryDirectory() as tmp_dir:
+            show = make_show(status=ShowStatus.ready_for_review.value)
+            session.add(show)
+            session.commit()
+
+            poll_result = ClayPollResult(
+                name="clay",
+                status="success",
+                message="ok",
+                records=[
+                    ClayRecord(
+                        clay_row_id="row-ready",
+                        row_status="ready",
+                        cells={
+                            "email": "ada@acme.com",
+                            "first_name": "Ada",
+                            "last_name": "Lovelace",
+                            "company_name": "Acme",
+                            "website": "acme.com",
+                        },
+                    ),
+                    ClayRecord(
+                        clay_row_id="row-failed",
+                        row_status="failed",
+                        cells={"company_name": "Broken Co"},
+                    ),
+                ],
+                total_rows=2,
+                ready_rows=1,
+                failed_rows=1,
+                skipped_rows=0,
+                all_terminal=True,
+            )
+
+            import_result = SmartleadSyncResult(
+                name="smartlead",
+                status="success",
+                message="imported",
+                campaign_id=999,
+                campaign_name="Luxe Pack - 2026-05-06",
+                imported_count=1,
+            )
+
+            raw_path = Path(tmp_dir) / "raw.csv"
+            ready_path = Path(tmp_dir) / "ready.csv"
+            with (
+                patch("app.services.poll_clay_table", return_value=poll_result),
+                patch("app.services.import_ready_rows_to_smartlead", return_value=import_result) as import_mock,
+                patch("app.services.enriched_export_path_for_show", return_value=raw_path),
+                patch("app.services.smartlead_ready_export_path_for_show", return_value=ready_path),
+            ):
+                status = sync_show_from_clay(session, show)
+
+            self.assertEqual(status, "success")
+            self.assertEqual(import_mock.call_count, 1)
+            imported_payload = import_mock.call_args.args[1]
+            self.assertEqual(len(imported_payload), 1)
+            self.assertEqual(show.smartlead_campaign_id, 999)
+            self.assertEqual(show.clay_status, "complete")
+            self.assertEqual(show.smartlead_status, "prepared")
+            self.assertTrue(raw_path.exists())
+            self.assertTrue(ready_path.exists())
+
+            sync_rows = session.scalars(select(ClaySyncRow).order_by(ClaySyncRow.clay_row_id.asc())).all()
+            self.assertEqual(len(sync_rows), 2)
+            self.assertTrue(sync_rows[0].imported_to_smartlead or sync_rows[1].imported_to_smartlead)
+
+            with (
+                patch("app.services.poll_clay_table", return_value=poll_result),
+                patch("app.services.import_ready_rows_to_smartlead", return_value=import_result) as import_mock,
+                patch("app.services.enriched_export_path_for_show", return_value=raw_path),
+                patch("app.services.smartlead_ready_export_path_for_show", return_value=ready_path),
+            ):
+                status = sync_show_from_clay(session, show)
+
+            self.assertEqual(status, "success")
+            self.assertEqual(import_mock.call_count, 0)
+
+    def test_launch_show_requires_terminal_rows_then_activates(self) -> None:
+        with self.Session() as session:
+            show = make_show(
+                status=ShowStatus.approved.value,
+                smartlead_campaign_id=777,
+                smartlead_campaign_name="Luxe Pack - 2026-05-06",
+                clay_total_rows=5,
+                clay_ready_rows=4,
+                clay_failed_rows=0,
+                clay_skipped_rows=0,
+            )
+            session.add(show)
+            session.commit()
+
+            with self.assertRaisesRegex(ValueError, "Clay is still enriching"):
+                launch_show(session, show)
+
+            show.clay_skipped_rows = 1
+            session.commit()
+
+            with patch(
+                "app.services.launch_smartlead_campaign",
+                return_value=ProviderResult("smartlead", "success", "started"),
+            ) as launch_mock:
+                launch_show(session, show)
+
+            self.assertEqual(launch_mock.call_count, 1)
+            self.assertEqual(show.status, ShowStatus.live.value)
+            self.assertEqual(show.smartlead_status, "active")
+
+    def test_run_bulk_direct_scrape_returns_zip_with_manifest(self) -> None:
+        payload = "\n".join(
+            [
+                "Show,Date,Place,Link",
+                "Luxe Pack,2026-05-06,New York City,https://example.com/luxe",
+                "High Point,2026-10-24,High Point,https://example.com/highpoint",
+            ]
+        ).encode("utf-8")
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            archive_path = Path(tmp_dir) / "bulk.zip"
+            created_files = [
+                Path(tmp_dir) / "luxe.csv",
+                Path(tmp_dir) / "highpoint.csv",
+            ]
+            for index, path in enumerate(created_files, start=1):
+                path.write_text("company_name,website_url\nAcme,https://acme.com\n", encoding="utf-8")
+
+            results = [
+                DirectScrapeResult(
+                    output_path=created_files[0],
+                    company_count=10,
+                    failure_count=0,
+                    conference_name="Luxe Pack",
+                    conference_location="New York City",
+                ),
+                DirectScrapeResult(
+                    output_path=created_files[1],
+                    company_count=12,
+                    failure_count=1,
+                    conference_name="High Point",
+                    conference_location="High Point",
+                ),
+            ]
+
+            with (
+                patch("app.services.direct_bulk_archive_path", return_value=archive_path),
+                patch("app.services._run_direct_scrape", side_effect=results),
+            ):
+                result = run_bulk_direct_scrape(payload)
+
+            self.assertIsInstance(result, BulkDirectScrapeResult)
+            self.assertEqual(result.success_count, 2)
+            self.assertTrue(archive_path.exists())
+            with zipfile.ZipFile(archive_path) as archive:
+                names = set(archive.namelist())
+                self.assertIn("manifest.csv", names)
+                self.assertIn("luxe-pack_2026-05-06.csv", names)
+                self.assertIn("high-point_2026-10-24.csv", names)
+                manifest_text = archive.read("manifest.csv").decode("utf-8")
+                self.assertIn("Luxe Pack", manifest_text)
+                self.assertIn("High Point", manifest_text)
+
+
+if __name__ == "__main__":
+    unittest.main()

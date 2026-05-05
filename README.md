@@ -11,10 +11,14 @@ This repo now contains two layers:
 - Store shows in a database
 - Wait until the configured trigger window before the show date
 - Run the scraper with input-driven `Conference` and `Location`
+- Use an OpenAI-backed fallback only when heuristic discovery stalls, if `OPENAI_API_KEY` is configured
 - Save the export path and scrape run history
-- Push scraper rows into Clay when a supported Clay transport is configured
-- Accept a Clay-enriched CSV upload per show, clean it, and keep a Smartlead-ready export
+- Duplicate one Clay template table per show when template-table automation is configured
+- Push scraper rows into that show-specific Clay table
+- Poll Clay for row-level enrichment status and rebuild both the raw enriched CSV and Smartlead-ready CSV automatically
 - Create or reuse one Smartlead campaign per trade show instead of merging every show into one campaign
+- Import only newly ready Clay rows into Smartlead and avoid double-importing the same Clay row
+- Keep launch manual, but pause every other active Smartlead campaign before starting the selected show
 - Notify operators by email when a show is ready for review
 - Support approval before downstream outreach syncs
 
@@ -157,16 +161,59 @@ The app supports two Clay delivery modes:
 - `CLAY_SESSION_COOKIE` + `CLAY_INPUT_TABLE_ID`
   This uses Clay's live table HTTP endpoints. In my testing, `CLAY_API_KEY` alone was not enough for those endpoints; Clay returned `401 You must be logged in`.
 
-If neither of those is configured, the app will still scrape successfully, but Clay sync will be marked as skipped.
+For the automated per-show flow on this branch, use:
+
+- `CLAY_SESSION_COOKIE`
+- `CLAY_TEMPLATE_TABLE_ID`
+- `CLAY_ROW_STATUS_COLUMN`
+
+Recommended terminal values:
+
+- `CLAY_READY_STATUS_VALUE=ready`
+- `CLAY_FAILED_STATUS_VALUE=failed`
+- `CLAY_SKIPPED_STATUS_VALUE=skip`
+
+Flow:
+
+1. The app duplicates the template table once per show.
+2. The scraper export is pushed into that dedicated Clay table.
+3. Clay enriches rows and sets the configured row status column.
+4. The worker polls the table and imports only rows marked `ready`.
+5. The show becomes launch-ready only after every row is terminal (`ready`, `failed`, or `skip`).
+
+If neither template-table automation nor webhook/direct-table input is configured, the app will still scrape successfully, but Clay sync will be marked as skipped.
+
+## Agent fallback
+
+The scraper still uses the fast heuristic path first, but it can now call an OpenAI-backed directory recovery step when discovery stalls.
+
+Relevant settings:
+
+- `OPENAI_API_KEY`
+- `SCRAPER_AGENT_MODE`
+- `SCRAPER_AGENT_MODEL`
+
+Modes:
+
+- `off`
+- `fallback`
+- `always`
+
+Recommended default:
+
+- `SCRAPER_AGENT_MODE=fallback`
+
+That keeps normal directories fast and cheap, while giving weird layouts a second recovery pass before the scrape fails.
 
 ## Smartlead integration
 
-The Smartlead flow now works per show:
+The Smartlead flow works per show:
 
-- the scraper export still goes into Clay
-- Clay can automatically POST enriched rows back into this app through the callback endpoint
-- the app cleans and deduplicates the rows, saves a Smartlead-ready CSV, and syncs it into a unique Smartlead campaign for that show
-- if no other app-managed Smartlead campaign is active, the worker can activate the next ready show automatically; otherwise it waits its turn
+- the scraper export still goes into Clay first
+- the app polls Clay back instead of relying on a callback
+- the app cleans and deduplicates ready rows, saves a Smartlead-ready CSV, and syncs them into a unique Smartlead campaign for that show
+- the campaign stays paused until you approve and launch it from the dashboard
+- when you launch one show, the app pauses every other active Smartlead campaign first
 
 Required setting:
 
@@ -177,37 +224,29 @@ Optional settings:
 - `SMARTLEAD_BASE_URL`
 - `SMARTLEAD_CLIENT_ID`
 - `SMARTLEAD_TEMPLATE_CAMPAIGN_ID`
-- `CLAY_CALLBACK_TOKEN`
 
 If `SMARTLEAD_TEMPLATE_CAMPAIGN_ID` is set, newly created show-specific campaigns will attempt to copy the template campaign's sender accounts, sequences, and basic schedule/settings before importing leads.
 
-### Clay callback automation
+### Clay template table
 
-To remove the manual Clay CSV export/upload step, create an `HTTP API` enrichment/action in Clay that `POST`s each enriched row to:
+Create one master Clay template table before testing the automated flow. That table should include:
 
-`POST /api/clay/enriched-row`
-
-Add header:
-
-- `X-Clay-Token: <CLAY_CALLBACK_TOKEN>`
-
-Include at least these fields in the JSON body:
-
+- the incoming scraper columns you want to enrich
 - `show_id`
-- `email`
-- `first_name`
-- `last_name`
-- `company_name`
+- `show_name`
+- `show_date`
+- `show_place`
+- `scraped_at`
+- `source_url`
+- one row-level status column, usually `enriched_status`
 
-Recommended extras:
+Recommended status values:
 
-- `job_title` or `title`
-- `website`
-- `linkedin_url`
-- `phone_number`
-- `clay_row_id` or another stable row identifier
+- `ready`
+- `failed`
+- `skip`
 
-The app uses `show_id` to route the row back to the correct trade show and rebuilds the Smartlead-ready export automatically.
+The app duplicates that template per show and uses the row status column as the source of truth for readiness.
 
 ## Email notifications
 

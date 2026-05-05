@@ -15,7 +15,19 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from app.config import BASE_DIR, get_settings
 from app.database import get_db, init_db
-from app.services import approve_show, create_or_update_show, get_show, import_shows_from_csv, list_shows, queue_show_now
+from app.services import (
+    approve_show,
+    create_or_update_show,
+    get_show,
+    import_shows_from_csv,
+    launch_show,
+    list_shows,
+    pause_show,
+    queue_show_now,
+    run_bulk_direct_scrape,
+    run_single_show_scrape,
+    sync_show_from_clay,
+)
 
 
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
@@ -89,6 +101,16 @@ def build_show_notice(show) -> dict[str, str] | None:
             tone = "warning"
             title = "Clay upload needs retry"
             details.append("The export finished, but Clay throttled or rejected the row push.")
+        elif show.clay_status == "polling":
+            tone = "warning" if show.status == "approved" else "success"
+            title = "Clay enrichment in progress"
+            details.append(
+                f"Clay has {show.clay_ready_rows}/{show.clay_total_rows or show.company_count} rows ready so far."
+            )
+        elif show.clay_status == "complete":
+            details.append(
+                f"Clay resolved all {show.clay_total_rows} rows. Ready: {show.clay_ready_rows}, failed: {show.clay_failed_rows}, skipped: {show.clay_skipped_rows}."
+            )
         elif show.clay_status == "success":
             details.append("Rows were sent to Clay.")
 
@@ -97,6 +119,26 @@ def build_show_notice(show) -> dict[str, str] | None:
             if title == "Scrape completed":
                 title = "Email notification needs retry"
             details.append("The export is ready, but the Outlook notification email did not send.")
+
+        if show.smartlead_status == "syncing":
+            details.append(
+                f"Smartlead has processed {show.smartlead_imported_rows} ready row(s) into {show.smartlead_campaign_name or 'the show campaign'}."
+            )
+        elif show.smartlead_status == "ready_to_launch":
+            tone = "success"
+            title = "Smartlead campaign ready"
+            details.append("All Clay rows are resolved and the Smartlead campaign is ready to launch.")
+        elif show.smartlead_status == "active":
+            title = "Smartlead campaign live"
+            details.append("This show's Smartlead campaign is currently active.")
+        elif show.smartlead_status == "paused":
+            tone = "warning"
+            title = "Smartlead campaign paused"
+            details.append("The Smartlead campaign is prepared but currently paused.")
+        elif show.smartlead_status == "failed":
+            tone = "warning"
+            title = "Smartlead sync needs retry"
+            details.append("The Clay pull succeeded, but the latest Smartlead sync failed.")
 
         if not details:
             details.append(f"{show.company_count} companies were exported and are ready for review.")
@@ -137,8 +179,15 @@ def format_run_at_label(show, now: datetime) -> str:
 
 
 def provider_status_summary(show) -> str:
-    if show.clay_status == "success":
-        return "Clay received the export."
+    if show.clay_status == "complete":
+        return f"Clay resolved {show.clay_total_rows} rows and Smartlead processed {show.smartlead_imported_rows}."
+    if show.clay_status == "polling":
+        total_rows = show.clay_total_rows or show.company_count
+        return f"Clay is enriching rows ({show.clay_ready_rows}/{total_rows} ready)."
+    if show.smartlead_status == "ready_to_launch":
+        return "Smartlead campaign is prepared and ready to launch."
+    if show.smartlead_status == "active":
+        return "Smartlead campaign is active."
     if show.clay_status == "failed":
         return "Clay push needs a retry."
     if show.company_count > 0:
@@ -181,6 +230,12 @@ def describe_show_flow(show, now: datetime) -> dict[str, str]:
         }
 
     if show.status == "ready_for_review":
+        if show.clay_status in {"polling", "complete"}:
+            return {
+                "section": "completed",
+                "step": "Reviewing Clay enrichment",
+                "next_action": "Clay is syncing back automatically. Approve the show when you want it launch-ready later.",
+            }
         return {
             "section": "completed",
             "step": "Ready for review",
@@ -188,17 +243,23 @@ def describe_show_flow(show, now: datetime) -> dict[str, str]:
         }
 
     if show.status == "approved":
+        if show.smartlead_status == "ready_to_launch":
+            return {
+                "section": "completed",
+                "step": "Ready to launch",
+                "next_action": "Launch the Smartlead campaign when you want this show to go live.",
+            }
         return {
             "section": "completed",
             "step": "Approved",
-            "next_action": "Waiting on the downstream outbound sync.",
+            "next_action": "Clay and Smartlead are still preparing the campaign.",
         }
 
     if show.status == "live":
         return {
             "section": "completed",
-            "step": "Completed",
-            "next_action": "This show has already run through the flow.",
+            "step": "Campaign live",
+            "next_action": "This show's Smartlead campaign is active.",
         }
 
     return {
@@ -328,6 +389,9 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
             "request": request,
             "app_name": settings.app_name,
             "default_offset": settings.default_run_offset_days,
+            "single_scrape_error": request.session.pop("single_scrape_error", ""),
+            "bulk_scrape_error": request.session.pop("bulk_scrape_error", ""),
+            "automation_error": request.session.pop("automation_error", ""),
             "active": active,
             "scheduled_later": scheduled_later,
             "completed": completed,
@@ -358,7 +422,8 @@ async def import_shows(
     try:
         import_shows_from_csv(db, payload, run_offset_days)
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        request.session["automation_error"] = str(exc)
+        return RedirectResponse("/", status_code=status.HTTP_303_SEE_OTHER)
     return RedirectResponse("/", status_code=status.HTTP_303_SEE_OTHER)
 
 
@@ -383,9 +448,66 @@ def add_single_show(
             run_offset_days=run_offset_days,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        request.session["automation_error"] = str(exc)
+        return RedirectResponse("/", status_code=status.HTTP_303_SEE_OTHER)
     db.commit()
     return RedirectResponse("/", status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.post("/scrape/single")
+def scrape_single_show(
+    request: Request,
+    show_name: str = Form(...),
+    event_date: str = Form(""),
+    place: str = Form(...),
+    link: str = Form(...),
+):
+    require_authenticated(request)
+    try:
+        result = run_single_show_scrape(
+            show_name=show_name,
+            event_date_raw=event_date,
+            place=place,
+            link=link,
+        )
+    except ValueError as exc:
+        request.session["single_scrape_error"] = str(exc)
+        return RedirectResponse("/", status_code=status.HTTP_303_SEE_OTHER)
+    except Exception as exc:  # noqa: BLE001
+        request.session["single_scrape_error"] = str(exc)
+        return RedirectResponse("/", status_code=status.HTTP_303_SEE_OTHER)
+
+    return FileResponse(
+        result.output_path,
+        filename=result.output_path.name,
+        media_type="text/csv",
+    )
+
+
+@app.post("/scrape/bulk")
+async def scrape_many_shows(
+    request: Request,
+    file: UploadFile = File(...),
+):
+    require_authenticated(request)
+    payload = await file.read()
+    if not payload:
+        request.session["bulk_scrape_error"] = "The uploaded CSV was empty."
+        return RedirectResponse("/", status_code=status.HTTP_303_SEE_OTHER)
+    try:
+        result = run_bulk_direct_scrape(payload)
+    except ValueError as exc:
+        request.session["bulk_scrape_error"] = str(exc)
+        return RedirectResponse("/", status_code=status.HTTP_303_SEE_OTHER)
+    except Exception as exc:  # noqa: BLE001
+        request.session["bulk_scrape_error"] = str(exc)
+        return RedirectResponse("/", status_code=status.HTTP_303_SEE_OTHER)
+
+    return FileResponse(
+        result.archive_path,
+        filename=result.archive_path.name,
+        media_type="application/zip",
+    )
 
 
 @app.post("/shows/delete-all")
@@ -415,6 +537,8 @@ def show_detail(show_id: int, request: Request, db: Session = Depends(get_db)):
     if show is None:
         raise HTTPException(status_code=404, detail="Show not found.")
     export_path = Path(show.latest_export_path) if show.latest_export_path else None
+    enriched_export_path = Path(show.enriched_export_path) if show.enriched_export_path else None
+    smartlead_ready_path = Path(show.smartlead_ready_export_path) if show.smartlead_ready_export_path else None
     return templates.TemplateResponse(
         "show_detail.html",
         {
@@ -422,6 +546,8 @@ def show_detail(show_id: int, request: Request, db: Session = Depends(get_db)):
             "app_name": settings.app_name,
             "show": show,
             "export_path": export_path,
+            "enriched_export_path": enriched_export_path,
+            "smartlead_ready_path": smartlead_ready_path,
             "notice": build_show_notice(show),
             "error_summary": summarize_show_error(show.last_error),
         },
@@ -463,6 +589,34 @@ def download_export(show_id: int, request: Request, db: Session = Depends(get_db
     return FileResponse(export_path, filename=export_path.name, media_type="text/csv")
 
 
+@app.get("/shows/{show_id}/enriched-export")
+def download_enriched_export(show_id: int, request: Request, db: Session = Depends(get_db)):
+    require_authenticated(request)
+    show = get_show(db, show_id)
+    if show is None or not show.enriched_export_path:
+        raise HTTPException(status_code=404, detail="Enriched export not found.")
+
+    export_path = Path(show.enriched_export_path)
+    if not export_path.exists():
+        raise HTTPException(status_code=404, detail="Enriched export file no longer exists.")
+
+    return FileResponse(export_path, filename=export_path.name, media_type="text/csv")
+
+
+@app.get("/shows/{show_id}/smartlead-export")
+def download_smartlead_export(show_id: int, request: Request, db: Session = Depends(get_db)):
+    require_authenticated(request)
+    show = get_show(db, show_id)
+    if show is None or not show.smartlead_ready_export_path:
+        raise HTTPException(status_code=404, detail="Smartlead-ready export not found.")
+
+    export_path = Path(show.smartlead_ready_export_path)
+    if not export_path.exists():
+        raise HTTPException(status_code=404, detail="Smartlead-ready export file no longer exists.")
+
+    return FileResponse(export_path, filename=export_path.name, media_type="text/csv")
+
+
 @app.post("/shows/{show_id}/approve")
 def approve_show_route(show_id: int, request: Request, db: Session = Depends(get_db)):
     require_authenticated(request)
@@ -470,4 +624,40 @@ def approve_show_route(show_id: int, request: Request, db: Session = Depends(get
     if show is None:
         raise HTTPException(status_code=404, detail="Show not found.")
     approve_show(db, show)
+    return RedirectResponse(f"/shows/{show_id}", status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.post("/shows/{show_id}/sync-clay")
+def sync_show_from_clay_route(show_id: int, request: Request, db: Session = Depends(get_db)):
+    require_authenticated(request)
+    show = get_show(db, show_id)
+    if show is None:
+        raise HTTPException(status_code=404, detail="Show not found.")
+    sync_show_from_clay(db, show)
+    return RedirectResponse(f"/shows/{show_id}", status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.post("/shows/{show_id}/launch")
+def launch_show_route(show_id: int, request: Request, db: Session = Depends(get_db)):
+    require_authenticated(request)
+    show = get_show(db, show_id)
+    if show is None:
+        raise HTTPException(status_code=404, detail="Show not found.")
+    try:
+        launch_show(db, show)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return RedirectResponse(f"/shows/{show_id}", status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.post("/shows/{show_id}/pause")
+def pause_show_route(show_id: int, request: Request, db: Session = Depends(get_db)):
+    require_authenticated(request)
+    show = get_show(db, show_id)
+    if show is None:
+        raise HTTPException(status_code=404, detail="Show not found.")
+    try:
+        pause_show(db, show)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return RedirectResponse(f"/shows/{show_id}", status_code=status.HTTP_303_SEE_OTHER)

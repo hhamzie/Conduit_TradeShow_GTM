@@ -16,6 +16,7 @@
       <p><span class="status status-{{ show.status }}">{{ show.status }}</span></p>
       <p class="muted">Scheduled run: {{ show.run_at }}</p>
       <p class="muted">Approval required: {{ "yes" if show.approval_required else "no" }}</p>
+      <p class="muted">Approved at: {{ show.approved_at if show.approved_at else "-" }}</p>
     </div>
     <div class="detail-card">
       <h2>Results</h2>
@@ -27,14 +28,29 @@
       {% else %}
       <p class="muted">No export yet</p>
       {% endif %}
+      {% if enriched_export_path %}
+      <p><a href="/shows/{{ show.id }}/enriched-export">{{ enriched_export_path.name }}</a></p>
+      <p class="muted">Latest Clay pull</p>
+      {% endif %}
+      {% if smartlead_ready_path %}
+      <p><a href="/shows/{{ show.id }}/smartlead-export">{{ smartlead_ready_path.name }}</a></p>
+      <p class="muted">Smartlead-ready CSV</p>
+      {% endif %}
     </div>
     <div class="detail-card">
       <h2>Provider Status</h2>
       <p>Notification: {{ show.notification_status }}</p>
       <p>Clay: {{ show.clay_status }}</p>
-      <p>HeyReach: {{ show.heyreach_status }}</p>
       <p>Smartlead: {{ show.smartlead_status }}</p>
-      <p class="muted">Clay rows are sent from the scraper export into your Clay input table when webhook or session-cookie transport is configured.</p>
+      <p>Clay rows: {{ show.clay_ready_rows }} ready / {{ show.clay_failed_rows }} failed / {{ show.clay_skipped_rows }} skipped / {{ show.clay_total_rows }} total</p>
+      <p>Smartlead imported rows: {{ show.smartlead_imported_rows }}</p>
+      {% if show.clay_table_id %}
+      <p>Clay table id: {{ show.clay_table_id }}</p>
+      {% endif %}
+      {% if show.smartlead_campaign_id %}
+      <p>Smartlead campaign: {{ show.smartlead_campaign_name or show.smartlead_campaign_id }} ({{ show.smartlead_campaign_id }})</p>
+      {% endif %}
+      <p class="muted">This show now gets its own Clay table and Smartlead campaign when template-based automation is configured.</p>
     </div>
   </div>
 
@@ -49,9 +65,24 @@
     <form action="/shows/{{ show.id }}/run-now" method="post">
       <button type="submit">Run Now</button>
     </form>
+    {% if show.clay_table_id %}
+    <form action="/shows/{{ show.id }}/sync-clay" method="post">
+      <button type="submit">Sync From Clay Now</button>
+    </form>
+    {% endif %}
     {% if show.status == "ready_for_review" %}
     <form action="/shows/{{ show.id }}/approve" method="post">
-      <button type="submit">Approve Outreach</button>
+      <button type="submit">Approve Launch</button>
+    </form>
+    {% endif %}
+    {% if show.status == "approved" %}
+    <form action="/shows/{{ show.id }}/launch" method="post">
+      <button type="submit">Launch Campaign</button>
+    </form>
+    {% endif %}
+    {% if show.smartlead_campaign_id and show.smartlead_status in ["active", "ready_to_launch", "paused"] %}
+    <form action="/shows/{{ show.id }}/pause" method="post">
+      <button type="submit">Pause Campaign</button>
     </form>
     {% endif %}
     <form action="/shows/{{ show.id }}/delete" method="post" onsubmit="return confirm('Delete this show from the dashboard?');">

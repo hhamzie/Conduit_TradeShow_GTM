@@ -39,11 +39,16 @@ DEFAULT_MAX_PAGES = 250
 DEFAULT_SAMPLE_SIZE = 3
 DEFAULT_BROWSER_MODE = "auto"
 DEFAULT_BROWSER_TIMEOUT_MS = 25000
+DEFAULT_AGENT_MODE = os.getenv("SCRAPER_AGENT_MODE", "fallback")
+DEFAULT_AGENT_MODEL = os.getenv("SCRAPER_AGENT_MODEL", "gpt-4.1-mini")
+OPENAI_RESPONSES_URL = os.getenv("OPENAI_RESPONSES_URL", "https://api.openai.com/v1/responses")
 MYS_DEFAULT_PAGE_SIZE = 50
 EXPOFP_DATA_FILENAME = "data.js"
 REQUEST_TIMEOUT_SECONDS = 30
 RETRY_ATTEMPTS = 3
 RETRY_BACKOFF_SECONDS = 1.5
+AGENT_MAX_ANCHORS = 180
+AGENT_MAX_CONTAINERS = 40
 USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0 Safari/537.36"
@@ -866,6 +871,20 @@ class BrowserFallbackOptions:
 
 
 @dataclass(frozen=True)
+class AgentFallbackOptions:
+    mode: str = DEFAULT_AGENT_MODE
+    model: str = DEFAULT_AGENT_MODEL
+
+    @property
+    def enabled(self) -> bool:
+        return self.mode != "off"
+
+    @property
+    def prefer_agent(self) -> bool:
+        return self.mode == "always"
+
+
+@dataclass(frozen=True)
 class ScrapeOptions:
     directory_url: str
     output_path: Path | None = None
@@ -876,6 +895,8 @@ class ScrapeOptions:
     end_page: int | None = None
     browser_mode: str = DEFAULT_BROWSER_MODE
     browser_timeout_ms: int = DEFAULT_BROWSER_TIMEOUT_MS
+    agent_mode: str = DEFAULT_AGENT_MODE
+    agent_model: str = DEFAULT_AGENT_MODEL
     conference_name: str = ""
     conference_location: str = ""
     require_website: bool = False
@@ -888,6 +909,21 @@ class ScrapeResult:
     failures: int
     conference_name: str
     conference_location: str
+
+
+@dataclass(frozen=True)
+class AgentProfileLink:
+    href: str
+    company_name: str = ""
+
+
+@dataclass(frozen=True)
+class AgentDirectoryPlan:
+    page_kind: str
+    directory_url: str
+    next_page_url: str
+    conference_name: str
+    profile_links: tuple[AgentProfileLink, ...]
 
 
 class BrowserRenderer:
@@ -1629,6 +1665,233 @@ def fetch_binary_with_curl(url: str, request_headers: dict[str, str]) -> bytes:
         raise RuntimeError(stderr_text or f"curl exited with status {completed.returncode}")
 
     return completed.stdout
+
+
+def openai_agent_is_configured() -> bool:
+    return bool(os.getenv("OPENAI_API_KEY", "").strip())
+
+
+def post_json(url: str, payload: dict[str, object], extra_headers: dict[str, str] | None = None) -> dict[str, object]:
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "User-Agent": USER_AGENT,
+    }
+    if extra_headers:
+        headers.update(extra_headers)
+
+    data = json.dumps(payload).encode("utf-8")
+    request = Request(url, headers=headers, data=data, method="POST")
+    with urlopen(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
+        encoding = response.headers.get_content_charset() or "utf-8"
+        body = response.read().decode(encoding, errors="replace")
+    parsed = json.loads(body)
+    if not isinstance(parsed, dict):
+        raise RuntimeError("Expected a JSON object response from the API.")
+    return parsed
+
+
+def prioritize_agent_anchor_records(page: ParsedPage) -> list[AnchorRecord]:
+    return sorted(
+        (
+            anchor
+            for anchor in page.anchors
+            if anchor.absolute_url and not looks_like_asset(anchor.absolute_url)
+        ),
+        key=lambda anchor: (
+            0 if anchor.in_main else 1,
+            1 if anchor.in_nav else 0,
+            1 if anchor.in_header else 0,
+            1 if anchor.in_footer else 0,
+            anchor.order,
+        ),
+    )
+
+
+def summarize_page_for_agent(seed_url: str, current_url: str, page: ParsedPage) -> dict[str, object]:
+    anchors = prioritize_agent_anchor_records(page)[:AGENT_MAX_ANCHORS]
+    containers = [
+        container
+        for container in page.containers
+        if container.in_main and container.actions
+    ][:AGENT_MAX_CONTAINERS]
+
+    return {
+        "seed_url": seed_url,
+        "current_url": current_url,
+        "page_title": page.title,
+        "h1_texts": list(page.h1_texts[:6]),
+        "anchors": [
+            {
+                "text": anchor.display_text,
+                "href": anchor.href,
+                "absolute_url": anchor.absolute_url,
+                "signature": list(anchor.signature),
+                "in_main": anchor.in_main,
+                "in_nav": anchor.in_nav,
+                "in_header": anchor.in_header,
+                "in_footer": anchor.in_footer,
+                "order": anchor.order,
+            }
+            for anchor in anchors
+        ],
+        "containers": [
+            {
+                "tag": container.tag,
+                "signature": list(container.signature),
+                "heading_texts": list(container.heading_texts[:4]),
+                "text_excerpt": normalize_text(container.text)[:220],
+                "action_urls": [action.absolute_url for action in container.actions[:6] if action.absolute_url],
+            }
+            for container in containers
+        ],
+    }
+
+
+def extract_text_from_openai_response(payload: dict[str, object]) -> str:
+    direct_text = payload.get("output_text")
+    if isinstance(direct_text, str) and direct_text.strip():
+        return direct_text.strip()
+
+    output_items = payload.get("output")
+    if not isinstance(output_items, list):
+        return ""
+
+    collected: list[str] = []
+    for item in output_items:
+        if not isinstance(item, dict):
+            continue
+        content = item.get("content")
+        if not isinstance(content, list):
+            continue
+        for part in content:
+            if not isinstance(part, dict):
+                continue
+            if part.get("type") in {"output_text", "text"}:
+                text_value = part.get("text")
+                if isinstance(text_value, str) and text_value.strip():
+                    collected.append(text_value.strip())
+    return "\n".join(collected).strip()
+
+
+def request_agent_directory_plan(
+    seed_url: str,
+    current_url: str,
+    page: ParsedPage,
+    *,
+    model: str,
+) -> AgentDirectoryPlan:
+    api_key = os.getenv("OPENAI_API_KEY", "").strip()
+    if not api_key:
+        raise RuntimeError("OpenAI agent fallback needs OPENAI_API_KEY.")
+
+    page_summary = summarize_page_for_agent(seed_url, current_url, page)
+    schema = {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "page_kind": {
+                "type": "string",
+                "enum": ["directory", "landing", "profile", "unknown"],
+            },
+            "directory_url": {"type": "string"},
+            "next_page_url": {"type": "string"},
+            "conference_name": {"type": "string"},
+            "profile_links": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "href": {"type": "string"},
+                        "company_name": {"type": "string"},
+                    },
+                    "required": ["href", "company_name"],
+                },
+            },
+        },
+        "required": [
+            "page_kind",
+            "directory_url",
+            "next_page_url",
+            "conference_name",
+            "profile_links",
+        ],
+    }
+
+    payload = {
+        "model": model,
+        "input": [
+            {
+                "role": "system",
+                "content": [
+                    {
+                        "type": "input_text",
+                        "text": (
+                            "You help a trade-show directory scraper recover exhibitor profile links when heuristics fail. "
+                            "Use only URLs present in the provided page summary. "
+                            "Return exhibitor or company profile links from the current page only, not external company websites. "
+                            "If the page is just a landing page that points to the real directory, set directory_url. "
+                            "If there is a clear next page in the same directory series, set next_page_url. "
+                            "Leave any field empty when you are not confident."
+                        ),
+                    }
+                ],
+            },
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "input_text",
+                        "text": json.dumps(page_summary, ensure_ascii=True),
+                    }
+                ],
+            },
+        ],
+        "text": {
+            "format": {
+                "type": "json_schema",
+                "name": "directory_page_plan",
+                "strict": True,
+                "schema": schema,
+            }
+        },
+        "max_output_tokens": 900,
+        "temperature": 0,
+    }
+
+    body = post_json(
+        OPENAI_RESPONSES_URL,
+        payload,
+        extra_headers={"Authorization": f"Bearer {api_key}"},
+    )
+    text = extract_text_from_openai_response(body)
+    if not text:
+        raise RuntimeError("OpenAI agent fallback returned no structured text output.")
+
+    parsed = json.loads(text)
+    if not isinstance(parsed, dict):
+        raise RuntimeError("OpenAI agent fallback returned malformed JSON.")
+
+    profile_links_payload = parsed.get("profile_links")
+    profile_links: list[AgentProfileLink] = []
+    if isinstance(profile_links_payload, list):
+        for item in profile_links_payload:
+            if not isinstance(item, dict):
+                continue
+            href = normalize_text(str(item.get("href") or ""))
+            company_name = normalize_text(str(item.get("company_name") or ""))
+            if not href:
+                continue
+            profile_links.append(AgentProfileLink(href=href, company_name=company_name))
+
+    return AgentDirectoryPlan(
+        page_kind=normalize_text(str(parsed.get("page_kind") or "unknown")).lower() or "unknown",
+        directory_url=normalize_text(str(parsed.get("directory_url") or "")),
+        next_page_url=normalize_text(str(parsed.get("next_page_url") or "")),
+        conference_name=normalize_text(str(parsed.get("conference_name") or "")),
+        profile_links=tuple(profile_links),
+    )
 
 
 def fetch_html(url: str, extra_headers: dict[str, str] | None = None) -> str:
@@ -5551,6 +5814,108 @@ def collect_entries_from_seed(
     return entries, adapter_title
 
 
+def collect_entries_with_agent_fallback(
+    seed_url: str,
+    seed_page: ParsedPage,
+    *,
+    max_pages: int,
+    page_loader: callable[[str], tuple[str, str, ParsedPage]] | None = None,
+    model: str = DEFAULT_AGENT_MODEL,
+) -> tuple[list[DirectoryEntry], str]:
+    if page_loader is None:
+        page_loader = load_static_page
+
+    entries: list[DirectoryEntry] = []
+    seen_profiles: set[str] = set()
+    seen_pages: set[str] = set()
+    queued_pages: set[str] = {seed_url}
+    queue: deque[tuple[str, ParsedPage | None]] = deque([(seed_url, seed_page)])
+    adapter_title = ""
+
+    while queue and len(seen_pages) < max_pages:
+        page_url, cached_page = queue.popleft()
+        queued_pages.discard(page_url)
+        if page_url in seen_pages:
+            continue
+
+        if cached_page is None:
+            _, _, page = page_loader(page_url)
+        else:
+            page = cached_page
+
+        seen_pages.add(page_url)
+        plan = request_agent_directory_plan(
+            seed_url=seed_url,
+            current_url=page_url,
+            page=page,
+            model=model,
+        )
+        if not adapter_title and plan.conference_name:
+            adapter_title = plan.conference_name
+
+        directory_url = normalize_navigable_target(page_url, plan.directory_url)
+        if (
+            directory_url
+            and same_site(directory_url, seed_url)
+            and directory_url not in seen_pages
+            and directory_url not in queued_pages
+        ):
+            queue.appendleft((directory_url, None))
+            queued_pages.add(directory_url)
+
+        anchor_name_by_url = {
+            anchor.absolute_url: anchor.display_text
+            for anchor in prioritize_agent_anchor_records(page)
+            if anchor.absolute_url and anchor.display_text
+        }
+
+        added = 0
+        page_number = extract_page_number_from_url(page_url) or len(seen_pages)
+        for profile_link in plan.profile_links:
+            normalized_profile_url = normalize_navigable_target(page_url, profile_link.href)
+            if not normalized_profile_url:
+                continue
+            if looks_like_asset(normalized_profile_url):
+                continue
+            if normalized_profile_url in seen_profiles:
+                continue
+
+            fallback_name = anchor_name_by_url.get(normalized_profile_url, "")
+            company_name = normalize_seed_company_name(profile_link.company_name or fallback_name)
+            if not company_name and fallback_name:
+                company_name = normalize_seed_company_name(fallback_name)
+            if not company_name:
+                continue
+
+            seen_profiles.add(normalized_profile_url)
+            entries.append(
+                DirectoryEntry(
+                    sort_index=len(entries),
+                    directory_page=page_number,
+                    company_name=company_name,
+                    profile_url=normalized_profile_url,
+                )
+            )
+            added += 1
+
+        print(
+            f"Agent fallback scanned directory page {len(seen_pages)} "
+            f"({added} new profile links, {len(entries)} total)."
+        )
+
+        next_page_url = normalize_navigable_target(page_url, plan.next_page_url)
+        if (
+            next_page_url
+            and same_site(next_page_url, seed_url)
+            and next_page_url not in seen_pages
+            and next_page_url not in queued_pages
+        ):
+            queue.append((next_page_url, None))
+            queued_pages.add(next_page_url)
+
+    return entries, adapter_title
+
+
 def scrape_profile_website(profile_url: str) -> str:
     profile_html = fetch_html(profile_url)
     embedded_url = extract_embedded_js_url(profile_html, MYS_WEBSITE_FIELDS)
@@ -5804,6 +6169,24 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--agent-mode",
+        choices=("off", "fallback", "always"),
+        default=DEFAULT_AGENT_MODE,
+        help=(
+            "OpenAI-backed directory recovery mode. `off` disables it, `fallback` "
+            "only uses it when heuristic discovery stalls, and `always` tries it "
+            f"before heuristics. Default: {DEFAULT_AGENT_MODE}."
+        ),
+    )
+    parser.add_argument(
+        "--agent-model",
+        default=DEFAULT_AGENT_MODEL,
+        help=(
+            "OpenAI model used for directory recovery, for example "
+            f"`{DEFAULT_AGENT_MODEL}`. Default: {DEFAULT_AGENT_MODEL}."
+        ),
+    )
+    parser.add_argument(
         "--require-website",
         action="store_true",
         help="Only keep companies where a website/domain was found.",
@@ -5833,6 +6216,10 @@ def run_scrape(options: ScrapeOptions) -> ScrapeResult:
         mode=options.browser_mode,
         timeout_ms=options.browser_timeout_ms,
     )
+    agent_options = AgentFallbackOptions(
+        mode=options.agent_mode,
+        model=options.agent_model,
+    )
     browser_renderer: BrowserRenderer | None = None
     browser_install_hint = (
         "Install Playwright with `python3 -m pip install playwright` and "
@@ -5856,80 +6243,155 @@ def run_scrape(options: ScrapeOptions) -> ScrapeResult:
             if browser_renderer is not None
             else None
         )
+        default_page_loader = browser_loader or static_loader
 
         used_browser_fallback = False
+        used_agent_fallback = False
         adapter_title = ""
+        heuristic_error: Exception | None = None
+        entries: list[DirectoryEntry] = []
 
-        if browser_options.prefer_browser and browser_loader is not None:
-            print("Browser mode `prefer` enabled. Rendering the seed page in a browser first.")
-            seed_url, seed_html, seed_page = resolve_seed_page(seed_url, browser_loader)
-            entries, adapter_title = collect_entries_from_seed(
-                seed_url=seed_url,
-                seed_html=seed_html,
-                seed_page=seed_page,
+        def heuristic_collect(
+            *,
+            loader: callable[[str], tuple[str, str, ParsedPage]],
+            use_browser: bool,
+        ) -> tuple[str, str, ParsedPage, list[DirectoryEntry], str]:
+            resolved_url, resolved_html, resolved_page = resolve_seed_page(seed_url, loader)
+            resolved_entries, resolved_adapter_title = collect_entries_from_seed(
+                seed_url=resolved_url,
+                seed_html=resolved_html,
+                seed_page=resolved_page,
                 sample_size=options.sample_size,
                 start_page=options.start_page,
                 end_page=options.end_page,
                 max_pages=options.max_pages,
-                page_loader=browser_loader,
+                page_loader=loader,
                 profile_website_scraper=(
-                    lambda profile_url: scrape_profile_website_with_browser(
-                        profile_url,
-                        browser_renderer=browser_renderer,
-                    )
-                ),
-            )
-            used_browser_fallback = True
-        else:
-            try:
-                seed_url, seed_html, seed_page = resolve_seed_page(seed_url, static_loader)
-                entries, adapter_title = collect_entries_from_seed(
-                    seed_url=seed_url,
-                    seed_html=seed_html,
-                    seed_page=seed_page,
-                    sample_size=options.sample_size,
-                    start_page=options.start_page,
-                    end_page=options.end_page,
-                    max_pages=options.max_pages,
-                )
-            except Exception as static_exc:
-                if browser_loader is None:
-                    if browser_options.enabled:
-                        raise RuntimeError(
-                            f"{static_exc} Browser fallback is unavailable. {browser_install_hint}"
-                        ) from static_exc
-                    raise
-
-                print(
-                    "Static HTML discovery stalled; retrying with browser-rendered fallback."
-                )
-                seed_url, seed_html, seed_page = resolve_seed_page(seed_url, browser_loader)
-                entries, adapter_title = collect_entries_from_seed(
-                    seed_url=seed_url,
-                    seed_html=seed_html,
-                    seed_page=seed_page,
-                    sample_size=options.sample_size,
-                    start_page=options.start_page,
-                    end_page=options.end_page,
-                    max_pages=options.max_pages,
-                    page_loader=browser_loader,
-                    profile_website_scraper=(
+                    (
                         lambda profile_url: scrape_profile_website_with_browser(
                             profile_url,
                             browser_renderer=browser_renderer,
                         )
-                    ),
+                    )
+                    if use_browser and browser_renderer is not None
+                    else None
+                ),
+            )
+            return resolved_url, resolved_html, resolved_page, resolved_entries, resolved_adapter_title
+
+        def agent_collect(
+            *,
+            resolved_url: str,
+            resolved_page: ParsedPage,
+            loader: callable[[str], tuple[str, str, ParsedPage]],
+        ) -> tuple[list[DirectoryEntry], str]:
+            return collect_entries_with_agent_fallback(
+                seed_url=resolved_url,
+                seed_page=resolved_page,
+                max_pages=options.max_pages,
+                page_loader=loader,
+                model=agent_options.model,
+            )
+
+        if agent_options.prefer_agent and openai_agent_is_configured():
+            print("Agent mode `always` enabled. Trying OpenAI directory recovery first.")
+            seed_url, seed_html, seed_page = resolve_seed_page(seed_url, default_page_loader)
+            entries, adapter_title = agent_collect(
+                resolved_url=seed_url,
+                resolved_page=seed_page,
+                loader=default_page_loader,
+            )
+            used_agent_fallback = bool(entries)
+            used_browser_fallback = browser_loader is not None and default_page_loader is browser_loader
+
+        if not entries and browser_options.prefer_browser and browser_loader is not None:
+            print("Browser mode `prefer` enabled. Rendering the seed page in a browser first.")
+            try:
+                seed_url, seed_html, seed_page, entries, adapter_title = heuristic_collect(
+                    loader=browser_loader,
+                    use_browser=True,
                 )
                 used_browser_fallback = True
+            except Exception as browser_exc:  # noqa: BLE001
+                heuristic_error = browser_exc
+                if agent_options.enabled and openai_agent_is_configured():
+                    print("Browser heuristic discovery stalled; trying OpenAI agent fallback.")
+                    seed_url, seed_html, seed_page = resolve_seed_page(seed_url, browser_loader)
+                    entries, adapter_title = agent_collect(
+                        resolved_url=seed_url,
+                        resolved_page=seed_page,
+                        loader=browser_loader,
+                    )
+                    used_agent_fallback = bool(entries)
+                    used_browser_fallback = True
+                if not entries:
+                    raise
+
+        if not entries and not (browser_options.prefer_browser and browser_loader is not None):
+            seed_url, seed_html, seed_page = resolve_seed_page(seed_url, static_loader)
+            try:
+                seed_url, seed_html, seed_page, entries, adapter_title = heuristic_collect(
+                    loader=static_loader,
+                    use_browser=False,
+                )
+            except Exception as static_exc:
+                heuristic_error = static_exc
+                if agent_options.enabled and openai_agent_is_configured():
+                    print("Heuristic discovery stalled; trying OpenAI agent fallback.")
+                    entries, adapter_title = agent_collect(
+                        resolved_url=seed_url,
+                        resolved_page=seed_page,
+                        loader=static_loader,
+                    )
+                    used_agent_fallback = bool(entries)
+
+                if not entries:
+                    if browser_loader is None:
+                        if browser_options.enabled:
+                            raise RuntimeError(
+                                f"{static_exc} Browser fallback is unavailable. {browser_install_hint}"
+                            ) from static_exc
+                        raise
+
+                    print(
+                        "Static HTML discovery stalled; retrying with browser-rendered fallback."
+                    )
+                    try:
+                        seed_url, seed_html, seed_page, entries, adapter_title = heuristic_collect(
+                            loader=browser_loader,
+                            use_browser=True,
+                        )
+                        used_browser_fallback = True
+                    except Exception as browser_exc:  # noqa: BLE001
+                        heuristic_error = browser_exc
+                        if agent_options.enabled and openai_agent_is_configured():
+                            print("Browser heuristic discovery stalled; trying OpenAI agent fallback.")
+                            seed_url, seed_html, seed_page = resolve_seed_page(seed_url, browser_loader)
+                            entries, adapter_title = agent_collect(
+                                resolved_url=seed_url,
+                                resolved_page=seed_page,
+                                loader=browser_loader,
+                            )
+                            used_agent_fallback = bool(entries)
+                            used_browser_fallback = True
+                        if not entries:
+                            raise
 
         if not entries:
+            if heuristic_error is not None:
+                raise RuntimeError(
+                    f"{heuristic_error} OpenAI agent fallback did not recover any profile links."
+                ) from heuristic_error
             raise RuntimeError(
                 "No company profile links were collected. "
-                "The directory may require JavaScript rendering."
+                "The directory may require JavaScript rendering or a stronger agent plan."
             )
 
         if adapter_title:
             seed_page = retitle_page(seed_page, adapter_title)
+
+        if used_agent_fallback:
+            print("OpenAI agent fallback recovered directory links.")
 
         records, failures = collect_company_records(
             entries,
@@ -6005,6 +6467,8 @@ def main() -> int:
                 end_page=args.end_page,
                 browser_mode=args.browser_mode,
                 browser_timeout_ms=args.browser_timeout_ms,
+                agent_mode=args.agent_mode,
+                agent_model=args.agent_model,
                 require_website=args.require_website,
             )
         )

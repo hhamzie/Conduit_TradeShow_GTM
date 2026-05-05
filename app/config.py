@@ -44,13 +44,22 @@ class Settings:
     notify_from_email: str
     notify_to_emails: tuple[str, ...]
     clay_api_key: str
+    clay_base_url: str
     clay_input_table_id: str
+    clay_template_table_id: str
     clay_webhook_url: str
     clay_webhook_auth_header: str
     clay_webhook_auth_value: str
     clay_session_cookie: str
+    clay_row_status_column: str
+    clay_ready_status_value: str
+    clay_failed_status_value: str
+    clay_skipped_status_value: str
     heyreach_api_key: str
     smartlead_api_key: str
+    smartlead_base_url: str
+    smartlead_client_id: str
+    smartlead_template_campaign_id: str
 
 
 @lru_cache(maxsize=1)
@@ -86,11 +95,20 @@ def get_settings() -> Settings:
         notify_from_email=os.getenv("NOTIFY_FROM_EMAIL", ""),
         notify_to_emails=notify_to_emails,
         clay_api_key=os.getenv("CLAY_API_KEY", ""),
+        clay_base_url=os.getenv("CLAY_BASE_URL", "https://api.clay.com/v3").rstrip("/"),
         clay_input_table_id=os.getenv("CLAY_INPUT_TABLE_ID", ""),
+        clay_template_table_id=os.getenv("CLAY_TEMPLATE_TABLE_ID", ""),
         clay_webhook_url=os.getenv("CLAY_WEBHOOK_URL", ""),
         clay_webhook_auth_header=os.getenv("CLAY_WEBHOOK_AUTH_HEADER", ""),
         clay_webhook_auth_value=os.getenv("CLAY_WEBHOOK_AUTH_VALUE", ""),
         clay_session_cookie=os.getenv("CLAY_SESSION_COOKIE", ""),
+        clay_row_status_column=os.getenv("CLAY_ROW_STATUS_COLUMN", "enriched_status"),
+        clay_ready_status_value=os.getenv("CLAY_READY_STATUS_VALUE", "ready"),
+        clay_failed_status_value=os.getenv("CLAY_FAILED_STATUS_VALUE", "failed"),
+        clay_skipped_status_value=os.getenv("CLAY_SKIPPED_STATUS_VALUE", "skip"),
         heyreach_api_key=os.getenv("HEYREACH_API_KEY", ""),
         smartlead_api_key=os.getenv("SMARTLEAD_API_KEY", ""),
+        smartlead_base_url=os.getenv("SMARTLEAD_BASE_URL", "https://server.smartlead.ai/api/v1").rstrip("/"),
+        smartlead_client_id=os.getenv("SMARTLEAD_CLIENT_ID", ""),
+        smartlead_template_campaign_id=os.getenv("SMARTLEAD_TEMPLATE_CAMPAIGN_ID", ""),
     )
