@@ -45,21 +45,23 @@ def _migrate_existing_schema() -> None:
 
 def _ensure_show_columns(inspector) -> None:
     existing_columns = {column["name"] for column in inspector.get_columns("shows")}
+    is_postgres = engine.dialect.name == "postgresql"
+    datetime_type = "TIMESTAMP" if is_postgres else "DATETIME"
     required_columns = {
         "enriched_export_path": "TEXT NOT NULL DEFAULT ''",
         "smartlead_ready_export_path": "TEXT NOT NULL DEFAULT ''",
         "clay_table_id": "TEXT NOT NULL DEFAULT ''",
         "clay_table_name": "TEXT NOT NULL DEFAULT ''",
         "clay_table_url": "TEXT NOT NULL DEFAULT ''",
-        "clay_last_polled_at": "DATETIME",
-        "clay_last_imported_at": "DATETIME",
+        "clay_last_polled_at": datetime_type,
+        "clay_last_imported_at": datetime_type,
         "clay_total_rows": "INTEGER NOT NULL DEFAULT 0",
         "clay_ready_rows": "INTEGER NOT NULL DEFAULT 0",
         "clay_failed_rows": "INTEGER NOT NULL DEFAULT 0",
         "clay_skipped_rows": "INTEGER NOT NULL DEFAULT 0",
         "smartlead_campaign_id": "INTEGER",
         "smartlead_campaign_name": "TEXT NOT NULL DEFAULT ''",
-        "smartlead_imported_at": "DATETIME",
+        "smartlead_imported_at": datetime_type,
         "smartlead_imported_rows": "INTEGER NOT NULL DEFAULT 0",
     }
     missing = {
