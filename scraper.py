@@ -793,6 +793,7 @@ class DirectoryEntry:
     company_name: str
     profile_url: str
     website_url_hint: str = ""
+    booth_number: str = ""
 
 
 @dataclass(frozen=True)
@@ -802,6 +803,7 @@ class CompanyRecord:
     company_name: str
     profile_url: str
     website_url: str
+    booth_number: str = ""
 
 
 @dataclass(frozen=True)
@@ -837,6 +839,7 @@ class ContainerEntryCandidate:
     profile_url: str
     signature: tuple[str, ...]
     order: int
+    booth_number: str = ""
 
 
 @dataclass(frozen=True)
@@ -3645,6 +3648,7 @@ def extract_table_row_entries(
                 directory_page=directory_page,
                 company_name=company_name,
                 profile_url=profile_url,
+                booth_number=booth_code,
             )
         )
 
@@ -4076,6 +4080,7 @@ def extract_text_only_container_candidate(
         profile_url=build_text_only_fragment_url(page_url, company_name, booth_code),
         signature=container.signature,
         order=container.order,
+        booth_number=booth_code,
     )
 
 
@@ -5977,6 +5982,7 @@ def collect_company_records(
                     company_name=final_company_name,
                     profile_url=entry.profile_url,
                     website_url=website_url_hint,
+                    booth_number=entry.booth_number,
                 )
             )
         else:
@@ -6012,6 +6018,7 @@ def collect_company_records(
                     company_name=entry.company_name,
                     profile_url=entry.profile_url,
                     website_url=website_url,
+                    booth_number=entry.booth_number,
                 )
             )
 
@@ -6047,6 +6054,7 @@ def collect_company_records(
                     company_name=record.company_name,
                     profile_url=record.profile_url,
                     website_url=browser_url,
+                    booth_number=record.booth_number,
                 )
 
             if position == len(pending_browser_indices) or position % 10 == 0:
@@ -6071,6 +6079,7 @@ def write_csv(
             csv_file,
             fieldnames=[
                 "company_name",
+                "booth_number",
                 "website_url",
                 "Location",
                 "Conference",
@@ -6081,6 +6090,7 @@ def write_csv(
             writer.writerow(
                 {
                     "company_name": record.company_name,
+                    "booth_number": record.booth_number,
                     "website_url": record.website_url,
                     "Location": conference_location,
                     "Conference": conference_name,
