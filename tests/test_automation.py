@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
+import io
 from pathlib import Path
 import tempfile
 import unittest
@@ -232,6 +233,45 @@ class AutomationTests(unittest.TestCase):
                 manifest_text = archive.read("manifest.csv").decode("utf-8")
                 self.assertIn("Luxe Pack", manifest_text)
                 self.assertIn("High Point", manifest_text)
+
+    def test_bulk_scrape_route_uses_threadpool(self) -> None:
+        async def run_test() -> None:
+            try:
+                from fastapi import UploadFile
+                from app.main import scrape_many_shows
+            except ModuleNotFoundError:
+                self.skipTest("fastapi is not installed in this test environment")
+
+            with tempfile.TemporaryDirectory() as tmp_dir:
+                archive_path = Path(tmp_dir) / "bulk.zip"
+                archive_path.write_bytes(b"zip")
+                upload = UploadFile(
+                    filename="shows.csv",
+                    file=io.BytesIO(
+                        b"Show,Date,Place,Link\nLuxe Pack,2026-05-06,New York City,https://example.com/luxe\n"
+                    ),
+                )
+                result = BulkDirectScrapeResult(
+                    archive_path=archive_path,
+                    success_count=1,
+                    failed_count=0,
+                )
+                request = type("Req", (), {"session": {}})()
+
+                with (
+                    patch("app.main.require_authenticated"),
+                    patch("app.main.run_in_threadpool", return_value=result) as threadpool_mock,
+                ):
+                    response = await scrape_many_shows(request=request, file=upload)
+
+                self.assertEqual(response.path, str(archive_path))
+                self.assertEqual(threadpool_mock.call_count, 1)
+                self.assertEqual(threadpool_mock.call_args.args[0], run_bulk_direct_scrape)
+                self.assertIn(b"Luxe Pack", threadpool_mock.call_args.args[1])
+
+        import asyncio
+
+        asyncio.run(run_test())
 
 
 if __name__ == "__main__":

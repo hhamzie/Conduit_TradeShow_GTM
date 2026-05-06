@@ -10,6 +10,7 @@ from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
+from starlette.concurrency import run_in_threadpool
 from starlette import status
 from starlette.middleware.sessions import SessionMiddleware
 
@@ -495,7 +496,7 @@ async def scrape_many_shows(
         request.session["bulk_scrape_error"] = "The uploaded CSV was empty."
         return RedirectResponse("/", status_code=status.HTTP_303_SEE_OTHER)
     try:
-        result = run_bulk_direct_scrape(payload)
+        result = await run_in_threadpool(run_bulk_direct_scrape, payload)
     except ValueError as exc:
         request.session["bulk_scrape_error"] = str(exc)
         return RedirectResponse("/", status_code=status.HTTP_303_SEE_OTHER)
