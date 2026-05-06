@@ -14,11 +14,13 @@ from scraper import (
     extract_directory_entry_candidates,
     find_embedded_directory_url,
     is_mapyourshow_directory,
+    is_bulletin_directory,
     extract_booth_number_from_profile,
     extract_table_row_entries,
     collect_directory_entries_mapyourshow,
     normalize_booth_number_candidate,
     parse_page,
+    should_browser_resolve_company_record,
     write_csv,
 )
 
@@ -388,6 +390,50 @@ class BoothNumberTests(unittest.TestCase):
         kept_records = apply_website_requirement(records)
 
         self.assertEqual(kept_records, records)
+
+    def test_is_bulletin_directory_matches_exhibitor_directory_url(self) -> None:
+        html = '<html><body><div id="app"></div></body></html>'
+
+        self.assertTrue(
+            is_bulletin_directory(
+                "https://icff.bulletin.co/icff/exhibitor-directory?sortBy=brands_made_active_desc&page=1",
+                html,
+            )
+        )
+
+    def test_should_browser_resolve_company_record_skips_when_booth_exists_and_website_optional(self) -> None:
+        record = CompanyRecord(
+            sort_index=0,
+            directory_page=1,
+            company_name="da.studio",
+            profile_url="https://icff.bulletin.co/brand/da-studio",
+            website_url="",
+            booth_number="W47",
+        )
+
+        self.assertFalse(
+            should_browser_resolve_company_record(
+                record,
+                require_website=False,
+            )
+        )
+
+    def test_should_browser_resolve_company_record_forces_resolution_when_website_required(self) -> None:
+        record = CompanyRecord(
+            sort_index=0,
+            directory_page=1,
+            company_name="da.studio",
+            profile_url="https://icff.bulletin.co/brand/da-studio",
+            website_url="",
+            booth_number="W47",
+        )
+
+        self.assertTrue(
+            should_browser_resolve_company_record(
+                record,
+                require_website=True,
+            )
+        )
 
     def test_is_mapyourshow_directory_detects_whitelabel_host(self) -> None:
         html = """

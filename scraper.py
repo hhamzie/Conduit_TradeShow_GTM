@@ -2386,6 +2386,17 @@ def is_expofp_directory(seed_url: str, seed_html: str) -> bool:
     )
 
 
+def is_bulletin_directory(seed_url: str, seed_html: str) -> bool:
+    parsed = urlparse(seed_url)
+    host = (parsed.netloc or "").lower()
+    path = (parsed.path or "").lower()
+    if "bulletin.co" not in host:
+        return False
+    if "exhibitor-directory" in path:
+        return True
+    return 'id="app"' in seed_html and "bulletin" in seed_html.lower()
+
+
 def mapyourshow_root_prefix(seed_url: str) -> str:
     path_segments = [segment for segment in urlparse(seed_url).path.split("/") if segment]
     if path_segments and MYS_VERSION_SEGMENT_RE.fullmatch(path_segments[0]):
@@ -6124,6 +6135,46 @@ def collect_directory_entries_with_query_probing(
     return entries
 
 
+def collect_directory_entries_bulletin(
+    seed_url: str,
+    seed_page: ParsedPage,
+    sample_size: int,
+    start_page: int | None,
+    end_page: int | None,
+    max_pages: int,
+    page_loader: callable[[str], tuple[str, str, ParsedPage]] | None = None,
+) -> tuple[list[DirectoryEntry], str] | None:
+    if page_loader is None:
+        page_loader = load_static_page
+
+    try:
+        strategy, _seed_entries = choose_listing_strategy(
+            seed_page=seed_page,
+            directory_url=seed_url,
+            sample_size=max(1, min(sample_size, 1)),
+            profile_website_scraper=lambda _profile_url: "",
+        )
+    except RuntimeError:
+        return None
+
+    print("Detected Bulletin directory. Using rendered listing-card extraction.")
+    param_name = discover_query_page_param(seed_url, seed_page) or "page"
+    entries = collect_directory_entries_with_query_probing(
+        seed_url=seed_url,
+        seed_page=seed_page,
+        strategy=strategy,
+        directory_url=seed_url,
+        param_name=param_name,
+        start_page=start_page,
+        end_page=end_page,
+        max_pages=max_pages,
+        page_loader=page_loader,
+    )
+    if not entries:
+        return None
+    return entries, ""
+
+
 def collect_directory_entries_with_explicit_pages(
     page_urls: list[tuple[int, str]],
     strategy: ListingStrategy,
@@ -6263,6 +6314,19 @@ def collect_entries_from_seed(
             seed_url=seed_url,
             seed_html=seed_html,
         )
+
+    if is_bulletin_directory(seed_url, seed_html):
+        bulletin_entries = collect_directory_entries_bulletin(
+            seed_url=seed_url,
+            seed_page=seed_page,
+            sample_size=sample_size,
+            start_page=start_page,
+            end_page=end_page,
+            max_pages=max_pages,
+            page_loader=page_loader,
+        )
+        if bulletin_entries is not None:
+            return bulletin_entries
 
     landing_entries = collect_direct_landing_entries(
         seed_url=seed_url,
@@ -6524,10 +6588,22 @@ def scrape_profile_website_with_browser(
     return rendered_website_url or website_url, booth_number or rendered_booth_number
 
 
+def should_browser_resolve_company_record(
+    record: CompanyRecord,
+    require_website: bool,
+) -> bool:
+    if not record.profile_url or record.website_url:
+        return False
+    if require_website:
+        return True
+    return not bool(record.booth_number)
+
+
 def collect_company_records(
     entries: list[DirectoryEntry],
     workers: int,
     browser_renderer: BrowserRenderer | None = None,
+    require_website: bool = False,
 ) -> tuple[list[CompanyRecord], int]:
     records: list[CompanyRecord] = []
     failures = 0
@@ -6602,7 +6678,10 @@ def collect_company_records(
         pending_browser_indices = [
             index
             for index, record in enumerate(records)
-            if not record.website_url and record.profile_url
+            if should_browser_resolve_company_record(
+                record,
+                require_website=require_website,
+            )
         ]
         if pending_browser_indices:
             print(
@@ -6869,7 +6948,7 @@ def run_scrape(options: ScrapeOptions) -> ScrapeResult:
                         lambda profile_url: scrape_profile_website_with_browser(
                             profile_url,
                             browser_renderer=browser_renderer,
-                        )
+                        )[0]
                     )
                     if use_browser and browser_renderer is not None
                     else None
@@ -6995,6 +7074,7 @@ def run_scrape(options: ScrapeOptions) -> ScrapeResult:
             entries,
             options.workers,
             browser_renderer=browser_renderer if used_browser_fallback else None,
+            require_website=options.require_website,
         )
         if options.require_website:
             records = apply_website_requirement(records)
