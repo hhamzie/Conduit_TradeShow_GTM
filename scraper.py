@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import csv
 from functools import lru_cache
+import html
 from html import unescape as html_unescape
 import json
 import os
@@ -1048,6 +1049,238 @@ class BrowserRenderer:
                 continue
         return False
 
+    @staticmethod
+    def _is_bulletin_directory_listing_url(url: str) -> bool:
+        parsed = urlparse(url)
+        if "bulletin.co" not in (parsed.netloc or "").lower():
+            return False
+        path_segments = [segment for segment in (parsed.path or "").lower().split("/") if segment]
+        return bool(path_segments and path_segments[-1] == "exhibitor-directory")
+
+    def _count_bulletin_profile_links(self, page: object) -> int:
+        try:
+            return int(
+                page.evaluate(
+                    """
+                    () => {
+                      const isProfileHref = (href) => {
+                        if (!href) return false;
+                        if (href.includes('/brands/')) return true;
+                        if (!href.includes('/exhibitor-directory/')) return false;
+                        if (href.includes('?')) return false;
+                        const parts = href.split('/').filter(Boolean);
+                        const tail = parts[parts.length - 1] || '';
+                        return !!tail && tail !== 'exhibitor-directory';
+                      };
+                      const links = Array.from(document.querySelectorAll('a[href]'));
+                      const seen = new Set();
+                      for (const link of links) {
+                        const href = link.getAttribute('href') || '';
+                        if (!isProfileHref(href)) continue;
+                        seen.add(href);
+                      }
+                      return seen.size;
+                    }
+                    """
+                )
+            )
+        except Exception:  # noqa: BLE001
+            return 0
+
+    def _extract_bulletin_directory_cards(self, page: object) -> list[dict[str, str]]:
+        try:
+            return list(
+                page.evaluate(
+                    """
+                    () => {
+                      const results = [];
+                      const seen = new Set();
+                      const isProfileHref = (href) => {
+                        if (!href) return false;
+                        if (href.includes('/brands/')) return true;
+                        if (!href.includes('/exhibitor-directory/')) return false;
+                        if (href.includes('?')) return false;
+                        const parts = href.split('/').filter(Boolean);
+                        const tail = parts[parts.length - 1] || '';
+                        return !!tail && tail !== 'exhibitor-directory';
+                      };
+                      const boothRegex = /\\b(?:booth|icff booth)\\s*#?\\s*([A-Z0-9-]+)\\b/i;
+                      const clean = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+                      const isCompanyLike = (value) => {
+                        const text = clean(value);
+                        if (!text) return false;
+                        if (text.length > 120) return false;
+                        if (!/[A-Za-z]/.test(text)) return false;
+                        const lower = text.toLowerCase();
+                        if (
+                          /^(?:booth|icff booth|lead time|login|latinx owned|wanted launch pad)$/.test(lower)
+                        ) {
+                          return false;
+                        }
+                        if (
+                          lower.includes('booth') ||
+                          lower.includes('shipping') ||
+                          lower.includes('launch pad') ||
+                          lower.includes('lead time')
+                        ) {
+                          return false;
+                        }
+                        return true;
+                      };
+                      const anchors = Array.from(document.querySelectorAll('a[href]'));
+                      for (const anchor of anchors) {
+                        const href = anchor.getAttribute('href') || '';
+                        if (!isProfileHref(href)) continue;
+                        const companyName = clean(
+                          anchor.textContent || anchor.getAttribute('aria-label') || ''
+                        );
+                        if (!isCompanyLike(companyName)) continue;
+                        let container = anchor.closest('article, li, section, div') || anchor.parentElement || anchor;
+                        let text = '';
+                        for (let hops = 0; container && hops < 6; hops += 1) {
+                          text = clean((container && container.innerText) || '');
+                          if (/booth/i.test(text)) break;
+                          container = container.parentElement;
+                        }
+                        const boothMatch = text.match(boothRegex);
+                        const absoluteHref = new URL(href, window.location.href).href;
+                        const key = `${absoluteHref}::${companyName}`;
+                        if (seen.has(key)) continue;
+                        seen.add(key);
+                        results.push({
+                          company_name: companyName,
+                          profile_url: absoluteHref,
+                          booth_number: boothMatch ? boothMatch[1].trim() : '',
+                        });
+                      }
+                      return results;
+                    }
+                    """
+                )
+            )
+        except Exception:  # noqa: BLE001
+            try:
+                debug_counts = page.evaluate(
+                    """
+                    () => {
+                      const anchors = Array.from(document.querySelectorAll('a[href]'));
+                      const exhibitorAnchors = anchors.filter((anchor) => {
+                        const href = anchor.getAttribute('href') || '';
+                        return href.includes('/brands/') || href.includes('/exhibitor-directory/');
+                      });
+                      return {
+                        all_anchors: anchors.length,
+                        exhibitor_anchors: exhibitorAnchors.length,
+                        url: window.location.href,
+                      };
+                    }
+                    """
+                )
+                print(f"Bulletin extractor JS failed. Page counts: {debug_counts}")
+            except Exception:  # noqa: BLE001
+                pass
+            return []
+
+    def _build_bulletin_directory_html(self, entries: list[dict[str, str]]) -> str:
+        parts = [
+            "<html><head><title>Bulletin Exhibitor Directory</title></head><body>",
+            '<main class="bulletin-directory">',
+        ]
+        for index, entry in enumerate(entries):
+            company_name = html.escape(normalize_text(str(entry.get("company_name") or "")))
+            profile_url = html.escape(str(entry.get("profile_url") or ""), quote=True)
+            booth_number = html.escape(normalize_text(str(entry.get("booth_number") or "")))
+            if not company_name or not profile_url:
+                continue
+            parts.append(f'<article class="bulletin-card" data-index="{index}">')
+            parts.append(f'<a class="bulletin-profile" href="{profile_url}">{company_name}</a>')
+            if booth_number:
+                parts.append(f'<div class="bulletin-booth">Booth #{booth_number}</div>')
+            parts.append("</article>")
+        parts.append("</main></body></html>")
+        return "".join(parts)
+
+    def _render_bulletin_directory(self, page: object) -> str:
+        harvested: dict[tuple[str, str], dict[str, str]] = {}
+        stall_rounds = 0
+        last_count = 0
+
+        for _ in range(40):
+            for entry in self._extract_bulletin_directory_cards(page):
+                key = (
+                    normalize_http_url(str(entry.get("profile_url") or "")) or "",
+                    normalize_text(str(entry.get("company_name") or "")),
+                )
+                if not key[0] or not key[1]:
+                    continue
+                existing = harvested.get(key)
+                if existing is None or (
+                    not existing.get("booth_number") and entry.get("booth_number")
+                ):
+                    harvested[key] = {
+                        "company_name": key[1],
+                        "profile_url": key[0],
+                        "booth_number": normalize_text(str(entry.get("booth_number") or "")),
+                    }
+
+            clicked = self._click_progress_controls(page)
+            try:
+                page.evaluate("() => window.scrollTo(0, document.body.scrollHeight)")
+            except Exception:  # noqa: BLE001
+                break
+            page.wait_for_timeout(1200)
+            try:
+                page.wait_for_load_state("networkidle", timeout=3000)
+            except Exception:  # noqa: BLE001
+                pass
+
+            current_count = len(harvested)
+            if current_count <= last_count and not clicked:
+                stall_rounds += 1
+            else:
+                stall_rounds = 0
+            last_count = max(last_count, current_count)
+            if stall_rounds >= 3:
+                break
+
+        return self._build_bulletin_directory_html(
+            sorted(
+                harvested.values(),
+                key=lambda item: item["company_name"].lower(),
+            )
+        )
+
+    def _stabilize_bulletin_directory(self, page: object) -> None:
+        last_count = 0
+        stall_rounds = 0
+
+        for _ in range(30):
+            clicked = self._click_progress_controls(page)
+            try:
+                page.evaluate("() => window.scrollTo(0, document.body.scrollHeight)")
+            except Exception:  # noqa: BLE001
+                break
+            page.wait_for_timeout(1200)
+            try:
+                page.wait_for_load_state("networkidle", timeout=3000)
+            except Exception:  # noqa: BLE001
+                pass
+
+            count = self._count_bulletin_profile_links(page)
+            if count <= last_count and not clicked:
+                stall_rounds += 1
+            else:
+                stall_rounds = 0
+            last_count = max(last_count, count)
+
+            if stall_rounds >= 3:
+                break
+
+        try:
+            page.evaluate("() => window.scrollTo(0, 0)")
+        except Exception:  # noqa: BLE001
+            pass
+
     def _stabilize_page(self, page: object) -> None:
         try:
             page.wait_for_load_state("networkidle", timeout=min(self.timeout_ms, 6000))
@@ -1056,6 +1289,10 @@ class BrowserRenderer:
 
         page.wait_for_timeout(800)
         self._dismiss_overlays(page)
+
+        if self._is_bulletin_directory_listing_url(page.url):
+            self._stabilize_bulletin_directory(page)
+            return
 
         last_height = 0
         stalls = 0
@@ -1100,6 +1337,8 @@ class BrowserRenderer:
             page.goto(url, wait_until="domcontentloaded")
             self._stabilize_page(page)
             final_url = normalize_http_url(page.url) or url
+            if self._is_bulletin_directory_listing_url(final_url):
+                return final_url, self._render_bulletin_directory(page)
             return final_url, page.content()
         finally:
             page.close()
@@ -6135,6 +6374,82 @@ def collect_directory_entries_with_query_probing(
     return entries
 
 
+def is_bulletin_profile_url(url: str) -> bool:
+    normalized = normalize_http_url(url)
+    if not normalized:
+        return False
+    parsed = urlparse(normalized)
+    if "bulletin.co" not in (parsed.netloc or "").lower():
+        return False
+    if parsed.query:
+        return False
+    path = (parsed.path or "").lower()
+    if "/brands/" in path:
+        return True
+    path_segments = [segment for segment in path.split("/") if segment]
+    return len(path_segments) >= 2 and path_segments[-2] == "exhibitor-directory"
+
+
+def extract_bulletin_directory_entries(
+    page: ParsedPage,
+    directory_url: str,
+    directory_page: int,
+) -> list[DirectoryEntry]:
+    booth_hints = booth_number_hints_by_profile(page, directory_url)
+    grouped: dict[str, ProfileEntryCandidate] = {}
+
+    for anchor in page.anchors:
+        if not is_bulletin_profile_url(anchor.absolute_url):
+            continue
+        if anchor.in_header or anchor.in_footer or anchor.in_nav:
+            continue
+
+        company_name = normalize_link_company_name(anchor.display_text)
+        if not company_name:
+            continue
+
+        profile_url = normalize_http_url(anchor.absolute_url)
+        if not profile_url:
+            continue
+
+        candidate = ProfileEntryCandidate(
+            company_name=company_name,
+            profile_url=profile_url,
+            booth_number=booth_hints.get(profile_url, ""),
+        )
+        existing = grouped.get(profile_url)
+        if existing is None:
+            grouped[profile_url] = candidate
+            continue
+        if len(candidate.company_name) > len(existing.company_name):
+            grouped[profile_url] = ProfileEntryCandidate(
+                company_name=candidate.company_name,
+                profile_url=profile_url,
+                booth_number=existing.booth_number or candidate.booth_number,
+            )
+            continue
+        if not existing.booth_number and candidate.booth_number:
+            grouped[profile_url] = ProfileEntryCandidate(
+                company_name=existing.company_name,
+                profile_url=profile_url,
+                booth_number=candidate.booth_number,
+            )
+
+    entries = [
+        DirectoryEntry(
+            sort_index=index,
+            directory_page=directory_page,
+            company_name=candidate.company_name,
+            profile_url=candidate.profile_url,
+            booth_number=candidate.booth_number,
+        )
+        for index, candidate in enumerate(
+            sorted(grouped.values(), key=lambda item: item.company_name.lower())
+        )
+    ]
+    return entries
+
+
 def collect_directory_entries_bulletin(
     seed_url: str,
     seed_page: ParsedPage,
@@ -6147,29 +6462,60 @@ def collect_directory_entries_bulletin(
     if page_loader is None:
         page_loader = load_static_page
 
-    try:
-        strategy, _seed_entries = choose_listing_strategy(
-            seed_page=seed_page,
-            directory_url=seed_url,
-            sample_size=max(1, min(sample_size, 1)),
-            profile_website_scraper=lambda _profile_url: "",
-        )
-    except RuntimeError:
-        return None
-
     print("Detected Bulletin directory. Using rendered listing-card extraction.")
+    requested_start = max(start_page or 1, 1)
+    requested_end = max(end_page or requested_start, requested_start)
+    requested_end = min(requested_end, requested_start + max_pages - 1)
+
+    entries: list[DirectoryEntry] = []
+    seen_profiles: set[str] = set()
+    consecutive_stalls = 0
     param_name = discover_query_page_param(seed_url, seed_page) or "page"
-    entries = collect_directory_entries_with_query_probing(
-        seed_url=seed_url,
-        seed_page=seed_page,
-        strategy=strategy,
-        directory_url=seed_url,
-        param_name=param_name,
-        start_page=start_page,
-        end_page=end_page,
-        max_pages=max_pages,
-        page_loader=page_loader,
-    )
+    seed_page_number = extract_page_number_from_url(seed_url)
+
+    for page_number in range(requested_start, requested_end + 1):
+        if seed_page_number == page_number or (
+            seed_page_number is None
+            and page_number == 1
+            and requested_start == 1
+        ):
+            current_page = seed_page
+        else:
+            _, _, current_page = page_loader(build_query_page_url(seed_url, param_name, page_number))
+
+        page_entries = extract_bulletin_directory_entries(
+            current_page,
+            directory_url=seed_url,
+            directory_page=page_number,
+        )
+        added = 0
+        for entry in page_entries:
+            if entry.profile_url in seen_profiles:
+                continue
+            seen_profiles.add(entry.profile_url)
+            entries.append(
+                DirectoryEntry(
+                    sort_index=len(entries),
+                    directory_page=page_number,
+                    company_name=entry.company_name,
+                    profile_url=entry.profile_url,
+                    booth_number=entry.booth_number,
+                )
+            )
+            added += 1
+
+        print(
+            f"Collected directory page {page_number} "
+            f"(bulletin rendered mode) ({len(page_entries)} matches, {len(entries)} total, {added} new)."
+        )
+
+        if not page_entries or added == 0:
+            consecutive_stalls += 1
+        else:
+            consecutive_stalls = 0
+        if consecutive_stalls >= 2:
+            break
+
     if not entries:
         return None
     return entries, ""
