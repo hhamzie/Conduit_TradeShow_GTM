@@ -3634,6 +3634,9 @@ def extract_table_row_entries(
     seen_profiles: set[str] = set()
 
     for row_html in HTML_TABLE_ROW_RE.findall(html_text):
+        if re.search(r"<th\b", row_html, flags=re.IGNORECASE):
+            continue
+
         cell_fragments = HTML_TABLE_CELL_RE.findall(row_html)
         if len(cell_fragments) < 2:
             continue
@@ -3670,6 +3673,149 @@ def extract_table_row_entries(
     return entries
 
 
+def collect_table_directory_entries_with_ajax_paginator(
+    seed_url: str,
+    seed_html: str,
+    seed_entries: list[DirectoryEntry],
+    start_page: int | None,
+    end_page: int | None,
+    max_pages: int,
+) -> list[DirectoryEntry] | None:
+    configs = discover_ajax_paginator_configs(seed_url, seed_html)
+    if not configs:
+        return None
+
+    tokens = extract_ajax_form_tokens(seed_html)
+    if tokens is None:
+        return None
+
+    requested_start = max(start_page or 1, 1)
+    chosen_config: AjaxPaginatorConfig | None = None
+    cached_page_entries: dict[int, list[DirectoryEntry]] = {}
+    current_tokens = tokens
+    ajax_loaded = False
+    seed_profile_urls = {entry.profile_url for entry in seed_entries}
+
+    for config in configs:
+        total_pages = ajax_total_pages(config)
+        if total_pages <= 1:
+            continue
+
+        requested_end = min(end_page or total_pages, total_pages)
+        requested_end = min(requested_end, requested_start + max_pages - 1)
+        if requested_start > requested_end:
+            raise ValueError("--start-page cannot be greater than --end-page.")
+
+        if requested_end == 1:
+            chosen_config = config
+            break
+
+        sample_page = requested_start if requested_start > 1 else 2
+        try:
+            payload = fetch_ajax_paginator_payload(
+                seed_url=seed_url,
+                config=config,
+                page_number=sample_page,
+                form_token=current_tokens[0],
+                form_time=current_tokens[1],
+                include_ajax_type=True,
+            )
+        except Exception:  # noqa: BLE001
+            continue
+
+        fragment_html = unquote(str(payload.get("data") or ""))
+        if not fragment_html.strip():
+            continue
+
+        sample_entries = extract_table_row_entries(
+            seed_url=seed_url,
+            html_text=fragment_html,
+            directory_page=sample_page,
+        )
+        sample_profile_urls = {entry.profile_url for entry in sample_entries}
+        if not sample_profile_urls:
+            continue
+        if sample_page != 1 and sample_profile_urls == seed_profile_urls:
+            continue
+
+        chosen_config = config
+        cached_page_entries[sample_page] = sample_entries
+        current_tokens = (
+            str(payload.get("formToken") or current_tokens[0]),
+            str(payload.get("formTime") or current_tokens[1]),
+        )
+        ajax_loaded = True
+        break
+
+    if chosen_config is None:
+        return None
+
+    total_pages = ajax_total_pages(chosen_config)
+    requested_end = min(end_page or total_pages, total_pages)
+    requested_end = min(requested_end, requested_start + max_pages - 1)
+    if requested_start > requested_end:
+        raise ValueError("--start-page cannot be greater than --end-page.")
+
+    print(
+        "Detected table-mode AJAX paginator. "
+        f"Will fetch up to {requested_end - requested_start + 1} page(s) "
+        f"out of {total_pages} total."
+    )
+
+    entries: list[DirectoryEntry] = []
+    seen_profiles: set[str] = set()
+
+    for page_number in range(requested_start, requested_end + 1):
+        if page_number == 1:
+            page_entries = seed_entries
+        elif page_number in cached_page_entries:
+            page_entries = cached_page_entries[page_number]
+        else:
+            payload = fetch_ajax_paginator_payload(
+                seed_url=seed_url,
+                config=chosen_config,
+                page_number=page_number,
+                form_token=current_tokens[0],
+                form_time=current_tokens[1],
+                include_ajax_type=not ajax_loaded,
+            )
+            ajax_loaded = True
+            current_tokens = (
+                str(payload.get("formToken") or current_tokens[0]),
+                str(payload.get("formTime") or current_tokens[1]),
+            )
+            fragment_html = unquote(str(payload.get("data") or ""))
+            page_entries = extract_table_row_entries(
+                seed_url=seed_url,
+                html_text=fragment_html,
+                directory_page=page_number,
+            )
+
+        added = 0
+        for entry in page_entries:
+            if entry.profile_url in seen_profiles:
+                continue
+            seen_profiles.add(entry.profile_url)
+            entries.append(
+                DirectoryEntry(
+                    sort_index=len(entries),
+                    directory_page=page_number,
+                    company_name=entry.company_name,
+                    profile_url=entry.profile_url,
+                    website_url_hint=entry.website_url_hint,
+                    booth_number=entry.booth_number,
+                )
+            )
+            added += 1
+
+        print(
+            f"Collected directory page {page_number} "
+            f"(table+ajax mode) ({len(page_entries)} matches, {len(entries)} total, {added} new)."
+        )
+
+    return entries or None
+
+
 def collect_table_directory_entries(
     seed_url: str,
     seed_html: str,
@@ -3685,6 +3831,17 @@ def collect_table_directory_entries(
     seed_entries = extract_table_row_entries(seed_url, seed_html, directory_page=1)
     if len(seed_entries) < 3:
         return None
+
+    ajax_entries = collect_table_directory_entries_with_ajax_paginator(
+        seed_url=seed_url,
+        seed_html=seed_html,
+        seed_entries=seed_entries,
+        start_page=start_page,
+        end_page=end_page,
+        max_pages=max_pages,
+    )
+    if ajax_entries is not None:
+        return ajax_entries
 
     page_numbers = [
         page_number
