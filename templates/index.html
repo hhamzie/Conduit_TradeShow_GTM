@@ -140,8 +140,9 @@
       action="/scrape/bulk"
       method="post"
       enctype="multipart/form-data"
-      data-direct-download-form
+      data-bulk-download-form
       data-progress-target="bulk-scrape-status"
+      data-progress-bar-target="bulk-scrape-progress-bar"
       data-loading-label="Building ZIP..."
     >
       <label class="lane-form-wide">
@@ -150,6 +151,7 @@
       </label>
       <button type="submit">Run Bulk Scrape and Download ZIP</button>
     </form>
+    <progress id="bulk-scrape-progress-bar" max="1" value="0" hidden style="width: 100%; margin-top: 0.75rem;"></progress>
     <p id="bulk-scrape-status" class="inline-status" hidden></p>
     <p class="mini-note">Expected columns: <strong>Show</strong>, <strong>Date</strong>, <strong>Place</strong>, <strong>Link</strong>.</p>
   </article>

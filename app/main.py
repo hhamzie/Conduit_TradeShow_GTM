@@ -4,13 +4,15 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 import hmac
 from pathlib import Path
+from threading import Lock, Thread
+from uuid import uuid4
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi.responses import JSONResponse
 from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
-from starlette.concurrency import run_in_threadpool
 from starlette import status
 from starlette.middleware.sessions import SessionMiddleware
 
@@ -48,6 +50,66 @@ app.add_middleware(
     same_site="lax",
 )
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
+
+bulk_scrape_jobs: dict[str, dict[str, object]] = {}
+bulk_scrape_jobs_lock = Lock()
+
+
+def set_bulk_scrape_job(job_id: str, **updates: object) -> dict[str, object]:
+    with bulk_scrape_jobs_lock:
+        job = bulk_scrape_jobs.setdefault(
+            job_id,
+            {
+                "job_id": job_id,
+                "status": "queued",
+                "completed": 0,
+                "total": 0,
+                "current_show": "",
+                "message": "Queued.",
+                "download_url": "",
+                "error": "",
+            },
+        )
+        job.update(updates)
+        return dict(job)
+
+
+def get_bulk_scrape_job(job_id: str) -> dict[str, object] | None:
+    with bulk_scrape_jobs_lock:
+        job = bulk_scrape_jobs.get(job_id)
+        return dict(job) if job is not None else None
+
+
+def run_bulk_scrape_job(job_id: str, payload: bytes) -> None:
+    def progress_callback(completed: int, total: int, show_name: str, message: str) -> None:
+        set_bulk_scrape_job(
+            job_id,
+            status="running",
+            completed=completed,
+            total=total,
+            current_show=show_name,
+            message=message,
+        )
+
+    try:
+        set_bulk_scrape_job(job_id, status="running", message="Preparing bulk scrape...")
+        result = run_bulk_direct_scrape(payload, progress_callback=progress_callback)
+        set_bulk_scrape_job(
+            job_id,
+            status="completed",
+            completed=result.show_count,
+            total=result.show_count,
+            message=f"Finished {result.success_count} show(s) with {result.failed_count} failure(s).",
+            download_url=f"/scrape/bulk/download/{job_id}",
+            archive_path=str(result.archive_path),
+        )
+    except Exception as exc:  # noqa: BLE001
+        set_bulk_scrape_job(
+            job_id,
+            status="failed",
+            error=str(exc),
+            message=str(exc),
+        )
 
 
 def is_authenticated(request: Request) -> bool:
@@ -495,18 +557,35 @@ async def scrape_many_shows(
     if not payload:
         request.session["bulk_scrape_error"] = "The uploaded CSV was empty."
         return RedirectResponse("/", status_code=status.HTTP_303_SEE_OTHER)
-    try:
-        result = await run_in_threadpool(run_bulk_direct_scrape, payload)
-    except ValueError as exc:
-        request.session["bulk_scrape_error"] = str(exc)
-        return RedirectResponse("/", status_code=status.HTTP_303_SEE_OTHER)
-    except Exception as exc:  # noqa: BLE001
-        request.session["bulk_scrape_error"] = str(exc)
-        return RedirectResponse("/", status_code=status.HTTP_303_SEE_OTHER)
+    job_id = uuid4().hex
+    set_bulk_scrape_job(job_id, status="queued", message="Queued bulk scrape job.")
+    Thread(target=run_bulk_scrape_job, args=(job_id, payload), daemon=True).start()
+    return JSONResponse({"job_id": job_id})
 
+
+@app.get("/scrape/bulk/status/{job_id}")
+def bulk_scrape_status(request: Request, job_id: str):
+    require_authenticated(request)
+    job = get_bulk_scrape_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Bulk scrape job not found.")
+    return JSONResponse(job)
+
+
+@app.get("/scrape/bulk/download/{job_id}")
+def bulk_scrape_download(request: Request, job_id: str):
+    require_authenticated(request)
+    job = get_bulk_scrape_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Bulk scrape job not found.")
+    if job.get("status") != "completed":
+        raise HTTPException(status_code=409, detail="Bulk scrape is not finished yet.")
+    archive_path = Path(str(job.get("archive_path") or "")).expanduser()
+    if not archive_path.exists():
+        raise HTTPException(status_code=404, detail="Bulk scrape archive was not found.")
     return FileResponse(
-        result.archive_path,
-        filename=result.archive_path.name,
+        archive_path,
+        filename=archive_path.name,
         media_type="application/zip",
     )
 

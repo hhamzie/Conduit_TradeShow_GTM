@@ -11,6 +11,7 @@ from pathlib import Path
 import re
 import zipfile
 from urllib.parse import urlparse
+from collections.abc import Callable
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
@@ -300,7 +301,10 @@ def run_single_show_scrape(
     )
 
 
-def run_bulk_direct_scrape(payload: bytes) -> BulkDirectScrapeResult:
+def run_bulk_direct_scrape(
+    payload: bytes,
+    progress_callback: Callable[[int, int, str, str], None] | None = None,
+) -> BulkDirectScrapeResult:
     settings = get_settings()
     text = payload.decode("utf-8-sig")
     reader = csv.DictReader(io.StringIO(text))
@@ -308,6 +312,18 @@ def run_bulk_direct_scrape(payload: bytes) -> BulkDirectScrapeResult:
     missing = [field for field in ("show", "date", "place", "link") if field not in headers]
     if missing:
         raise ValueError(f"Missing required columns: {', '.join(missing)}")
+    rows = list(reader)
+
+    return _run_bulk_direct_scrape_rows(rows, headers, settings, progress_callback)
+
+
+def _run_bulk_direct_scrape_rows(
+    rows: list[dict[str, str]],
+    headers: dict[str, str],
+    settings,
+    progress_callback: Callable[[int, int, str, str], None] | None = None,
+) -> BulkDirectScrapeResult:
+    total_rows = len(rows)
 
     archive_path = direct_bulk_archive_path()
     archive_path.parent.mkdir(parents=True, exist_ok=True)
@@ -316,11 +332,12 @@ def run_bulk_direct_scrape(payload: bytes) -> BulkDirectScrapeResult:
     failed_count = 0
 
     with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-        for row_number, row in enumerate(reader, start=2):
+        for row_number, row in enumerate(rows, start=2):
             show_name = (row.get(headers["show"]) or "").strip()
             event_date_raw = (row.get(headers["date"]) or "").strip()
             place = (row.get(headers["place"]) or "").strip()
             link = (row.get(headers["link"]) or "").strip()
+            progress_name = show_name or f"Row {row_number}"
 
             if not (show_name and event_date_raw and place and link):
                 failed_count += 1
@@ -337,6 +354,13 @@ def run_bulk_direct_scrape(payload: bytes) -> BulkDirectScrapeResult:
                         "error": "Missing one or more required fields.",
                     }
                 )
+                if progress_callback is not None:
+                    progress_callback(
+                        success_count + failed_count,
+                        total_rows,
+                        progress_name,
+                        "Missing one or more required fields.",
+                    )
                 continue
 
             try:
@@ -367,6 +391,13 @@ def run_bulk_direct_scrape(payload: bytes) -> BulkDirectScrapeResult:
                     }
                 )
                 success_count += 1
+                if progress_callback is not None:
+                    progress_callback(
+                        success_count + failed_count,
+                        total_rows,
+                        show_name,
+                        f"Finished {show_name} ({success_count + failed_count}/{total_rows})",
+                    )
             except Exception as exc:  # noqa: BLE001
                 failed_count += 1
                 manifest_rows.append(
@@ -382,6 +413,13 @@ def run_bulk_direct_scrape(payload: bytes) -> BulkDirectScrapeResult:
                         "error": str(exc),
                     }
                 )
+                if progress_callback is not None:
+                    progress_callback(
+                        success_count + failed_count,
+                        total_rows,
+                        show_name,
+                        f"Failed {show_name}: {exc}",
+                    )
             finally:
                 gc.collect()
 
