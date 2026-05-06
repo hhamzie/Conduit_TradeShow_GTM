@@ -29,6 +29,7 @@ class Settings:
     default_run_offset_days: int
     worker_poll_seconds: int
     default_scraper_workers: int
+    bulk_scraper_workers: int
     default_max_pages: int
     default_sample_size: int
     default_browser_mode: str
@@ -80,6 +81,7 @@ def get_settings() -> Settings:
         default_run_offset_days=int(os.getenv("DEFAULT_RUN_OFFSET_DAYS", "14")),
         worker_poll_seconds=int(os.getenv("WORKER_POLL_SECONDS", "30")),
         default_scraper_workers=int(os.getenv("DEFAULT_SCRAPER_WORKERS", "8")),
+        bulk_scraper_workers=int(os.getenv("BULK_SCRAPER_WORKERS", "1")),
         default_max_pages=int(os.getenv("DEFAULT_MAX_PAGES", "250")),
         default_sample_size=int(os.getenv("DEFAULT_SAMPLE_SIZE", "3")),
         default_browser_mode=os.getenv("DEFAULT_BROWSER_MODE", "auto"),

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import gc
 import hashlib
 import io
 import json
@@ -247,9 +248,10 @@ def _run_direct_scrape(
     output_path: Path,
     require_website: bool = True,
     browser_mode: str = "auto",
+    workers: int | None = None,
 ) -> DirectScrapeResult:
     settings = get_settings()
-    direct_scrape_workers = min(settings.default_scraper_workers, 4)
+    direct_scrape_workers = workers or min(settings.default_scraper_workers, 4)
     result = run_scrape(
         ScrapeOptions(
             directory_url=link.strip(),
@@ -299,6 +301,7 @@ def run_single_show_scrape(
 
 
 def run_bulk_direct_scrape(payload: bytes) -> BulkDirectScrapeResult:
+    settings = get_settings()
     text = payload.decode("utf-8-sig")
     reader = csv.DictReader(io.StringIO(text))
     headers = normalize_headers(reader.fieldnames)
@@ -346,6 +349,7 @@ def run_bulk_direct_scrape(payload: bytes) -> BulkDirectScrapeResult:
                     output_path=output_path,
                     require_website=True,
                     browser_mode="prefer",
+                    workers=max(1, min(settings.bulk_scraper_workers, 2)),
                 )
                 relative_name = output_path.name
                 archive.write(result.output_path, arcname=relative_name)
@@ -378,6 +382,8 @@ def run_bulk_direct_scrape(payload: bytes) -> BulkDirectScrapeResult:
                         "error": str(exc),
                     }
                 )
+            finally:
+                gc.collect()
 
         manifest_buffer = io.StringIO()
         writer = csv.DictWriter(
