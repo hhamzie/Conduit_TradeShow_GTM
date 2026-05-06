@@ -366,6 +366,13 @@ def _run_bulk_direct_scrape_rows(
             try:
                 event_date = parse_show_date(event_date_raw)
                 output_path = direct_single_export_path(show_name, event_date)
+                if progress_callback is not None:
+                    progress_callback(
+                        success_count + failed_count,
+                        total_rows,
+                        show_name,
+                        f"Scraping {show_name} ({success_count + failed_count + 1}/{total_rows})",
+                    )
                 result = _run_direct_scrape(
                     show_name=show_name,
                     place=place,
