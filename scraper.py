@@ -5126,16 +5126,22 @@ def normalize_booth_number_candidate(value: str) -> str:
     cleaned = raw_cleaned.upper()
     if not cleaned:
         return ""
-    if not re.fullmatch(r"(?=.*\d)[A-Z0-9]{1,8}(?:[-/][A-Z0-9]{1,8})*", cleaned):
+    if not re.fullmatch(
+        r"(?=.*\d)(?:[A-Z]{1,4}\d{1,8}[A-Z]?|\d{1,8}[A-Z]?)(?:[-/][A-Z0-9]{1,8})*",
+        cleaned,
+    ):
         suffix_match = re.fullmatch(
             r"(?P<booth>(?:[A-Za-z]{1,4}\d{1,8}|\d{1,8})(?:[-/][A-Za-z0-9]{1,8})*)"
-            r"(?P<junk>[a-z]{4,})",
+            r"(?P<junk>[A-Za-z]{2,})",
             raw_cleaned,
         )
         if not suffix_match:
             return ""
         cleaned = suffix_match.group("booth").upper()
-        if not re.fullmatch(r"(?=.*\d)[A-Z0-9]{1,8}(?:[-/][A-Z0-9]{1,8})*", cleaned):
+        if not re.fullmatch(
+            r"(?=.*\d)(?:[A-Z]{1,4}\d{1,8}[A-Z]?|\d{1,8}[A-Z]?)(?:[-/][A-Z0-9]{1,8})*",
+            cleaned,
+        ):
             return ""
     return cleaned
 
@@ -6669,6 +6675,21 @@ def filter_records_with_websites(records: list[CompanyRecord]) -> list[CompanyRe
     return [record for record in records if record.website_url]
 
 
+def apply_website_requirement(records: list[CompanyRecord]) -> list[CompanyRecord]:
+    kept_records = filter_records_with_websites(records)
+    if kept_records:
+        dropped_records = len(records) - len(kept_records)
+        if dropped_records:
+            print(f"Dropped {dropped_records} company record(s) without a website/domain.")
+        return kept_records
+
+    if records:
+        print(
+            "No records had a website/domain. Keeping all records because company names were still collected."
+        )
+    return records
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
@@ -6976,13 +6997,7 @@ def run_scrape(options: ScrapeOptions) -> ScrapeResult:
             browser_renderer=browser_renderer if used_browser_fallback else None,
         )
         if options.require_website:
-            kept_records = filter_records_with_websites(records)
-            dropped_records = len(records) - len(kept_records)
-            if dropped_records:
-                print(
-                    f"Dropped {dropped_records} company record(s) without a website/domain."
-                )
-            records = kept_records
+            records = apply_website_requirement(records)
         output_path = resolve_output_path(
             str(options.output_path) if options.output_path is not None else None,
             seed_url,

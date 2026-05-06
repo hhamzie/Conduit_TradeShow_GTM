@@ -6,6 +6,7 @@ import unittest
 from unittest.mock import patch
 
 from scraper import (
+    apply_website_requirement,
     build_listing_candidates,
     build_mapyourshow_search_url,
     collect_table_directory_entries,
@@ -360,6 +361,33 @@ class BoothNumberTests(unittest.TestCase):
     def test_normalize_booth_number_candidate_strips_trailing_lowercase_junk(self) -> None:
         self.assertEqual(normalize_booth_number_candidate("2601randomstring"), "2601")
         self.assertEqual(normalize_booth_number_candidate("W746randomstring"), "W746")
+        self.assertEqual(normalize_booth_number_candidate("2601ncp"), "2601")
+        self.assertEqual(normalize_booth_number_candidate("W55ncp"), "W55")
+        self.assertEqual(normalize_booth_number_candidate("W55A"), "W55A")
+
+    def test_apply_website_requirement_keeps_records_when_none_have_websites(self) -> None:
+        records = [
+            CompanyRecord(
+                sort_index=0,
+                directory_page=1,
+                company_name="da.studio",
+                profile_url="https://icff.bulletin.co/icff/exhibitor-directory/da-studio",
+                website_url="",
+                booth_number="W47",
+            ),
+            CompanyRecord(
+                sort_index=1,
+                directory_page=1,
+                company_name="C.Plot",
+                profile_url="https://icff.bulletin.co/icff/exhibitor-directory/c-plot",
+                website_url="",
+                booth_number="W81",
+            ),
+        ]
+
+        kept_records = apply_website_requirement(records)
+
+        self.assertEqual(kept_records, records)
 
     def test_is_mapyourshow_directory_detects_whitelabel_host(self) -> None:
         html = """
