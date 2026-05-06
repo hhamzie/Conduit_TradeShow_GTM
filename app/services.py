@@ -372,7 +372,7 @@ def _run_bulk_direct_scrape_rows(
                     link=link,
                     output_path=output_path,
                     require_website=True,
-                    browser_mode="prefer",
+                    browser_mode="auto",
                     workers=max(1, min(settings.bulk_scraper_workers, 2)),
                 )
                 relative_name = output_path.name
