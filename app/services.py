@@ -246,17 +246,19 @@ def _run_direct_scrape(
     link: str,
     output_path: Path,
     require_website: bool = True,
-    browser_mode: str = "prefer",
+    browser_mode: str = "auto",
 ) -> DirectScrapeResult:
+    settings = get_settings()
+    direct_scrape_workers = min(settings.default_scraper_workers, 4)
     result = run_scrape(
         ScrapeOptions(
             directory_url=link.strip(),
             output_path=output_path,
-            workers=get_settings().default_scraper_workers,
-            max_pages=get_settings().default_max_pages,
-            sample_size=get_settings().default_sample_size,
+            workers=direct_scrape_workers,
+            max_pages=settings.default_max_pages,
+            sample_size=settings.default_sample_size,
             browser_mode=browser_mode,
-            browser_timeout_ms=get_settings().default_browser_timeout_ms,
+            browser_timeout_ms=settings.default_browser_timeout_ms,
             conference_name=show_name.strip(),
             conference_location=place.strip(),
             require_website=require_website,
@@ -292,7 +294,7 @@ def run_single_show_scrape(
         link=normalized_link,
         output_path=output_path,
         require_website=True,
-        browser_mode="prefer",
+        browser_mode="auto",
     )
 
 

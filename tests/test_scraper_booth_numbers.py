@@ -5,6 +5,7 @@ import tempfile
 import unittest
 
 from scraper import (
+    collect_table_directory_entries,
     CompanyRecord,
     extract_booth_number_from_profile,
     extract_table_row_entries,
@@ -82,6 +83,46 @@ class BoothNumberTests(unittest.TestCase):
         page = parse_page("https://example.com/exhibitor/acme", html)
         booth_number = extract_booth_number_from_profile(page, html)
         self.assertEqual(booth_number, "C21")
+
+    def test_collect_table_directory_entries_keeps_booth_numbers(self) -> None:
+        html = """
+        <html>
+          <body>
+            <table>
+              <tr>
+                <td>C21</td>
+                <td>Acme Packaging</td>
+                <td><a href="/exhibitor/acme">View</a></td>
+              </tr>
+              <tr>
+                <td>D14</td>
+                <td>Beta Labs</td>
+                <td><a href="/exhibitor/beta">View</a></td>
+              </tr>
+              <tr>
+                <td>E07</td>
+                <td>Gamma Group</td>
+                <td><a href="/exhibitor/gamma">View</a></td>
+              </tr>
+            </table>
+          </body>
+        </html>
+        """
+
+        seed_url = "https://www.luxepacknewyork.com/exhibitors-lp"
+        seed_page = parse_page(seed_url, html)
+        entries = collect_table_directory_entries(
+            seed_url=seed_url,
+            seed_html=html,
+            seed_page=seed_page,
+            start_page=1,
+            end_page=1,
+            max_pages=1,
+        )
+
+        self.assertIsNotNone(entries)
+        assert entries is not None
+        self.assertEqual([entry.booth_number for entry in entries], ["C21", "D14", "E07"])
 
 
 if __name__ == "__main__":

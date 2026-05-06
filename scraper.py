@@ -3740,6 +3740,8 @@ def collect_table_directory_entries(
                     directory_page=page_number,
                     company_name=entry.company_name,
                     profile_url=entry.profile_url,
+                    website_url_hint=entry.website_url_hint,
+                    booth_number=entry.booth_number,
                 )
             )
             added += 1
