@@ -150,6 +150,7 @@ GENERIC_ANCHOR_PHRASES = {
     "apply",
     "back",
     "blog",
+    "brand thumbnail",
     "browse",
     "calendar",
     "categories",
@@ -425,6 +426,7 @@ MYS_FILTER_PARAMS = {
     "pavilion",
     "hall",
     "georegion",
+    "list",
     "search",
 }
 MYS_SOCIAL_FIELDS = (
@@ -558,11 +560,13 @@ TRACKING_IFRAME_HOST_MARKERS = (
     "googleadservices.com",
     "googlesyndication.com",
     "googletagmanager.com",
+    "insight.adsrvr.org",
 )
 TRACKING_IFRAME_PATH_MARKERS = (
     "/activityi",
     "/activity;",
     "/pagead/",
+    "/track/cei",
 )
 NEXT_DATA_SCRIPT_RE = re.compile(
     r"<script[^>]+\bid=[\"']__NEXT_DATA__[\"'][^>]*>(.*?)</script>",
@@ -854,6 +858,13 @@ class ContainerEntryCandidate:
     profile_url: str
     signature: tuple[str, ...]
     order: int
+    booth_number: str = ""
+
+
+@dataclass(frozen=True)
+class ProfileEntryCandidate:
+    company_name: str
+    profile_url: str
     booth_number: str = ""
 
 
@@ -2350,16 +2361,18 @@ def is_swapcard_site(url: str) -> bool:
 
 
 def is_mapyourshow_directory(seed_url: str, seed_html: str) -> bool:
-    if not is_mapyourshow_site(seed_url):
+    if "getExhibitorURL" not in seed_html:
         return False
     return (
-        "remote-proxy.cfm?action=search" in seed_html
-        and "getExhibitorURL" in seed_html
-        and (
-            "searchtype=exhibitorgallery" in seed_html
-            or 'searchtype:"exhibitorgallery"' in seed_html
-            or "searchtype:'exhibitorgallery'" in seed_html
+        (
+            "remote-proxy.cfm?action=search" in seed_html
+            and (
+                "searchtype=exhibitorgallery" in seed_html
+                or 'searchtype:"exhibitorgallery"' in seed_html
+                or "searchtype:'exhibitorgallery'" in seed_html
+            )
         )
+        or "searchresults.results.exhibitor" in seed_html
     )
 
 
@@ -2436,6 +2449,27 @@ def build_mapyourshow_profile_url(seed_url: str, exhibitor_id: str) -> str:
     )
 
 
+def extract_mapyourshow_booth_number(fields: dict[str, object]) -> str:
+    raw_values = fields.get("boothsdisplay_la") or fields.get("booths_la") or ()
+    values: list[str] = []
+
+    if isinstance(raw_values, str):
+        values = [part.strip() for part in raw_values.split(",")]
+    elif isinstance(raw_values, list):
+        values = [normalize_text(str(value)) for value in raw_values if str(value).strip()]
+
+    booth_numbers: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        normalized = normalize_booth_number_candidate(value)
+        if not normalized or normalized in seen:
+            continue
+        booth_numbers.append(normalized)
+        seen.add(normalized)
+
+    return ", ".join(booth_numbers)
+
+
 def collect_directory_entries_mapyourshow(
     seed_url: str,
     start_page: int | None,
@@ -2503,6 +2537,7 @@ def collect_directory_entries_mapyourshow(
                 continue
 
             profile_url = build_mapyourshow_profile_url(seed_url, exhibitor_id)
+            booth_number = extract_mapyourshow_booth_number(fields)
             if profile_url in seen_profiles:
                 continue
 
@@ -2513,6 +2548,7 @@ def collect_directory_entries_mapyourshow(
                     directory_page=page_number,
                     company_name=company_name,
                     profile_url=profile_url,
+                    booth_number=booth_number,
                 )
             )
             added += 1
@@ -3632,8 +3668,9 @@ def extract_table_row_entries(
 ) -> list[DirectoryEntry]:
     entries: list[DirectoryEntry] = []
     seen_profiles: set[str] = set()
+    table_html = SCRIPT_STYLE_RE.sub(" ", html_text or "")
 
-    for row_html in HTML_TABLE_ROW_RE.findall(html_text):
+    for row_html in HTML_TABLE_ROW_RE.findall(table_html):
         if re.search(r"<th\b", row_html, flags=re.IGNORECASE):
             continue
 
@@ -3930,6 +3967,8 @@ def is_companyish_text(text: str) -> bool:
         return False
     if lower in PAGINATION_WORDS:
         return False
+    if PROFILE_BOOTH_LABEL_RE.fullmatch(text) or PROFILE_BOOTH_REVERSE_LABEL_RE.fullmatch(text):
+        return False
     if lower.startswith("page ") and lower[5:].isdigit():
         return False
     if len(text) < 2 or len(text) > 140:
@@ -3983,6 +4022,22 @@ def choose_better_link(
 ) -> AnchorRecord | ActionRecord:
     existing_text = existing.display_text
     candidate_text = candidate.display_text
+    existing_company_name = normalize_link_company_name(existing_text)
+    candidate_company_name = normalize_link_company_name(candidate_text)
+
+    if existing_company_name and not candidate_company_name:
+        return existing
+    if candidate_company_name and not existing_company_name:
+        return candidate
+    if existing_company_name and candidate_company_name:
+        existing_is_clean = existing_company_name.lower() == existing_text.lower()
+        candidate_is_clean = candidate_company_name.lower() == candidate_text.lower()
+        if existing_is_clean != candidate_is_clean:
+            return existing if existing_is_clean else candidate
+        if existing_company_name.lower() != candidate_company_name.lower():
+            return candidate if len(candidate_company_name) > len(existing_company_name) else existing
+        if len(candidate_text) != len(existing_text):
+            return candidate if len(candidate_text) < len(existing_text) else existing
 
     if not existing_text:
         return candidate
@@ -3995,13 +4050,35 @@ def choose_better_link(
     return existing
 
 
+def normalize_link_company_name(text: str) -> str:
+    cleaned = normalize_text(text)
+    if not cleaned:
+        return ""
+
+    cleaned = re.sub(r"\bbrand thumbnail\b", " ", cleaned, flags=re.IGNORECASE)
+    cleaned = PROFILE_BOOTH_LABEL_RE.sub(" ", cleaned)
+    cleaned = PROFILE_BOOTH_REVERSE_LABEL_RE.sub(" ", cleaned)
+    cleaned = normalize_seed_company_name(cleaned.strip(" -|,:#"))
+    if not cleaned or not is_companyish_text(cleaned):
+        return ""
+    return cleaned
+
+
 def choose_better_container_candidate(
     existing: ContainerEntryCandidate,
     candidate: ContainerEntryCandidate,
 ) -> ContainerEntryCandidate:
-    if len(candidate.company_name) > len(existing.company_name):
-        return candidate
-    return existing
+    preferred = candidate if len(candidate.company_name) > len(existing.company_name) else existing
+    merged_booth_number = existing.booth_number or candidate.booth_number
+    if preferred.booth_number == merged_booth_number:
+        return preferred
+    return ContainerEntryCandidate(
+        company_name=preferred.company_name,
+        profile_url=preferred.profile_url,
+        signature=preferred.signature,
+        order=min(existing.order, candidate.order),
+        booth_number=merged_booth_number,
+    )
 
 
 def is_same_site_company_link(
@@ -4063,7 +4140,11 @@ def build_link_listing_candidates(
         if unique_urls < 3:
             continue
 
-        texts = [record.display_text for record in by_url.values() if record.display_text]
+        texts = [
+            company_name
+            for record in by_url.values()
+            if (company_name := normalize_link_company_name(record.display_text))
+        ]
         if not texts:
             continue
 
@@ -4088,6 +4169,11 @@ def build_link_listing_candidates(
     unique_fallback_urls = {record.absolute_url for record in fallback_links}
     if len(unique_fallback_urls) >= 3:
         fallback_texts = [record.display_text for record in fallback_links if record.display_text]
+        fallback_texts = [
+            company_name
+            for text in fallback_texts
+            if (company_name := normalize_link_company_name(text))
+        ]
         diversity = (
             len({text.lower() for text in fallback_texts}) / len(unique_fallback_urls)
             if fallback_texts
@@ -4100,7 +4186,11 @@ def build_link_listing_candidates(
                 url_group="*",
                 base_score=len(unique_fallback_urls) * 12 + diversity * 20 + 5,
                 unique_urls=len(unique_fallback_urls),
-                sample_names=tuple(record.display_text for record in fallback_links[:3]),
+                sample_names=tuple(
+                    company_name
+                    for record in fallback_links
+                    if (company_name := normalize_link_company_name(record.display_text))
+                )[:3],
             )
         )
 
@@ -4207,6 +4297,35 @@ def text_only_container_name_parts(text: str) -> tuple[str, str]:
     return cleaned, booth_code
 
 
+def extract_booth_number_from_text(text: str) -> str:
+    normalized_text = normalize_text(text)
+    if not normalized_text:
+        return ""
+    for pattern in (PROFILE_BOOTH_LABEL_RE, PROFILE_BOOTH_REVERSE_LABEL_RE):
+        match = pattern.search(normalized_text)
+        if not match:
+            continue
+        booth_number = normalize_booth_number_candidate(match.group("booth"))
+        if booth_number:
+            return booth_number
+    return ""
+
+
+def extract_container_booth_number(container: ContainerRecord) -> str:
+    booth_candidates = (
+        *container.heading_texts,
+        container.text,
+        *(action.display_text for action in container.actions),
+        *(action.title_attr for action in container.actions),
+        *(action.aria_label for action in container.actions),
+    )
+    for raw_text in booth_candidates:
+        booth_number = extract_booth_number_from_text(raw_text)
+        if booth_number:
+            return booth_number
+    return ""
+
+
 def build_text_only_fragment_url(page_url: str, company_name: str, booth_code: str) -> str:
     normalized = normalize_http_url(page_url) or page_url
     parsed = urlparse(normalized)
@@ -4265,17 +4384,37 @@ def extract_container_candidate(
     if container.in_header or container.in_footer or container.in_nav:
         return None
 
-    heading_candidates = dedupe_preserving_order(list(container.heading_texts))
-    if len(heading_candidates) > 5:
+    raw_heading_candidates = dedupe_preserving_order(list(container.heading_texts))
+    if len(raw_heading_candidates) > 5:
         return None
+
+    name_candidates: list[str] = []
+    seen_name_candidates: set[str] = set()
+
+    for heading_text in raw_heading_candidates:
+        normalized_name = normalize_link_company_name(heading_text) or normalize_seed_company_name(
+            heading_text
+        )
+        if not normalized_name or normalized_name.lower() in seen_name_candidates:
+            continue
+        seen_name_candidates.add(normalized_name.lower())
+        name_candidates.append(normalized_name)
+
+    for action in container.actions:
+        for action_text in (action.display_text, action.title_attr, action.aria_label):
+            normalized_name = normalize_link_company_name(action_text)
+            if not normalized_name or normalized_name.lower() in seen_name_candidates:
+                continue
+            seen_name_candidates.add(normalized_name.lower())
+            name_candidates.append(normalized_name)
 
     company_name = ""
     best_name_score = float("-inf")
-    for heading_text in heading_candidates:
-        score = score_container_company_name(heading_text)
+    for candidate_name in name_candidates:
+        score = score_container_company_name(candidate_name)
         if score > best_name_score:
             best_name_score = score
-            company_name = heading_text
+            company_name = candidate_name
 
     if not company_name:
         text_only_name, _booth_code = text_only_container_name_parts(container.text)
@@ -4284,6 +4423,8 @@ def extract_container_candidate(
 
     if not company_name:
         return None
+
+    booth_number = extract_container_booth_number(container)
 
     by_url: dict[str, tuple[float, ActionRecord]] = {}
     for action in container.actions:
@@ -4312,6 +4453,7 @@ def extract_container_candidate(
         profile_url=best_profile_url,
         signature=container.signature,
         order=container.order,
+        booth_number=booth_number,
     )
 
 
@@ -4519,12 +4661,27 @@ def extract_directory_entries_from_links(
             grouped[candidate.absolute_url] = choose_better_link(existing, candidate)
 
     entries = [
-        (record.display_text, record.absolute_url)
+        (company_name, record.absolute_url)
         for record in grouped.values()
-        if record.display_text
+        if (company_name := normalize_link_company_name(record.display_text))
     ]
     entries.sort(key=lambda item: item[0].lower())
     return entries
+
+
+def extract_directory_entry_candidates_from_links(
+    records: list[AnchorRecord] | list[ActionRecord],
+    strategy: ListingStrategy,
+    directory_url: str,
+) -> list[ProfileEntryCandidate]:
+    return [
+        ProfileEntryCandidate(company_name=company_name, profile_url=profile_url)
+        for company_name, profile_url in extract_directory_entries_from_links(
+            records,
+            strategy=strategy,
+            directory_url=directory_url,
+        )
+    ]
 
 
 def extract_directory_entries_from_containers(
@@ -4575,6 +4732,58 @@ def extract_directory_entries_from_containers(
     return entries
 
 
+def extract_directory_entry_candidates_from_containers(
+    page: ParsedPage,
+    strategy: ListingStrategy,
+    directory_url: str,
+) -> list[ProfileEntryCandidate]:
+    grouped: dict[str, ContainerEntryCandidate] = {}
+    candidates = [
+        candidate
+        for container in page.containers
+        if (candidate := extract_container_candidate(container, directory_url)) is not None
+    ]
+
+    def matches(candidate: ContainerEntryCandidate) -> bool:
+        if strategy.signature and candidate.signature != strategy.signature:
+            return False
+        if strategy.url_group != "*" and url_group(candidate.profile_url) != strategy.url_group:
+            return False
+        return True
+
+    matching_candidates = [candidate for candidate in candidates if matches(candidate)]
+    if len(matching_candidates) < 2 and strategy.signature:
+        matching_candidates = [
+            candidate for candidate in candidates if candidate.signature == strategy.signature
+        ]
+
+    if len(matching_candidates) < 2 and strategy.url_group != "*":
+        matching_candidates = [
+            candidate
+            for candidate in candidates
+            if url_group(candidate.profile_url) == strategy.url_group
+        ]
+
+    for candidate in matching_candidates:
+        existing = grouped.get(candidate.profile_url)
+        if existing is None:
+            grouped[candidate.profile_url] = candidate
+        else:
+            grouped[candidate.profile_url] = choose_better_container_candidate(existing, candidate)
+
+    entries = [
+        ProfileEntryCandidate(
+            company_name=candidate.company_name,
+            profile_url=candidate.profile_url,
+            booth_number=candidate.booth_number,
+        )
+        for candidate in grouped.values()
+        if candidate.company_name
+    ]
+    entries.sort(key=lambda item: item.company_name.lower())
+    return entries
+
+
 def extract_directory_entries_from_text_containers(
     page: ParsedPage,
     strategy: ListingStrategy,
@@ -4613,6 +4822,48 @@ def extract_directory_entries_from_text_containers(
     return entries
 
 
+def extract_directory_entry_candidates_from_text_containers(
+    page: ParsedPage,
+    strategy: ListingStrategy,
+) -> list[ProfileEntryCandidate]:
+    grouped: dict[str, ContainerEntryCandidate] = {}
+    candidates = [
+        candidate
+        for container in page.containers
+        if (candidate := extract_text_only_container_candidate(container, page.url)) is not None
+    ]
+
+    def matches(candidate: ContainerEntryCandidate) -> bool:
+        if strategy.signature and candidate.signature != strategy.signature:
+            return False
+        return True
+
+    matching_candidates = [candidate for candidate in candidates if matches(candidate)]
+    if len(matching_candidates) < 2 and strategy.signature:
+        matching_candidates = [
+            candidate for candidate in candidates if candidate.signature == strategy.signature
+        ]
+
+    for candidate in matching_candidates:
+        existing = grouped.get(candidate.profile_url)
+        if existing is None:
+            grouped[candidate.profile_url] = candidate
+        else:
+            grouped[candidate.profile_url] = choose_better_container_candidate(existing, candidate)
+
+    entries = [
+        ProfileEntryCandidate(
+            company_name=candidate.company_name,
+            profile_url=candidate.profile_url,
+            booth_number=candidate.booth_number,
+        )
+        for candidate in grouped.values()
+        if candidate.company_name
+    ]
+    entries.sort(key=lambda item: item.company_name.lower())
+    return entries
+
+
 def extract_directory_entries(
     page: ParsedPage,
     strategy: ListingStrategy,
@@ -4642,6 +4893,79 @@ def extract_directory_entries(
             strategy=strategy,
         )
     return []
+
+
+def booth_number_hints_by_profile(
+    page: ParsedPage,
+    directory_url: str,
+) -> dict[str, str]:
+    booth_hints: dict[str, str] = {}
+
+    for container in page.containers:
+        container_candidate = extract_container_candidate(container, directory_url)
+        if (
+            container_candidate is not None
+            and container_candidate.profile_url
+            and container_candidate.booth_number
+            and container_candidate.profile_url not in booth_hints
+        ):
+            booth_hints[container_candidate.profile_url] = container_candidate.booth_number
+
+        text_candidate = extract_text_only_container_candidate(container, page.url)
+        if (
+            text_candidate is not None
+            and text_candidate.profile_url
+            and text_candidate.booth_number
+            and text_candidate.profile_url not in booth_hints
+        ):
+            booth_hints[text_candidate.profile_url] = text_candidate.booth_number
+
+    return booth_hints
+
+
+def extract_directory_entry_candidates(
+    page: ParsedPage,
+    strategy: ListingStrategy,
+    directory_url: str,
+) -> list[ProfileEntryCandidate]:
+    if strategy.source_kind == "anchor":
+        candidates = extract_directory_entry_candidates_from_links(
+            list(page.anchors),
+            strategy=strategy,
+            directory_url=directory_url,
+        )
+    elif strategy.source_kind == "action":
+        candidates = extract_directory_entry_candidates_from_links(
+            page_action_records(page),
+            strategy=strategy,
+            directory_url=directory_url,
+        )
+    elif strategy.source_kind == "container":
+        candidates = extract_directory_entry_candidates_from_containers(
+            page,
+            strategy=strategy,
+            directory_url=directory_url,
+        )
+    elif strategy.source_kind == "text_container":
+        candidates = extract_directory_entry_candidates_from_text_containers(
+            page,
+            strategy=strategy,
+        )
+    else:
+        return []
+
+    booth_hints = booth_number_hints_by_profile(page, directory_url)
+    if not booth_hints:
+        return candidates
+
+    return [
+        ProfileEntryCandidate(
+            company_name=candidate.company_name,
+            profile_url=candidate.profile_url,
+            booth_number=candidate.booth_number or booth_hints.get(candidate.profile_url, ""),
+        )
+        for candidate in candidates
+    ]
 
 
 def parse_json_ld_urls(blocks: tuple[str, ...], directory_url: str) -> list[str]:
@@ -4798,11 +5122,21 @@ def extract_company_website(page: ParsedPage, profile_url: str) -> str:
 
 
 def normalize_booth_number_candidate(value: str) -> str:
-    cleaned = normalize_text(value).upper().strip(" :#,-")
+    raw_cleaned = normalize_text(value).strip(" :#,-")
+    cleaned = raw_cleaned.upper()
     if not cleaned:
         return ""
     if not re.fullmatch(r"(?=.*\d)[A-Z0-9]{1,8}(?:[-/][A-Z0-9]{1,8})*", cleaned):
-        return ""
+        suffix_match = re.fullmatch(
+            r"(?P<booth>(?:[A-Za-z]{1,4}\d{1,8}|\d{1,8})(?:[-/][A-Za-z0-9]{1,8})*)"
+            r"(?P<junk>[a-z]{4,})",
+            raw_cleaned,
+        )
+        if not suffix_match:
+            return ""
+        cleaned = suffix_match.group("booth").upper()
+        if not re.fullmatch(r"(?=.*\d)[A-Z0-9]{1,8}(?:[-/][A-Z0-9]{1,8})*", cleaned):
+            return ""
     return cleaned
 
 
@@ -5459,14 +5793,14 @@ def collect_directory_entries_with_ajax_paginator(
     if tokens is None:
         return None
 
-    seed_entries = extract_directory_entries(seed_page, strategy, directory_url)
-    if not seed_entries:
+    seed_entry_candidates = extract_directory_entry_candidates(seed_page, strategy, directory_url)
+    if not seed_entry_candidates:
         return None
-    seed_profile_urls = {profile_url for _, profile_url in seed_entries}
+    seed_profile_urls = {entry.profile_url for entry in seed_entry_candidates}
 
     requested_start = max(start_page or 1, 1)
     chosen_config: AjaxPaginatorConfig | None = None
-    cached_page_entries: dict[int, list[tuple[str, str]]] = {}
+    cached_page_entries: dict[int, list[ProfileEntryCandidate]] = {}
     current_tokens = tokens
     ajax_loaded = False
 
@@ -5501,19 +5835,19 @@ def collect_directory_entries_with_ajax_paginator(
         if not fragment_html.strip():
             continue
 
-        sample_page_entries = extract_directory_entries(
+        sample_page_candidates = extract_directory_entry_candidates(
             parse_page(seed_url, fragment_html),
             strategy,
             directory_url,
         )
-        sample_profile_urls = {profile_url for _, profile_url in sample_page_entries}
+        sample_profile_urls = {entry.profile_url for entry in sample_page_candidates}
         if not sample_profile_urls:
             continue
         if sample_page != 1 and sample_profile_urls == seed_profile_urls:
             continue
 
         chosen_config = config
-        cached_page_entries[sample_page] = sample_page_entries
+        cached_page_entries[sample_page] = sample_page_candidates
         current_tokens = (
             str(payload.get("formToken") or current_tokens[0]),
             str(payload.get("formTime") or current_tokens[1]),
@@ -5541,9 +5875,9 @@ def collect_directory_entries_with_ajax_paginator(
 
     for page_number in range(requested_start, requested_end + 1):
         if page_number == 1:
-            page_entries = seed_entries
+            page_candidates = seed_entry_candidates
         elif page_number in cached_page_entries:
-            page_entries = cached_page_entries[page_number]
+            page_candidates = cached_page_entries[page_number]
         else:
             payload = fetch_ajax_paginator_payload(
                 seed_url=seed_url,
@@ -5559,14 +5893,16 @@ def collect_directory_entries_with_ajax_paginator(
                 str(payload.get("formTime") or current_tokens[1]),
             )
             fragment_html = unquote(str(payload.get("data") or ""))
-            page_entries = extract_directory_entries(
+            page_candidates = extract_directory_entry_candidates(
                 parse_page(seed_url, fragment_html),
                 strategy,
                 directory_url,
             )
 
         added = 0
-        for company_name, profile_url in page_entries:
+        for candidate in page_candidates:
+            company_name = candidate.company_name
+            profile_url = candidate.profile_url
             if profile_url in seen_profiles:
                 continue
             seen_profiles.add(profile_url)
@@ -5576,13 +5912,14 @@ def collect_directory_entries_with_ajax_paginator(
                     directory_page=page_number,
                     company_name=company_name,
                     profile_url=profile_url,
+                    booth_number=candidate.booth_number,
                 )
             )
             added += 1
 
         print(
             f"Collected directory page {page_number} "
-            f"(ajax mode) ({len(page_entries)} matches, {len(entries)} total, {added} new)."
+            f"(ajax mode) ({len(page_candidates)} matches, {len(entries)} total, {added} new)."
         )
 
     return entries
@@ -5746,9 +6083,11 @@ def collect_directory_entries_with_query_probing(
         else:
             _, _, page = page_loader(page_url)
 
-        page_entries = extract_directory_entries(page, strategy, directory_url)
+        page_candidates = extract_directory_entry_candidates(page, strategy, directory_url)
         added = 0
-        for company_name, profile_url in page_entries:
+        for candidate in page_candidates:
+            company_name = candidate.company_name
+            profile_url = candidate.profile_url
             if profile_url in seen_profiles:
                 continue
             seen_profiles.add(profile_url)
@@ -5758,16 +6097,17 @@ def collect_directory_entries_with_query_probing(
                     directory_page=page_number,
                     company_name=company_name,
                     profile_url=profile_url,
+                    booth_number=candidate.booth_number,
                 )
             )
             added += 1
 
         print(
             f"Collected directory page {page_number} "
-            f"(query-probe mode) ({len(page_entries)} matches, {len(entries)} total, {added} new)."
+            f"(query-probe mode) ({len(page_candidates)} matches, {len(entries)} total, {added} new)."
         )
 
-        if not page_entries or added == 0:
+        if not page_candidates or added == 0:
             consecutive_stalls += 1
         else:
             consecutive_stalls = 0
@@ -5792,10 +6132,12 @@ def collect_directory_entries_with_explicit_pages(
 
     for position, (page_number, page_url) in enumerate(page_urls, start=1):
         _, _, page = page_loader(page_url)
-        page_entries = extract_directory_entries(page, strategy, directory_url)
+        page_candidates = extract_directory_entry_candidates(page, strategy, directory_url)
 
         added = 0
-        for company_name, profile_url in page_entries:
+        for candidate in page_candidates:
+            company_name = candidate.company_name
+            profile_url = candidate.profile_url
             if profile_url in seen_profiles:
                 continue
             seen_profiles.add(profile_url)
@@ -5805,6 +6147,7 @@ def collect_directory_entries_with_explicit_pages(
                     directory_page=page_number,
                     company_name=company_name,
                     profile_url=profile_url,
+                    booth_number=candidate.booth_number,
                 )
             )
             added += 1
@@ -5812,7 +6155,7 @@ def collect_directory_entries_with_explicit_pages(
         print(
             f"Collected directory page {page_number} "
             f"(position {position}/{len(page_urls)}) "
-            f"({len(page_entries)} matches, {len(entries)} total, {added} new)."
+            f"({len(page_candidates)} matches, {len(entries)} total, {added} new)."
         )
 
     return entries
@@ -5848,10 +6191,12 @@ def collect_directory_entries_with_bfs(
 
         seen_pages.add(page_url)
         page_number = extract_page_number_from_url(page_url) or len(seen_pages)
-        page_entries = extract_directory_entries(page, strategy, directory_url)
+        page_candidates = extract_directory_entry_candidates(page, strategy, directory_url)
 
         added = 0
-        for company_name, profile_url in page_entries:
+        for candidate in page_candidates:
+            company_name = candidate.company_name
+            profile_url = candidate.profile_url
             if profile_url in seen_profiles:
                 continue
             seen_profiles.add(profile_url)
@@ -5861,13 +6206,14 @@ def collect_directory_entries_with_bfs(
                     directory_page=page_number,
                     company_name=company_name,
                     profile_url=profile_url,
+                    booth_number=candidate.booth_number,
                 )
             )
             added += 1
 
         print(
             f"Collected directory page {len(seen_pages)} "
-            f"({len(page_entries)} matches, {len(entries)} total, {added} new)."
+            f"({len(page_candidates)} matches, {len(entries)} total, {added} new)."
         )
 
         for next_page_url in discover_pagination_links(page, seed_url, page_url):
