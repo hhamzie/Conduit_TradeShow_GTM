@@ -65,7 +65,21 @@ async function handleDirectDownloadFormSubmit(event) {
       contentType.includes("application/zip");
 
     if (!response.ok) {
-      throw new Error("The scraper request failed. Please try again.");
+      let errorDetail = "";
+      try {
+        errorDetail = (await response.text()).trim();
+      } catch (_error) {
+        errorDetail = "";
+      }
+
+      if (errorDetail) {
+        errorDetail = errorDetail.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+      }
+
+      const message = errorDetail
+        ? `The scraper request failed (${response.status}): ${errorDetail}`
+        : `The scraper request failed (${response.status}). Please try again.`;
+      throw new Error(message);
     }
 
     if (!looksLikeDownload) {
