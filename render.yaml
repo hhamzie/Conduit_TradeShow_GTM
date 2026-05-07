@@ -3,6 +3,8 @@ services:
     name: hpointscraper
     runtime: docker
     plan: starter
+    branch: main
+    autoDeploy: true
     healthCheckPath: /healthz
     disk:
       name: exports

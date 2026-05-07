@@ -19,3 +19,22 @@ jobs:
             exit 1
           fi
           curl --fail --silent --show-error --request POST "$RENDER_DEPLOY_HOOK_URL"
+
+      - name: Verify deployed health
+        env:
+          RENDER_HEALTHCHECK_URL: ${{ secrets.RENDER_HEALTHCHECK_URL }}
+        run: |
+          if [ -z "$RENDER_HEALTHCHECK_URL" ]; then
+            echo "Skipping post-deploy health check because RENDER_HEALTHCHECK_URL is not set."
+            exit 0
+          fi
+
+          for attempt in $(seq 1 20); do
+            if curl --fail --silent --show-error "$RENDER_HEALTHCHECK_URL" >/dev/null; then
+              exit 0
+            fi
+            sleep 15
+          done
+
+          echo "Render health check did not pass after deploy." >&2
+          exit 1
