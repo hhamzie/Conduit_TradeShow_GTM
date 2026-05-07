@@ -1,0 +1,308 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import datetime
+
+from app.models import Show
+
+
+WORKFLOW_SECTIONS = {"active", "scheduled_later", "completed"}
+
+
+@dataclass(frozen=True)
+class ShowNotice:
+    tone: str
+    title: str
+    detail: str
+
+
+@dataclass(frozen=True)
+class ShowCard:
+    show: Show
+    error_summary: str
+    notice: ShowNotice | None
+    step_label: str
+    next_action: str
+    section: str
+    run_timing: str
+    provider_summary: str
+    status_label: str
+
+
+@dataclass(frozen=True)
+class WorkflowDashboardView:
+    active: list[ShowCard]
+    scheduled_later: list[ShowCard]
+    completed: list[ShowCard]
+    show_count: int
+    ready_count: int
+    completed_count: int
+    active_count: int
+    scheduled_count: int
+    completed_section_count: int
+    active_lead_count: int
+    scheduled_lead_count: int
+    completed_lead_count: int
+
+
+def summarize_show_error(error_text: str) -> str:
+    if not error_text:
+        return ""
+    lowered = error_text.lower()
+    if "could not resolve host" in lowered or "nodename nor servname provided" in lowered:
+        return "An earlier worker run could not reach the site over the network. Retry the show now."
+    if "too many requests" in lowered or "http 429" in lowered:
+        return "Clay throttled the upload after the scrape finished. Retry later to resend the export."
+    if (
+        "could not infer company/profile links" in lowered
+        and "browser fallback is unavailable" in lowered
+    ):
+        return "This source failed before browser rendering was enabled. Retry now with browser support turned on."
+    if "could not infer company/profile links" in lowered:
+        return "We reached the site, but the exhibitor layout still needs a source-specific extractor."
+    if "browser fallback is unavailable" in lowered:
+        return "This event site may require browser rendering. Retry now that browser support is installed."
+    compact = " ".join(error_text.split())
+    if len(compact) > 170:
+        return compact[:167] + "..."
+    return compact
+
+
+def build_show_notice(show: Show) -> ShowNotice | None:
+    if show.status == "failed":
+        return ShowNotice(
+            tone="danger",
+            title="Scrape needs attention",
+            detail=summarize_show_error(show.last_error) or "The latest scrape attempt failed.",
+        )
+
+    if show.company_count > 0:
+        details: list[str] = []
+        tone = "success"
+        title = "Scrape completed"
+
+        if show.clay_status == "failed":
+            tone = "warning"
+            title = "Clay upload needs retry"
+            details.append("The export finished, but Clay throttled or rejected the row push.")
+        elif show.clay_status == "polling":
+            tone = "warning" if show.status == "approved" else "success"
+            title = "Clay enrichment in progress"
+            details.append(
+                f"Clay has {show.clay_ready_rows}/{show.clay_total_rows or show.company_count} rows ready so far."
+            )
+        elif show.clay_status == "complete":
+            details.append(
+                f"Clay resolved all {show.clay_total_rows} rows. Ready: {show.clay_ready_rows}, failed: {show.clay_failed_rows}, skipped: {show.clay_skipped_rows}."
+            )
+        elif show.clay_status == "success":
+            details.append("Rows were sent to Clay.")
+
+        if show.notification_status == "failed":
+            tone = "warning"
+            if title == "Scrape completed":
+                title = "Email notification needs retry"
+            details.append("The export is ready, but the Outlook notification email did not send.")
+
+        if show.smartlead_status == "syncing":
+            details.append(
+                f"Smartlead has processed {show.smartlead_imported_rows} ready row(s) into {show.smartlead_campaign_name or 'the show campaign'}."
+            )
+        elif show.smartlead_status == "ready_to_launch":
+            tone = "success"
+            title = "Smartlead campaign ready"
+            details.append("All Clay rows are resolved and the Smartlead campaign is ready to launch.")
+        elif show.smartlead_status == "active":
+            title = "Smartlead campaign live"
+            details.append("This show's Smartlead campaign is currently active.")
+        elif show.smartlead_status == "paused":
+            tone = "warning"
+            title = "Smartlead campaign paused"
+            details.append("The Smartlead campaign is prepared but currently paused.")
+        elif show.smartlead_status == "failed":
+            tone = "warning"
+            title = "Smartlead sync needs retry"
+            details.append("The Clay pull succeeded, but the latest Smartlead sync failed.")
+
+        if not details:
+            details.append(f"{show.company_count} companies were exported and are ready for review.")
+
+        return ShowNotice(
+            tone=tone,
+            title=title,
+            detail=" ".join(details),
+        )
+
+    return None
+
+
+def format_run_at_label(show: Show, now: datetime) -> str:
+    run_at = show.run_at
+    if run_at is None:
+        return "No run time set"
+
+    delta = run_at - now
+    total_seconds = int(delta.total_seconds())
+    total_hours = abs(total_seconds) // 3600
+    days = total_hours // 24
+    hours = total_hours % 24
+
+    when_label = run_at.strftime("%b %d, %Y at %-I:%M %p")
+    if total_seconds <= 0:
+        if days > 0:
+            return f"Should have queued {days} day(s) ago · scheduled for {when_label}"
+        if hours > 0:
+            return f"Should have queued {hours} hour(s) ago · scheduled for {when_label}"
+        return f"Should queue now · scheduled for {when_label}"
+
+    if days > 0:
+        return f"Queues in {days} day(s) · scheduled for {when_label}"
+    if hours > 0:
+        return f"Queues in {hours} hour(s) · scheduled for {when_label}"
+    return f"Queues in under an hour · scheduled for {when_label}"
+
+
+def provider_status_summary(show: Show) -> str:
+    if show.clay_status == "complete":
+        return f"Clay resolved {show.clay_total_rows} rows and Smartlead processed {show.smartlead_imported_rows}."
+    if show.clay_status == "polling":
+        total_rows = show.clay_total_rows or show.company_count
+        return f"Clay is enriching rows ({show.clay_ready_rows}/{total_rows} ready)."
+    if show.smartlead_status == "ready_to_launch":
+        return "Smartlead campaign is prepared and ready to launch."
+    if show.smartlead_status == "active":
+        return "Smartlead campaign is active."
+    if show.clay_status == "failed":
+        return "Clay push needs a retry."
+    if show.company_count > 0:
+        return "Clay has not received this export yet."
+    return "Clay has nothing to send yet."
+
+
+def describe_show_flow(show: Show, now: datetime) -> dict[str, str]:
+    if show.status == "waiting":
+        if show.run_at and show.run_at <= now:
+            return {
+                "section": "ready_now",
+                "step": "Inside the run window",
+                "next_action": "The worker should run this soon. Use Run Immediately only if you want to force it now.",
+            }
+        return {
+            "section": "scheduled_later",
+            "step": "Waiting for trigger window",
+            "next_action": "No action needed yet. The worker should queue it at the scheduled time.",
+        }
+
+    if show.status == "queued":
+        return {
+            "section": "in_progress",
+            "step": "Queued for worker",
+            "next_action": "The worker should pick this up next.",
+        }
+
+    if show.status == "scraping":
+        return {
+            "section": "in_progress",
+            "step": "Scrape is running",
+            "next_action": "Wait for the export and Clay handoff to finish.",
+        }
+
+    if show.status == "ready_for_review":
+        if show.clay_status in {"polling", "complete"}:
+            return {
+                "section": "completed",
+                "step": "Reviewing Clay enrichment",
+                "next_action": "Clay is syncing back automatically. Approve the show when you want it launch-ready later.",
+            }
+        return {
+            "section": "completed",
+            "step": "Ready for review",
+            "next_action": "Review the export, then approve if it looks good.",
+        }
+
+    if show.status == "approved":
+        if show.smartlead_status == "ready_to_launch":
+            return {
+                "section": "completed",
+                "step": "Ready to launch",
+                "next_action": "Launch the Smartlead campaign when you want this show to go live.",
+            }
+        return {
+            "section": "completed",
+            "step": "Approved",
+            "next_action": "Clay and Smartlead are still preparing the campaign.",
+        }
+
+    if show.status == "live":
+        return {
+            "section": "completed",
+            "step": "Campaign live",
+            "next_action": "This show's Smartlead campaign is active.",
+        }
+
+    return {
+        "section": "in_progress",
+        "step": "Needs attention",
+        "next_action": "Retry this scrape after reviewing the latest error.",
+    }
+
+
+def build_show_card(show: Show, now: datetime) -> ShowCard:
+    flow = describe_show_flow(show, now)
+    return ShowCard(
+        show=show,
+        error_summary=summarize_show_error(show.last_error),
+        notice=build_show_notice(show),
+        step_label=flow["step"],
+        next_action=flow["next_action"],
+        section=flow["section"],
+        run_timing=format_run_at_label(show, now),
+        provider_summary=provider_status_summary(show),
+        status_label=show.status.replace("_", " "),
+    )
+
+
+def shows_in_section(shows: list[Show], section: str, now: datetime) -> list[Show]:
+    matched: list[Show] = []
+    for show in shows:
+        card = build_show_card(show, now)
+        if section == "active" and card.section in {"ready_now", "in_progress"}:
+            matched.append(show)
+            continue
+        if card.section == section:
+            matched.append(show)
+    return matched
+
+
+def build_workflow_dashboard_view(shows: list[Show], now: datetime) -> WorkflowDashboardView:
+    show_cards = [build_show_card(show, now) for show in shows]
+    scheduled_later = sorted(
+        [item for item in show_cards if item.section == "scheduled_later"],
+        key=lambda item: (item.show.run_at or datetime.max, item.show.event_date, item.show.id),
+    )
+    active = sorted(
+        [item for item in show_cards if item.section in {"ready_now", "in_progress"}],
+        key=lambda item: (item.show.run_at or datetime.max, item.show.event_date, item.show.id),
+    )
+    completed = sorted(
+        [item for item in show_cards if item.section == "completed"],
+        key=lambda item: (item.show.event_date, item.show.run_at or datetime.max, item.show.id),
+    )
+    return WorkflowDashboardView(
+        active=active,
+        scheduled_later=scheduled_later,
+        completed=completed,
+        show_count=len(shows),
+        ready_count=sum(1 for show in shows if show.status == "ready_for_review"),
+        completed_count=sum(1 for show in shows if show.company_count > 0),
+        active_count=len(active),
+        scheduled_count=len(scheduled_later),
+        completed_section_count=len(completed),
+        active_lead_count=_lead_total(active),
+        scheduled_lead_count=_lead_total(scheduled_later),
+        completed_lead_count=_lead_total(completed),
+    )
+
+
+def _lead_total(items: list[ShowCard]) -> int:
+    return sum(int(item.show.company_count or 0) for item in items)

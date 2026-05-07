@@ -234,7 +234,7 @@ class AutomationTests(unittest.TestCase):
                 self.assertIn("Luxe Pack", manifest_text)
                 self.assertIn("High Point", manifest_text)
 
-    def test_bulk_scrape_route_uses_threadpool(self) -> None:
+    def test_bulk_scrape_route_starts_background_job(self) -> None:
         async def run_test() -> None:
             try:
                 from fastapi import UploadFile
@@ -242,32 +242,24 @@ class AutomationTests(unittest.TestCase):
             except ModuleNotFoundError:
                 self.skipTest("fastapi is not installed in this test environment")
 
-            with tempfile.TemporaryDirectory() as tmp_dir:
-                archive_path = Path(tmp_dir) / "bulk.zip"
-                archive_path.write_bytes(b"zip")
-                upload = UploadFile(
-                    filename="shows.csv",
-                    file=io.BytesIO(
-                        b"Show,Date,Place,Link\nLuxe Pack,2026-05-06,New York City,https://example.com/luxe\n"
-                    ),
-                )
-                result = BulkDirectScrapeResult(
-                    archive_path=archive_path,
-                    success_count=1,
-                    failed_count=0,
-                )
-                request = type("Req", (), {"session": {}})()
+            upload = UploadFile(
+                filename="shows.csv",
+                file=io.BytesIO(
+                    b"Show,Date,Place,Link\nLuxe Pack,2026-05-06,New York City,https://example.com/luxe\n"
+                ),
+            )
+            request = type("Req", (), {"session": {}})()
 
-                with (
-                    patch("app.main.require_authenticated"),
-                    patch("app.main.run_in_threadpool", return_value=result) as threadpool_mock,
-                ):
-                    response = await scrape_many_shows(request=request, file=upload)
+            with (
+                patch("app.web.routes.workflow.require_authenticated"),
+                patch("app.web.routes.workflow.bulk_scrape_jobs.start_job", return_value="job-123") as start_job_mock,
+            ):
+                response = await scrape_many_shows(request=request, file=upload)
 
-                self.assertEqual(response.path, str(archive_path))
-                self.assertEqual(threadpool_mock.call_count, 1)
-                self.assertEqual(threadpool_mock.call_args.args[0], run_bulk_direct_scrape)
-                self.assertIn(b"Luxe Pack", threadpool_mock.call_args.args[1])
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.body, b'{"job_id":"job-123"}')
+            self.assertEqual(start_job_mock.call_count, 1)
+            self.assertIn(b"Luxe Pack", start_job_mock.call_args.args[0])
 
         import asyncio
 

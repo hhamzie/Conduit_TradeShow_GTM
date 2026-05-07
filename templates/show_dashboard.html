@@ -1,0 +1,134 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="panel intelligence-hero-panel">
+  <div class="panel-head intelligence-hero-head">
+    <div>
+      <p class="hero-kicker">Trade Show Intelligence</p>
+      <h1>One screen for every show you have loaded.</h1>
+      <p class="hero-copy">This view ranks each trade show by exhibitor depth, data quality, booth coverage, and timing so you can decide whether it is worth visiting before you spend time on travel planning.</p>
+    </div>
+    <a class="button" href="/">Open Workflow</a>
+  </div>
+  <div class="stats-grid stats-grid-compact">
+    <article class="stat-card">
+      <span class="stat-label">Tracked Shows</span>
+      <strong class="stat-value">{{ tracked_count }}</strong>
+    </article>
+    <article class="stat-card">
+      <span class="stat-label">High Priority</span>
+      <strong class="stat-value">{{ high_priority_count }}</strong>
+    </article>
+    <article class="stat-card">
+      <span class="stat-label">Exports Ready</span>
+      <strong class="stat-value">{{ export_ready_count }}</strong>
+    </article>
+    <article class="stat-card">
+      <span class="stat-label">Total Exhibitors</span>
+      <strong class="stat-value">{{ total_exhibitors }}</strong>
+    </article>
+  </div>
+  <p class="mini-note">The score is heuristic. It reflects size, timing, and usable exhibitor data, not a guarantee of commercial fit.</p>
+</section>
+
+{% if analyses %}
+<section class="intelligence-grid">
+  {% for analysis in analyses %}
+  <article class="panel intelligence-card">
+    <div class="analysis-head">
+      <div>
+        <p class="eyebrow">{{ analysis.theme_label }}</p>
+        <h2>{{ analysis.show.name }}</h2>
+        <p class="show-subtitle">{{ analysis.show.place }} · {{ analysis.show.event_date }}</p>
+      </div>
+      <div class="score-badge priority-{{ analysis.priority_slug }}">
+        <span>{{ analysis.priority_label }}</span>
+        <strong>{{ analysis.priority_score }}</strong>
+      </div>
+    </div>
+
+    <p class="analysis-summary">{{ analysis.recommendation }}</p>
+
+    <div class="metric-strip">
+      <div class="metric-tile">
+        <span>Exhibitors</span>
+        <strong>{{ analysis.exhibitor_count }}</strong>
+      </div>
+      <div class="metric-tile">
+        <span>Websites</span>
+        <strong>{{ analysis.website_coverage_percent }}%</strong>
+      </div>
+      <div class="metric-tile">
+        <span>Booths</span>
+        <strong>{{ analysis.booth_coverage_percent }}%</strong>
+      </div>
+      <div class="metric-tile">
+        <span>Timing</span>
+        <strong>{% if analysis.days_until_event >= 0 %}{{ analysis.days_until_event }} day(s){% else %}Past due{% endif %}</strong>
+      </div>
+    </div>
+
+    <div class="analysis-columns">
+      <div class="analysis-column">
+        <h3>Why It Stands Out</h3>
+        <ul class="simple-list">
+          {% for item in analysis.reasons %}
+          <li>{{ item }}</li>
+          {% endfor %}
+        </ul>
+      </div>
+      <div class="analysis-column">
+        <h3>Watchouts</h3>
+        <ul class="simple-list">
+          {% for item in analysis.risks %}
+          <li>{{ item }}</li>
+          {% endfor %}
+        </ul>
+      </div>
+    </div>
+
+    <div class="playbook-grid">
+      <article class="playbook-card">
+        <h3>Who To Meet</h3>
+        <ul class="simple-list">
+          {% for item in analysis.who_to_meet[:3] %}
+          <li>{{ item }}</li>
+          {% endfor %}
+        </ul>
+      </article>
+      <article class="playbook-card">
+        <h3>Questions</h3>
+        <ul class="simple-list">
+          {% for item in analysis.questions_to_ask[:3] %}
+          <li>{{ item }}</li>
+          {% endfor %}
+        </ul>
+      </article>
+      <article class="playbook-card">
+        <h3>Sample Companies</h3>
+        <ul class="simple-list">
+          {% for item in analysis.sample_company_names %}
+          <li>{{ item }}</li>
+          {% else %}
+          <li>Run the export to populate company profiles.</li>
+          {% endfor %}
+        </ul>
+      </article>
+    </div>
+
+    <div class="card-action-row">
+      <a class="button secondary" href="/shows/{{ analysis.show.id }}">Open Show Profile</a>
+      <a class="button secondary" href="{{ analysis.show.source_url }}" target="_blank" rel="noreferrer">Source Directory</a>
+    </div>
+  </article>
+  {% endfor %}
+</section>
+{% else %}
+<section class="panel">
+  <div class="empty-state">
+    <h3>No trade shows loaded</h3>
+    <p>Add one show or import a CSV from the workflow screen, then this dashboard will rank them automatically.</p>
+  </div>
+</section>
+{% endif %}
+{% endblock %}
