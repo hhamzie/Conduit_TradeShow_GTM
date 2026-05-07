@@ -85,6 +85,11 @@ class Show(Base):
         cascade="all, delete-orphan",
         order_by="ClaySyncRow.id.asc()",
     )
+    guide_rows: Mapped[list["ShowGuideRow"]] = relationship(
+        back_populates="show",
+        cascade="all, delete-orphan",
+        order_by="ShowGuideRow.sheet_key.asc(), ShowGuideRow.position.asc(), ShowGuideRow.id.asc()",
+    )
 
 
 class CampaignRun(Base):
@@ -123,3 +128,17 @@ class ClaySyncRow(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(), server_default=func.now(), onupdate=func.now())
 
     show: Mapped[Show] = relationship(back_populates="clay_rows")
+
+
+class ShowGuideRow(Base):
+    __tablename__ = "show_guide_rows"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    show_id: Mapped[int] = mapped_column(ForeignKey("shows.id", ondelete="CASCADE"))
+    sheet_key: Mapped[str] = mapped_column(String(64))
+    position: Mapped[int] = mapped_column(Integer(), default=0)
+    values_json: Mapped[str] = mapped_column(Text(), default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime(), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(), server_default=func.now(), onupdate=func.now())
+
+    show: Mapped[Show] = relationship(back_populates="guide_rows")

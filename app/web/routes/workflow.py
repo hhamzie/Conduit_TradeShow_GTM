@@ -25,6 +25,11 @@ router = APIRouter()
 
 
 @router.get("/")
+def home():
+    return RedirectResponse("/shows/dashboard", status_code=status.HTTP_303_SEE_OTHER)
+
+
+@router.get("/workflow")
 def dashboard(request: Request, db: Session = Depends(get_db)):
     require_authenticated(request)
     shows = list_shows(db)
@@ -34,6 +39,7 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
         template_context(
             request,
             current_page="workflow",
+            can_manage=True,
             default_offset=settings.default_run_offset_days,
             single_scrape_error=request.session.pop("single_scrape_error", ""),
             bulk_scrape_error=request.session.pop("bulk_scrape_error", ""),
@@ -59,7 +65,7 @@ async def import_shows(
         import_shows_from_csv(db, payload, run_offset_days)
     except ValueError as exc:
         request.session["automation_error"] = str(exc)
-    return RedirectResponse("/", status_code=status.HTTP_303_SEE_OTHER)
+    return RedirectResponse("/workflow", status_code=status.HTTP_303_SEE_OTHER)
 
 
 @router.post("/shows/add")
@@ -84,9 +90,9 @@ def add_single_show(
         )
     except ValueError as exc:
         request.session["automation_error"] = str(exc)
-        return RedirectResponse("/", status_code=status.HTTP_303_SEE_OTHER)
+        return RedirectResponse("/workflow", status_code=status.HTTP_303_SEE_OTHER)
     db.commit()
-    return RedirectResponse("/", status_code=status.HTTP_303_SEE_OTHER)
+    return RedirectResponse("/workflow", status_code=status.HTTP_303_SEE_OTHER)
 
 
 @router.post("/scrape/single")
@@ -107,10 +113,10 @@ def scrape_single_show(
         )
     except ValueError as exc:
         request.session["single_scrape_error"] = str(exc)
-        return RedirectResponse("/", status_code=status.HTTP_303_SEE_OTHER)
+        return RedirectResponse("/workflow", status_code=status.HTTP_303_SEE_OTHER)
     except Exception as exc:  # noqa: BLE001
         request.session["single_scrape_error"] = str(exc)
-        return RedirectResponse("/", status_code=status.HTTP_303_SEE_OTHER)
+        return RedirectResponse("/workflow", status_code=status.HTTP_303_SEE_OTHER)
 
     return FileResponse(
         result.output_path,
@@ -128,7 +134,7 @@ async def scrape_many_shows(
     payload = await file.read()
     if not payload:
         request.session["bulk_scrape_error"] = "The uploaded CSV was empty."
-        return RedirectResponse("/", status_code=status.HTTP_303_SEE_OTHER)
+        return RedirectResponse("/workflow", status_code=status.HTTP_303_SEE_OTHER)
 
     job_id = bulk_scrape_jobs.start_job(payload)
     return JSONResponse({"job_id": job_id})
@@ -177,4 +183,4 @@ def delete_all_shows(
     for show in targets:
         db.delete(show)
     db.commit()
-    return RedirectResponse("/", status_code=status.HTTP_303_SEE_OTHER)
+    return RedirectResponse("/workflow", status_code=status.HTTP_303_SEE_OTHER)

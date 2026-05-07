@@ -3,14 +3,17 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import FileResponse, RedirectResponse
 from sqlalchemy.orm import Session
 from starlette import status
 
-from app.core.auth import require_authenticated
+from app.core.auth import can_manage, require_authenticated
 from app.core.templating import template_context, templates
 from app.database import get_db
+from app.guide_services import create_guide_row, delete_guide_row, update_guide_row
+from app.models import ShowGuideRow
+from app.show_guides import build_guide_sheet_views, get_guide_sheet
 from app.show_intelligence import build_show_analysis, build_show_analyses
 from app.services import (
     approve_show,
@@ -20,6 +23,7 @@ from app.services import (
     pause_show,
     queue_show_now,
     sync_show_from_clay,
+    update_show,
 )
 from app.web.presenters import build_show_notice, summarize_show_error
 
@@ -45,9 +49,15 @@ def _file_response(raw_path: str, *, not_found_detail: str) -> FileResponse:
     return FileResponse(export_path, filename=export_path.name, media_type="text/csv")
 
 
+def _get_guide_row_or_404(db: Session, show_id: int, row_id: int) -> ShowGuideRow:
+    row = db.get(ShowGuideRow, row_id)
+    if row is None or row.show_id != show_id:
+        raise HTTPException(status_code=404, detail="Guide row not found.")
+    return row
+
+
 @router.get("/shows/dashboard")
 def show_dashboard(request: Request, db: Session = Depends(get_db)):
-    require_authenticated(request)
     shows = list_shows(db)
     analyses = build_show_analyses(shows, today=datetime.now().date(), company_limit=8)
     return templates.TemplateResponse(
@@ -55,6 +65,7 @@ def show_dashboard(request: Request, db: Session = Depends(get_db)):
         template_context(
             request,
             current_page="show_dashboard",
+            can_manage=can_manage(request),
             title="Show Dashboard",
             analyses=analyses,
             tracked_count=len(analyses),
@@ -67,7 +78,6 @@ def show_dashboard(request: Request, db: Session = Depends(get_db)):
 
 @router.get("/shows/{show_id}")
 def show_detail(show_id: int, request: Request, db: Session = Depends(get_db)):
-    require_authenticated(request)
     show = _get_show_or_404(db, show_id)
     export_path = Path(show.latest_export_path) if show.latest_export_path else None
     enriched_export_path = Path(show.enriched_export_path) if show.enriched_export_path else None
@@ -77,9 +87,11 @@ def show_detail(show_id: int, request: Request, db: Session = Depends(get_db)):
         template_context(
             request,
             current_page="show_dashboard",
+            can_manage=can_manage(request),
             title=show.name,
             show=show,
             analysis=build_show_analysis(show, today=datetime.now().date(), company_limit=18),
+            guide_sheets=build_guide_sheet_views(show),
             export_path=export_path,
             enriched_export_path=enriched_export_path,
             smartlead_ready_path=smartlead_ready_path,
@@ -89,13 +101,41 @@ def show_detail(show_id: int, request: Request, db: Session = Depends(get_db)):
     )
 
 
+@router.post("/shows/{show_id}/update")
+def update_show_route(
+    show_id: int,
+    request: Request,
+    show_name: str = Form(...),
+    event_date: str = Form(...),
+    place: str = Form(...),
+    link: str = Form(...),
+    run_offset_days: int = Form(...),
+    db: Session = Depends(get_db),
+):
+    require_authenticated(request)
+    show = _get_show_or_404(db, show_id)
+    try:
+        update_show(
+            db,
+            show=show,
+            show_name=show_name,
+            event_date_raw=event_date,
+            place=place,
+            link=link,
+            run_offset_days=run_offset_days,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return RedirectResponse(f"/shows/{show_id}", status_code=status.HTTP_303_SEE_OTHER)
+
+
 @router.post("/shows/{show_id}/delete")
 def delete_show(show_id: int, request: Request, db: Session = Depends(get_db)):
     require_authenticated(request)
     show = _get_show_or_404(db, show_id)
     db.delete(show)
     db.commit()
-    return RedirectResponse("/", status_code=status.HTTP_303_SEE_OTHER)
+    return RedirectResponse("/shows/dashboard", status_code=status.HTTP_303_SEE_OTHER)
 
 
 @router.post("/shows/{show_id}/run-now")
@@ -163,3 +203,34 @@ def pause_show_route(show_id: int, request: Request, db: Session = Depends(get_d
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return RedirectResponse(f"/shows/{show_id}", status_code=status.HTTP_303_SEE_OTHER)
+
+
+@router.post("/shows/{show_id}/guide/{sheet_key}/add")
+async def add_guide_row_route(show_id: int, sheet_key: str, request: Request, db: Session = Depends(get_db)):
+    require_authenticated(request)
+    show = _get_show_or_404(db, show_id)
+    try:
+        get_guide_sheet(sheet_key)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    payload = dict(await request.form())
+    create_guide_row(db, show=show, sheet_key=sheet_key, payload=payload)
+    return RedirectResponse(f"/shows/{show_id}#sheet-{sheet_key}", status_code=status.HTTP_303_SEE_OTHER)
+
+
+@router.post("/shows/{show_id}/guide/{row_id}/update")
+async def update_guide_row_route(show_id: int, row_id: int, request: Request, db: Session = Depends(get_db)):
+    require_authenticated(request)
+    row = _get_guide_row_or_404(db, show_id, row_id)
+    payload = dict(await request.form())
+    update_guide_row(db, row=row, payload=payload)
+    return RedirectResponse(f"/shows/{show_id}#sheet-{row.sheet_key}", status_code=status.HTTP_303_SEE_OTHER)
+
+
+@router.post("/shows/{show_id}/guide/{row_id}/delete")
+def delete_guide_row_route(show_id: int, row_id: int, request: Request, db: Session = Depends(get_db)):
+    require_authenticated(request)
+    row = _get_guide_row_or_404(db, show_id, row_id)
+    sheet_key = row.sheet_key
+    delete_guide_row(db, row=row)
+    return RedirectResponse(f"/shows/{show_id}#sheet-{sheet_key}", status_code=status.HTTP_303_SEE_OTHER)

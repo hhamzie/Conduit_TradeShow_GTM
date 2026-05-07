@@ -14,7 +14,7 @@ router = APIRouter()
 @router.get("/login")
 def login_page(request: Request):
     if is_authenticated(request):
-        return RedirectResponse("/", status_code=status.HTTP_303_SEE_OTHER)
+        return RedirectResponse("/workflow", status_code=status.HTTP_303_SEE_OTHER)
     return templates.TemplateResponse(
         "login.html",
         template_context(request, error=""),
@@ -35,10 +35,10 @@ def login_submit(
         )
 
     log_user_in(request, username)
-    return RedirectResponse("/", status_code=status.HTTP_303_SEE_OTHER)
+    return RedirectResponse("/workflow", status_code=status.HTTP_303_SEE_OTHER)
 
 
 @router.post("/logout")
 def logout(request: Request):
     log_user_out(request)
-    return RedirectResponse("/login", status_code=status.HTTP_303_SEE_OTHER)
+    return RedirectResponse("/shows/dashboard", status_code=status.HTTP_303_SEE_OTHER)

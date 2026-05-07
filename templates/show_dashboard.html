@@ -8,7 +8,9 @@
       <h1>One screen for every show you have loaded.</h1>
       <p class="hero-copy">This view ranks each trade show by exhibitor depth, data quality, booth coverage, and timing so you can decide whether it is worth visiting before you spend time on travel planning.</p>
     </div>
-    <a class="button" href="/">Open Workflow</a>
+    {% if can_manage %}
+    <a class="button" href="/workflow">Open Workflow</a>
+    {% endif %}
   </div>
   <div class="stats-grid stats-grid-compact">
     <article class="stat-card">
@@ -118,7 +120,9 @@
 
     <div class="card-action-row">
       <a class="button secondary" href="/shows/{{ analysis.show.id }}">Open Show Profile</a>
+      {% if can_manage %}
       <a class="button secondary" href="{{ analysis.show.source_url }}" target="_blank" rel="noreferrer">Source Directory</a>
+      {% endif %}
     </div>
   </article>
   {% endfor %}

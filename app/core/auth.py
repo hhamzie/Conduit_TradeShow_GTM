@@ -15,6 +15,10 @@ def is_authenticated(request: Request) -> bool:
     return bool(request.session.get("authenticated"))
 
 
+def can_manage(request: Request) -> bool:
+    return is_authenticated(request)
+
+
 def require_authenticated(request: Request) -> None:
     if not is_authenticated(request):
         raise HTTPException(

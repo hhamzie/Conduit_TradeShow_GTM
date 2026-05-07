@@ -241,6 +241,42 @@ def create_or_update_show(
     return False
 
 
+def update_show(
+    db: Session,
+    *,
+    show: Show,
+    show_name: str,
+    event_date_raw: str,
+    place: str,
+    link: str,
+    run_offset_days: int,
+) -> None:
+    normalized_name = show_name.strip()
+    normalized_place = place.strip()
+    normalized_link = link.strip()
+    if not (normalized_name and event_date_raw.strip() and normalized_place and normalized_link):
+        raise ValueError("Show name, date, place, and directory URL are all required.")
+
+    event_date = parse_show_date(event_date_raw)
+    existing = db.scalar(
+        select(Show).where(
+            Show.id != show.id,
+            Show.source_url == normalized_link,
+            Show.event_date == event_date,
+        )
+    )
+    if existing is not None:
+        raise ValueError("Another show already uses that date and source URL.")
+
+    show.name = normalized_name
+    show.place = normalized_place
+    show.source_url = normalized_link
+    show.event_date = event_date
+    show.run_offset_days = run_offset_days
+    show.run_at = compute_run_at(event_date, run_offset_days)
+    db.commit()
+
+
 def _run_direct_scrape(
     *,
     show_name: str,
@@ -500,7 +536,7 @@ def list_shows(db: Session) -> list[Show]:
     return list(
         db.scalars(
             select(Show)
-            .options(selectinload(Show.runs), selectinload(Show.clay_rows))
+            .options(selectinload(Show.runs), selectinload(Show.clay_rows), selectinload(Show.guide_rows))
             .order_by(Show.event_date.asc(), Show.created_at.desc())
         )
     )
@@ -509,7 +545,7 @@ def list_shows(db: Session) -> list[Show]:
 def get_show(db: Session, show_id: int) -> Show | None:
     return db.scalar(
         select(Show)
-        .options(selectinload(Show.runs), selectinload(Show.clay_rows))
+        .options(selectinload(Show.runs), selectinload(Show.clay_rows), selectinload(Show.guide_rows))
         .where(Show.id == show_id)
     )
 

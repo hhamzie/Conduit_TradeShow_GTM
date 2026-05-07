@@ -8,12 +8,44 @@
       <p>{{ show.place }} · {{ show.event_date }}</p>
     </div>
     <div class="panel-head-actions">
-      <a class="button secondary" href="/shows/dashboard">Show Dashboard</a>
-      <a class="button secondary" href="/">Workflow</a>
+      <a class="button secondary" href="/shows/dashboard">Trade Shows</a>
+      {% if can_manage %}
+      <a class="button secondary" href="/workflow">Workflow</a>
+      {% endif %}
     </div>
   </div>
 
+  {% if can_manage %}
+  <div class="detail-card detail-stack">
+    <h2>Edit Show</h2>
+    <form class="edit-show-form" action="/shows/{{ show.id }}/update" method="post">
+      <label>
+        <span>Show name</span>
+        <input type="text" name="show_name" value="{{ show.name }}" required />
+      </label>
+      <label>
+        <span>Show date</span>
+        <input type="text" name="event_date" value="{{ show.event_date }}" required />
+      </label>
+      <label>
+        <span>Place</span>
+        <input type="text" name="place" value="{{ show.place }}" required />
+      </label>
+      <label class="lane-form-wide">
+        <span>Directory or show link</span>
+        <input type="url" name="link" value="{{ show.source_url }}" required />
+      </label>
+      <label>
+        <span>Run days before show</span>
+        <input type="number" name="run_offset_days" min="0" max="60" value="{{ show.run_offset_days }}" required />
+      </label>
+      <button type="submit">Save Show</button>
+    </form>
+  </div>
+  {% endif %}
+
   <div class="detail-grid">
+    {% if can_manage %}
     <div class="detail-card">
       <h2>Status</h2>
       <p><span class="status status-{{ show.status }}">{{ show.status }}</span></p>
@@ -53,8 +85,15 @@
       {% if show.smartlead_campaign_id %}
       <p>Smartlead campaign: {{ show.smartlead_campaign_name or show.smartlead_campaign_id }} ({{ show.smartlead_campaign_id }})</p>
       {% endif %}
-      <p class="muted">This show now gets its own Clay table and Smartlead campaign when template-based automation is configured.</p>
     </div>
+    {% else %}
+    <div class="detail-card detail-card-wide">
+      <h2>Show Snapshot</h2>
+      <p><strong>{{ analysis.exhibitor_count }}</strong> exhibitors in the current profile.</p>
+      <p><strong>{{ analysis.website_coverage_percent }}%</strong> website coverage · <strong>{{ analysis.booth_coverage_percent }}%</strong> booth coverage.</p>
+      <p><a href="{{ show.source_url }}" target="_blank" rel="noreferrer">Open source directory</a></p>
+    </div>
+    {% endif %}
   </div>
 
   <div class="detail-card detail-stack visit-analysis-card">
@@ -143,13 +182,14 @@
     </div>
   </div>
 
-  {% if notice %}
+  {% if notice and can_manage %}
   <div class="detail-card detail-stack show-notice show-notice-{{ notice.tone }}">
     <h2>{{ notice.title }}</h2>
     <p>{{ notice.detail }}</p>
   </div>
   {% endif %}
 
+  {% if can_manage %}
   <div class="actions">
     <form action="/shows/{{ show.id }}/run-now" method="post">
       <button type="submit">Run Now</button>
@@ -178,11 +218,12 @@
       <button class="button danger" type="submit">Delete Show</button>
     </form>
   </div>
+  {% endif %}
 
   <div class="detail-card detail-stack">
     <h2>Source</h2>
     <p><a href="{{ show.source_url }}" target="_blank" rel="noreferrer">{{ show.source_url }}</a></p>
-    {% if show.last_error %}
+    {% if show.last_error and can_manage %}
     <h2>Latest Error Summary</h2>
     <p class="show-error">{{ error_summary }}</p>
     <details class="raw-error">
@@ -190,6 +231,88 @@
       <pre class="error-box">{{ show.last_error }}</pre>
     </details>
     {% endif %}
+  </div>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <div>
+      <h2>Guide Sheets</h2>
+      <p>DB-backed sheets for show-specific targets, booth groupings, and operator notes.</p>
+    </div>
+  </div>
+
+  <div class="guide-sheet-stack">
+    {% for sheet in guide_sheets %}
+    <section class="guide-sheet-card" id="sheet-{{ sheet.definition.key }}">
+      <div class="guide-sheet-head">
+        <div>
+          <h3>{{ sheet.definition.label }}</h3>
+          <p class="muted">{{ sheet.definition.description }}</p>
+        </div>
+        <span class="sheet-count">{{ sheet.rows|length }} row(s)</span>
+      </div>
+
+      <div class="table-wrap">
+        <table class="guide-table">
+          <thead>
+            <tr>
+              {% for field in sheet.definition.fields %}
+              <th>{{ field.label }}</th>
+              {% endfor %}
+              {% if can_manage %}
+              <th>Actions</th>
+              {% endif %}
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in sheet.rows %}
+            {% if can_manage %}
+            {% set form_id = "guide-row-" ~ row.id %}
+            <form id="{{ form_id }}" action="/shows/{{ show.id }}/guide/{{ row.id }}/update" method="post"></form>
+            <tr>
+              {% for field in sheet.definition.fields %}
+              <td>
+                <input type="{{ field.input_type }}" name="{{ field.key }}" value="{{ row.values.get(field.key, '') }}" placeholder="{{ field.placeholder }}" form="{{ form_id }}" />
+              </td>
+              {% endfor %}
+              <td class="guide-actions-cell">
+                <button class="button subtle" type="submit" form="{{ form_id }}">Save</button>
+                <button class="button danger subtle" type="submit" form="{{ form_id }}" formaction="/shows/{{ show.id }}/guide/{{ row.id }}/delete" onclick="return confirm('Delete this guide row?');">Delete</button>
+              </td>
+            </tr>
+            {% else %}
+            <tr>
+              {% for field in sheet.definition.fields %}
+              <td>{{ row.values.get(field.key, "") or "-" }}</td>
+              {% endfor %}
+            </tr>
+            {% endif %}
+            {% else %}
+            <tr>
+              <td colspan="{{ sheet.definition.fields|length + (1 if can_manage else 0) }}" class="empty">No rows yet.</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+
+      {% if can_manage %}
+      <details class="guide-add-row">
+        <summary>Add row to {{ sheet.definition.label }}</summary>
+        <form class="guide-row-form" action="/shows/{{ show.id }}/guide/{{ sheet.definition.key }}/add" method="post">
+          {% for field in sheet.definition.fields %}
+          <label>
+            <span>{{ field.label }}</span>
+            <input type="{{ field.input_type }}" name="{{ field.key }}" placeholder="{{ field.placeholder }}" />
+          </label>
+          {% endfor %}
+          <button type="submit">Add Row</button>
+        </form>
+      </details>
+      {% endif %}
+    </section>
+    {% endfor %}
   </div>
 </section>
 
@@ -256,6 +379,7 @@
   {% endif %}
 </section>
 
+{% if can_manage %}
 <section class="panel">
   <div class="panel-head">
     <div>
@@ -296,4 +420,5 @@
     </table>
   </div>
 </section>
+{% endif %}
 {% endblock %}

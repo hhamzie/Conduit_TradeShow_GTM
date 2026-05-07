@@ -4,8 +4,10 @@ from app.application import create_app
 from app.web.routes.auth import login_page, login_submit, logout
 from app.web.routes.health import healthz
 from app.web.routes.shows import (
+    add_guide_row_route,
     approve_show_route,
     delete_show,
+    delete_guide_row_route,
     download_enriched_export,
     download_export,
     download_smartlead_export,
@@ -15,6 +17,8 @@ from app.web.routes.shows import (
     show_dashboard,
     show_detail,
     sync_show_from_clay_route,
+    update_guide_row_route,
+    update_show_route,
 )
 from app.web.routes.workflow import (
     add_single_show,
@@ -47,6 +51,7 @@ __all__ = [
     "bulk_scrape_download",
     "delete_all_shows",
     "show_detail",
+    "update_show_route",
     "delete_show",
     "run_show_now",
     "download_export",
@@ -56,4 +61,7 @@ __all__ = [
     "sync_show_from_clay_route",
     "launch_show_route",
     "pause_show_route",
+    "add_guide_row_route",
+    "update_guide_row_route",
+    "delete_guide_row_route",
 ]

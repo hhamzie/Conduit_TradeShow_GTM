@@ -517,6 +517,17 @@ button.button.subtle {
   gap: 10px;
 }
 
+.edit-show-form,
+.guide-row-form,
+.guide-sheet-stack {
+  display: grid;
+  gap: 14px;
+}
+
+.edit-show-form {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .show-card {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 210px;
@@ -773,6 +784,58 @@ button.button.subtle {
 .visit-analysis-card {
   margin-top: 20px;
   background: linear-gradient(180deg, rgba(250, 252, 255, 0.98), rgba(244, 248, 255, 0.95));
+}
+
+.guide-sheet-card {
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.76);
+}
+
+.guide-sheet-head {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+
+.sheet-count {
+  display: inline-flex;
+  align-items: center;
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: rgba(47, 109, 246, 0.08);
+  color: var(--accent-dark);
+  font-size: 0.8rem;
+  font-weight: 800;
+}
+
+.guide-table input {
+  min-width: 120px;
+}
+
+.guide-actions-cell {
+  display: flex;
+  gap: 8px;
+  align-items: start;
+  flex-wrap: wrap;
+}
+
+.guide-add-row {
+  margin-top: 16px;
+}
+
+.guide-add-row summary {
+  cursor: pointer;
+  font-weight: 700;
+  color: var(--ink-soft);
+}
+
+.guide-row-form {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-top: 14px;
 }
 
 @media (max-width: 960px) {
@@ -1138,6 +1201,10 @@ th {
   margin-bottom: 18px;
 }
 
+.detail-card-wide {
+  grid-column: 1 / -1;
+}
+
 .detail-card {
   border: 1px solid var(--line);
   border-radius: 20px;
@@ -1189,7 +1256,9 @@ th {
   .lane-grid,
   .hero-grid,
   .lane-form-single,
-  .lane-form-automation {
+  .lane-form-automation,
+  .edit-show-form,
+  .guide-row-form {
     grid-template-columns: 1fr;
   }
 
