@@ -26,8 +26,17 @@ jobs:
       - name: Compile application
         run: python -m compileall app tests
 
-      - name: Run unit tests
-        run: python -m unittest tests.test_show_intelligence tests.test_workflow_presenters tests.test_show_guides tests.test_automation
+      - name: Run show intelligence tests
+        run: python -m unittest -v tests.test_show_intelligence
+
+      - name: Run workflow presenter tests
+        run: python -m unittest -v tests.test_workflow_presenters
+
+      - name: Run guide sheet tests
+        run: python -m unittest -v tests.test_show_guides
+
+      - name: Run automation tests
+        run: python -m unittest -v tests.test_automation
 
       - name: Smoke test production app
         run: sh scripts/smoke-production.sh
