@@ -40,8 +40,6 @@
         <tr>
           <th>Show</th>
           <th>Rating</th>
-          <th>Guide Signal</th>
-          <th>Context</th>
           <th>Smartlead</th>
           <th>Guide</th>
           <th>Profile</th>
@@ -64,28 +62,14 @@
             </div>
           </td>
           <td>
-            <div class="dashboard-context-cell">
-              <strong>{{ analysis.guide_people_total }}</strong>
-              <span class="muted">sales + support reps</span>
-              <span class="muted">{{ analysis.guide_company_count }} guide companies · {{ "%.1f"|format(analysis.guide_average_people_per_company) }} avg</span>
-            </div>
-          </td>
-          <td>
-            <div class="dashboard-context-cell">
-              {% for line in analysis.guide_context %}
-              <span>{{ line }}</span>
-              {% endfor %}
-            </div>
-          </td>
-          <td>
             <div class="dashboard-action-cell">
               {% if analysis.show.smartlead_campaign_id %}
               <span class="status-chip status-chip-success">Done</span>
-              <a class="button secondary" href="https://app.smartlead.ai/app/campaigns/{{ analysis.show.smartlead_campaign_id }}" target="_blank" rel="noreferrer">Open</a>
+              <a class="button secondary action-button" href="https://app.smartlead.ai/app/campaigns/{{ analysis.show.smartlead_campaign_id }}" target="_blank" rel="noreferrer" data-tooltip="Open Smartlead campaign">Open</a>
               {% elif can_manage %}
               <form action="/shows/{{ analysis.show.id }}/smartlead/setup" method="post">
                 <input type="hidden" name="campaign_mode" value="smart" />
-                <button class="button secondary" type="submit">Add</button>
+                <button class="button secondary action-button" type="submit" data-tooltip="Create or attach Smartlead campaign">Add</button>
               </form>
               {% else %}
               <span class="status-chip">Not added</span>
@@ -94,16 +78,29 @@
           </td>
           <td>
             <div class="dashboard-action-cell">
-              {% if can_manage and analysis.export_ready and analysis.guide_company_count == 0 %}
-              <form action="/shows/{{ analysis.show.id }}/guide/build" method="post">
-                <button class="button secondary" type="submit">Build</button>
-              </form>
+              {% if analysis.guide_company_count > 0 %}
+              <a class="icon-button guide-icon guide-icon-ready" href="/shows/{{ analysis.show.id }}/guide" data-tooltip="Open guide" aria-label="Open guide">&#128214;</a>
+              {% elif can_manage %}
+              <details class="action-menu">
+                <summary class="icon-button guide-icon guide-icon-missing" data-tooltip="No guide yet. Click for options." aria-label="Guide options">&#128214;</summary>
+                <div class="action-menu-panel">
+                  <a class="action-menu-link" href="/shows/{{ analysis.show.id }}/guide">Add rows</a>
+                  {% if analysis.export_ready %}
+                  <form action="/shows/{{ analysis.show.id }}/guide/build" method="post">
+                    <button class="action-menu-link action-menu-button" type="submit">Build from export</button>
+                  </form>
+                  {% else %}
+                  <a class="action-menu-link" href="/shows/{{ analysis.show.id }}/guide">Create blank guide</a>
+                  {% endif %}
+                </div>
+              </details>
+              {% else %}
+              <a class="icon-button guide-icon guide-icon-missing" href="/shows/{{ analysis.show.id }}/guide" data-tooltip="Guide not built yet" aria-label="Open guide">&#128214;</a>
               {% endif %}
-              <a class="icon-button" href="/shows/{{ analysis.show.id }}/guide" title="Open trade show guide" aria-label="Open trade show guide">&#128214;</a>
             </div>
           </td>
           <td>
-            <a class="button secondary" href="/shows/{{ analysis.show.id }}">Open</a>
+            <a class="button secondary action-button" href="/shows/{{ analysis.show.id }}" data-tooltip="Open show profile">Open</a>
           </td>
         </tr>
         {% endfor %}
