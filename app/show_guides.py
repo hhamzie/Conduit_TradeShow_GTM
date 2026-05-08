@@ -110,6 +110,8 @@ def serialize_guide_values(values: dict[str, str]) -> str:
 def build_guide_sheet_views(show: Show) -> tuple[GuideSheetView, ...]:
     grouped: dict[str, list[GuideRowView]] = {key: [] for key in GUIDE_SHEETS}
     for row in show.guide_rows:
+        if row.source != "workbook":
+            continue
         if row.sheet_key not in grouped:
             continue
         grouped[row.sheet_key].append(

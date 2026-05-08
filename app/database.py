@@ -41,6 +41,8 @@ def _migrate_existing_schema() -> None:
     existing_tables = set(inspector.get_table_names())
     if "shows" in existing_tables:
         _ensure_show_columns(inspector)
+    if "show_guide_rows" in existing_tables:
+        _ensure_guide_columns(inspector)
 
 
 def _ensure_show_columns(inspector) -> None:
@@ -75,3 +77,16 @@ def _ensure_show_columns(inspector) -> None:
     with engine.begin() as connection:
         for name, definition in missing.items():
             connection.execute(text(f"ALTER TABLE shows ADD COLUMN {name} {definition}"))
+
+
+def _ensure_guide_columns(inspector) -> None:
+    existing_columns = {column["name"] for column in inspector.get_columns("show_guide_rows")}
+    missing = {}
+    if "source" not in existing_columns:
+        missing["source"] = "TEXT NOT NULL DEFAULT 'legacy'"
+    if not missing:
+        return
+
+    with engine.begin() as connection:
+        for name, definition in missing.items():
+            connection.execute(text(f"ALTER TABLE show_guide_rows ADD COLUMN {name} {definition}"))

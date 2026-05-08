@@ -33,6 +33,7 @@ def create_guide_row(
     row = ShowGuideRow(
         show=show,
         sheet_key=sheet_key,
+        source="workbook",
         position=int(next_position or 0),
         values_json=serialize_guide_values(values),
     )
@@ -141,6 +142,7 @@ def import_trade_show_guide_workbook(db: Session, *, show: Show, workbook_bytes:
                 ShowGuideRow(
                     show=show,
                     sheet_key=sheet_key,
+                    source="workbook",
                     position=position,
                     values_json=serialize_guide_values(payload),
                 )
@@ -182,6 +184,7 @@ def rebuild_trade_show_guides(db: Session, *, show: Show) -> tuple[int, int]:
             ShowGuideRow(
                 show=show,
                 sheet_key="company_summary",
+                source="generated",
                 position=index,
                 values_json=serialize_guide_values(shared_values),
             )
@@ -190,6 +193,7 @@ def rebuild_trade_show_guides(db: Session, *, show: Show) -> tuple[int, int]:
             ShowGuideRow(
                 show=show,
                 sheet_key="booth_category_groups",
+                source="generated",
                 position=index,
                 values_json=serialize_guide_values(
                     {

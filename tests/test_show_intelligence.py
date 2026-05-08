@@ -75,6 +75,7 @@ class ShowIntelligenceTests(unittest.TestCase):
         show.guide_rows = [
             ShowGuideRow(
                 sheet_key="company_summary",
+                source="workbook",
                 position=0,
                 values_json=serialize_guide_values(
                     {
@@ -95,6 +96,7 @@ class ShowIntelligenceTests(unittest.TestCase):
             ),
             ShowGuideRow(
                 sheet_key="company_summary",
+                source="workbook",
                 position=1,
                 values_json=serialize_guide_values(
                     {

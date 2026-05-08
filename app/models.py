@@ -136,6 +136,7 @@ class ShowGuideRow(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     show_id: Mapped[int] = mapped_column(ForeignKey("shows.id", ondelete="CASCADE"))
     sheet_key: Mapped[str] = mapped_column(String(64))
+    source: Mapped[str] = mapped_column(String(32), default="workbook")
     position: Mapped[int] = mapped_column(Integer(), default=0)
     values_json: Mapped[str] = mapped_column(Text(), default="{}")
     created_at: Mapped[datetime] = mapped_column(DateTime(), server_default=func.now())

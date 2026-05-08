@@ -476,7 +476,7 @@ def _guide_company_rows(show: Show) -> list[dict[str, str]]:
     return [
         parse_guide_row_values(row)
         for row in show.guide_rows
-        if row.sheet_key == "company_summary"
+        if row.sheet_key == "company_summary" and row.source == "workbook"
     ]
 
 
