@@ -774,7 +774,6 @@ button.button.subtle {
   align-items: center;
   justify-content: flex-end;
   gap: 10px;
-  justify-items: end;
 }
 
 .icon-button {
@@ -790,6 +789,18 @@ button.button.subtle {
   color: var(--ink);
   text-decoration: none;
   font-size: 0.96rem;
+}
+
+.icon-mark {
+  width: 18px;
+  height: 18px;
+  display: block;
+  flex: 0 0 auto;
+}
+
+.icon-mark-smartlead {
+  width: 22px;
+  height: 22px;
 }
 
 .icon-button:hover {
@@ -809,8 +820,10 @@ button.button.subtle {
 }
 
 .smartlead-icon {
-  background: rgba(47, 109, 246, 0.1);
-  border-color: rgba(47, 109, 246, 0.16);
+  width: 46px;
+  border-radius: 16px;
+  background: linear-gradient(180deg, rgba(47, 109, 246, 0.12), rgba(47, 109, 246, 0.08));
+  border-color: rgba(47, 109, 246, 0.18);
   color: var(--accent-dark);
 }
 
@@ -927,30 +940,30 @@ button.button.subtle {
   position: relative;
 }
 
-[data-tooltip]::after {
-  content: attr(data-tooltip);
-  position: absolute;
-  left: 50%;
-  bottom: calc(100% + 10px);
-  transform: translateX(-50%) translateY(4px);
+.floating-tooltip {
+  position: fixed;
+  top: 0;
+  left: 0;
+  max-width: 220px;
   padding: 7px 10px;
   border-radius: 10px;
-  background: rgba(20, 32, 51, 0.92);
+  background: rgba(20, 32, 51, 0.94);
   color: white;
-  white-space: nowrap;
   font-size: 0.76rem;
   font-weight: 700;
   letter-spacing: 0.01em;
-  opacity: 0;
+  line-height: 1.35;
+  box-shadow: 0 14px 30px rgba(20, 32, 51, 0.24);
   pointer-events: none;
+  opacity: 0;
+  transform: translate3d(0, 6px, 0);
   transition: opacity 120ms ease, transform 120ms ease;
-  z-index: 30;
+  z-index: 9999;
 }
 
-[data-tooltip]:hover::after,
-[data-tooltip]:focus-visible::after {
+.floating-tooltip.is-visible {
   opacity: 1;
-  transform: translateX(-50%) translateY(0);
+  transform: translate3d(0, 0, 0);
 }
 
 .priority-high {

@@ -301,6 +301,81 @@ function handleDashboardRowClick(event) {
   window.location.href = href;
 }
 
+let activeTooltipTarget = null;
+let floatingTooltip = null;
+
+function ensureFloatingTooltip() {
+  if (floatingTooltip) {
+    return floatingTooltip;
+  }
+  floatingTooltip = document.createElement("div");
+  floatingTooltip.className = "floating-tooltip";
+  document.body.appendChild(floatingTooltip);
+  return floatingTooltip;
+}
+
+function positionFloatingTooltip(target, event) {
+  const tooltip = ensureFloatingTooltip();
+  const text = target.dataset.tooltip || "";
+  if (!text) {
+    return;
+  }
+  tooltip.textContent = text;
+  tooltip.classList.add("is-visible");
+
+  const offset = 14;
+  const tooltipRect = tooltip.getBoundingClientRect();
+  const viewportWidth = window.innerWidth;
+  const viewportHeight = window.innerHeight;
+  const targetRect = target.getBoundingClientRect();
+  const anchorX = typeof event.clientX === "number" ? event.clientX : (targetRect.left + targetRect.right) / 2;
+  const anchorY = typeof event.clientY === "number" ? event.clientY : targetRect.top;
+  let left = anchorX - (tooltipRect.width / 2);
+  let top = anchorY - tooltipRect.height - offset;
+
+  if (left < 8) {
+    left = 8;
+  }
+  if (left + tooltipRect.width > viewportWidth - 8) {
+    left = viewportWidth - tooltipRect.width - 8;
+  }
+  if (top < 8) {
+    top = (typeof event.clientY === "number" ? event.clientY : targetRect.bottom) + offset;
+  }
+  if (top + tooltipRect.height > viewportHeight - 8) {
+    top = viewportHeight - tooltipRect.height - 8;
+  }
+
+  tooltip.style.left = `${left}px`;
+  tooltip.style.top = `${top}px`;
+}
+
+function handleTooltipEnter(event) {
+  const target = event.currentTarget;
+  if (!target.dataset.tooltip) {
+    return;
+  }
+  activeTooltipTarget = target;
+  positionFloatingTooltip(target, event);
+}
+
+function handleTooltipMove(event) {
+  if (activeTooltipTarget !== event.currentTarget) {
+    return;
+  }
+  positionFloatingTooltip(event.currentTarget, event);
+}
+
+function handleTooltipLeave(event) {
+  if (activeTooltipTarget !== event.currentTarget) {
+    return;
+  }
+  activeTooltipTarget = null;
+  if (floatingTooltip) {
+    floatingTooltip.classList.remove("is-visible");
+  }
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   const directForms = document.querySelectorAll("[data-direct-download-form]");
   directForms.forEach((form) => {
@@ -320,5 +395,14 @@ document.addEventListener("DOMContentLoaded", () => {
   const dashboardRows = document.querySelectorAll("[data-row-href]");
   dashboardRows.forEach((row) => {
     row.addEventListener("click", handleDashboardRowClick);
+  });
+
+  const tooltipTargets = document.querySelectorAll("[data-tooltip]");
+  tooltipTargets.forEach((target) => {
+    target.addEventListener("mouseenter", handleTooltipEnter);
+    target.addEventListener("mousemove", handleTooltipMove);
+    target.addEventListener("mouseleave", handleTooltipLeave);
+    target.addEventListener("focus", handleTooltipEnter);
+    target.addEventListener("blur", handleTooltipLeave);
   });
 });

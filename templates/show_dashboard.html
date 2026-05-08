@@ -59,21 +59,54 @@
           <td>
             <div class="dashboard-icon-rail">
               {% if analysis.show.smartlead_campaign_id %}
-              <a class="icon-button smartlead-icon" href="https://app.smartlead.ai/app/campaigns/{{ analysis.show.smartlead_campaign_id }}" target="_blank" rel="noreferrer" data-tooltip="Smartlead campaign">&#10148;</a>
+              <a class="icon-button smartlead-icon" href="https://app.smartlead.ai/app/campaigns/{{ analysis.show.smartlead_campaign_id }}" target="_blank" rel="noreferrer" data-tooltip="Smartlead campaign">
+                <svg viewBox="0 0 64 64" aria-hidden="true" class="icon-mark icon-mark-smartlead">
+                  <path d="M18 18c-6.5 0-12 5.5-12 12s5.5 12 12 12h6V18h-6Z" fill="currentColor"/>
+                  <path d="M29 15.5c0-3.4 3.6-5.5 6.5-3.8l22.3 12.8c2.8 1.6 2.8 5.9 0 7.5L35.5 44.8c-2.9 1.7-6.5-.4-6.5-3.8V15.5Z" fill="currentColor"/>
+                  <rect x="24" y="45.5" width="11" height="14.5" rx="3.5" fill="currentColor"/>
+                  <circle cx="56" cy="30" r="6" fill="currentColor" opacity="0.8"/>
+                </svg>
+              </a>
               {% elif can_manage %}
               <form action="/shows/{{ analysis.show.id }}/smartlead/setup" method="post">
                 <input type="hidden" name="campaign_mode" value="smart" />
-                <button class="icon-button smartlead-icon smartlead-icon-missing" type="submit" data-tooltip="Add Smartlead campaign">&#10148;</button>
+                <button class="icon-button smartlead-icon smartlead-icon-missing" type="submit" data-tooltip="Add Smartlead campaign">
+                  <svg viewBox="0 0 64 64" aria-hidden="true" class="icon-mark icon-mark-smartlead">
+                    <path d="M18 18c-6.5 0-12 5.5-12 12s5.5 12 12 12h6V18h-6Z" fill="currentColor"/>
+                    <path d="M29 15.5c0-3.4 3.6-5.5 6.5-3.8l22.3 12.8c2.8 1.6 2.8 5.9 0 7.5L35.5 44.8c-2.9 1.7-6.5-.4-6.5-3.8V15.5Z" fill="currentColor"/>
+                    <rect x="24" y="45.5" width="11" height="14.5" rx="3.5" fill="currentColor"/>
+                    <circle cx="56" cy="30" r="6" fill="currentColor" opacity="0.8"/>
+                  </svg>
+                </button>
               </form>
               {% else %}
-              <span class="icon-button smartlead-icon smartlead-icon-missing" data-tooltip="No Smartlead campaign">&#10148;</span>
+              <span class="icon-button smartlead-icon smartlead-icon-missing" data-tooltip="No Smartlead campaign">
+                <svg viewBox="0 0 64 64" aria-hidden="true" class="icon-mark icon-mark-smartlead">
+                  <path d="M18 18c-6.5 0-12 5.5-12 12s5.5 12 12 12h6V18h-6Z" fill="currentColor"/>
+                  <path d="M29 15.5c0-3.4 3.6-5.5 6.5-3.8l22.3 12.8c2.8 1.6 2.8 5.9 0 7.5L35.5 44.8c-2.9 1.7-6.5-.4-6.5-3.8V15.5Z" fill="currentColor"/>
+                  <rect x="24" y="45.5" width="11" height="14.5" rx="3.5" fill="currentColor"/>
+                  <circle cx="56" cy="30" r="6" fill="currentColor" opacity="0.8"/>
+                </svg>
+              </span>
               {% endif %}
 
               {% if analysis.guide_company_count > 0 %}
-              <a class="icon-button guide-icon guide-icon-ready" href="/shows/{{ analysis.show.id }}/guide" data-tooltip="Open guide" aria-label="Open guide">&#128214;</a>
+              <a class="icon-button guide-icon guide-icon-ready" href="/shows/{{ analysis.show.id }}/guide" data-tooltip="Open guide" aria-label="Open guide">
+                <svg viewBox="0 0 24 24" aria-hidden="true" class="icon-mark">
+                  <path d="M4.75 5.25A2.25 2.25 0 0 1 7 3h10.25A2.75 2.75 0 0 1 20 5.75v12.5A1.75 1.75 0 0 1 18.25 20H8.75A3.75 3.75 0 0 0 5 23V5.25Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+                  <path d="M5 5.25A2.25 2.25 0 0 1 7.25 3H8v17.5H7.75A2.75 2.75 0 0 0 5 23.25" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+                  <path d="M11 7.25h5.5M11 10.75h5.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                </svg>
+              </a>
               {% elif can_manage %}
               <details class="action-menu">
-                <summary class="icon-button guide-icon guide-icon-missing" data-tooltip="No guide yet. Click for options." aria-label="Guide options">&#128214;</summary>
+                <summary class="icon-button guide-icon guide-icon-missing" data-tooltip="No guide yet. Click for options." aria-label="Guide options">
+                  <svg viewBox="0 0 24 24" aria-hidden="true" class="icon-mark">
+                    <path d="M4.75 5.25A2.25 2.25 0 0 1 7 3h10.25A2.75 2.75 0 0 1 20 5.75v12.5A1.75 1.75 0 0 1 18.25 20H8.75A3.75 3.75 0 0 0 5 23V5.25Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+                    <path d="M5 5.25A2.25 2.25 0 0 1 7.25 3H8v17.5H7.75A2.75 2.75 0 0 0 5 23.25" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+                    <path d="M11 7.25h5.5M11 10.75h5.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                  </svg>
+                </summary>
                 <div class="action-menu-panel">
                   <form class="workbook-upload-form" action="/shows/{{ analysis.show.id }}/guide/upload" method="post" enctype="multipart/form-data" data-auto-submit-file-form>
                     <input class="visually-hidden-file" id="guide-upload-{{ analysis.show.id }}" type="file" name="workbook" accept=".xlsx,.xlsm" required />
@@ -83,12 +116,24 @@
                 </div>
               </details>
               {% else %}
-              <a class="icon-button guide-icon guide-icon-missing" href="/shows/{{ analysis.show.id }}/guide" data-tooltip="Guide not built yet" aria-label="Open guide">&#128214;</a>
+              <a class="icon-button guide-icon guide-icon-missing" href="/shows/{{ analysis.show.id }}/guide" data-tooltip="Guide not built yet" aria-label="Open guide">
+                <svg viewBox="0 0 24 24" aria-hidden="true" class="icon-mark">
+                  <path d="M4.75 5.25A2.25 2.25 0 0 1 7 3h10.25A2.75 2.75 0 0 1 20 5.75v12.5A1.75 1.75 0 0 1 18.25 20H8.75A3.75 3.75 0 0 0 5 23V5.25Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+                  <path d="M5 5.25A2.25 2.25 0 0 1 7.25 3H8v17.5H7.75A2.75 2.75 0 0 0 5 23.25" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+                  <path d="M11 7.25h5.5M11 10.75h5.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                </svg>
+              </a>
               {% endif %}
 
               {% if can_manage %}
               <details class="action-menu">
-                <summary class="icon-button profile-icon" data-tooltip="More actions" aria-label="More actions">&#8942;</summary>
+                <summary class="icon-button profile-icon" data-tooltip="More actions" aria-label="More actions">
+                  <svg viewBox="0 0 24 24" aria-hidden="true" class="icon-mark">
+                    <circle cx="12" cy="5" r="1.8" fill="currentColor"/>
+                    <circle cx="12" cy="12" r="1.8" fill="currentColor"/>
+                    <circle cx="12" cy="19" r="1.8" fill="currentColor"/>
+                  </svg>
+                </summary>
                 <div class="action-menu-panel">
                   <form action="/shows/{{ analysis.show.id }}/delete" method="post" onsubmit="return confirm('Delete this show from the dashboard?');">
                     <button class="action-menu-link action-menu-button danger-link" type="submit">Delete show</button>
@@ -96,7 +141,13 @@
                 </div>
               </details>
               {% else %}
-              <span class="icon-button profile-icon" data-tooltip="Open row for profile">&#8942;</span>
+              <span class="icon-button profile-icon" data-tooltip="Open row for profile">
+                <svg viewBox="0 0 24 24" aria-hidden="true" class="icon-mark">
+                  <circle cx="12" cy="5" r="1.8" fill="currentColor"/>
+                  <circle cx="12" cy="12" r="1.8" fill="currentColor"/>
+                  <circle cx="12" cy="19" r="1.8" fill="currentColor"/>
+                </svg>
+              </span>
               {% endif %}
             </div>
           </td>
