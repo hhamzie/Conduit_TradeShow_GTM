@@ -1089,8 +1089,9 @@ button.button.subtle {
 }
 
 .metric-strip {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  margin-bottom: 18px;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  margin-bottom: 0;
+  gap: 10px;
 }
 
 .metric-tile,
@@ -1103,14 +1104,14 @@ button.button.subtle {
 }
 
 .metric-tile {
-  padding: 16px;
+  padding: 12px 14px;
   border: 1px solid var(--line);
-  background: rgba(247, 250, 255, 0.9);
+  background: #ffffff;
 }
 
 .metric-tile span {
   display: block;
-  margin-bottom: 8px;
+  margin-bottom: 6px;
   font-size: 0.74rem;
   font-weight: 800;
   letter-spacing: 0.08em;
@@ -1119,8 +1120,15 @@ button.button.subtle {
 }
 
 .metric-tile strong {
-  font-size: 1.2rem;
+  font-size: 1rem;
   letter-spacing: -0.03em;
+}
+
+.metric-tile-status small {
+  display: block;
+  margin-top: 4px;
+  font-size: 0.82rem;
+  line-height: 1.35;
 }
 
 .analysis-columns {
@@ -1541,7 +1549,7 @@ button.button.subtle {
   .company-guide-grid,
   .next-step-strip,
   .metric-strip {
-    grid-template-columns: minmax(0, 1fr);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .show-card {
@@ -2095,6 +2103,14 @@ th {
   margin-bottom: 0;
 }
 
+.profile-overview-panel {
+  padding: 18px 20px;
+}
+
+.profile-overview-panel .panel-head {
+  margin-bottom: 12px;
+}
+
 .profile-overview-grid {
   display: grid;
   grid-template-columns: minmax(0, 320px);
@@ -2312,6 +2328,10 @@ th {
   .edit-show-form,
   .guide-row-form,
   .profile-overview-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .metric-strip {
     grid-template-columns: 1fr;
   }
 

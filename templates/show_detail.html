@@ -87,7 +87,7 @@
   {% endif %}
 </section>
 
-<section class="panel profile-card">
+<section class="panel profile-card profile-overview-panel">
   <div class="panel-head">
     <div>
       <h2>Overview</h2>
@@ -111,31 +111,28 @@
       <span>Timing</span>
       <strong>{% if analysis.days_until_event >= 0 %}{{ analysis.days_until_event }}d out{% else %}{{ analysis.days_until_event | abs }}d ago{% endif %}</strong>
     </div>
-  </div>
-
-  <div class="profile-overview-grid">
-    <article class="profile-summary-card">
-      <span class="stat-label">Guide</span>
-      <strong class="stat-value">{% if analysis.guide_company_count > 0 %}Ready{% else %}Missing{% endif %}</strong>
-      <p class="muted">
+    <div class="metric-tile metric-tile-status">
+      <span>Guide</span>
+      <strong>{% if analysis.guide_company_count > 0 %}Ready{% else %}Missing{% endif %}</strong>
+      <small class="muted">
         {% if analysis.guide_company_count > 0 %}
-        {{ analysis.guide_company_count }} companies loaded
+        {{ analysis.guide_company_count }} loaded
         {% else %}
-        No workbook uploaded yet
+        No workbook yet
         {% endif %}
-      </p>
-    </article>
-    <article class="profile-summary-card">
-      <span class="stat-label">Clay Table</span>
-      <strong class="stat-value">{% if show.clay_table_id %}Connected{% else %}Missing{% endif %}</strong>
-      <p class="muted">
+      </small>
+    </div>
+    <div class="metric-tile metric-tile-status">
+      <span>Clay Table</span>
+      <strong>{% if show.clay_table_id %}Connected{% else %}Missing{% endif %}</strong>
+      <small class="muted">
         {% if show.clay_table_id %}
-        {{ show.clay_table_name or "Table linked" }}
+        {{ show.clay_table_name or "Linked" }}
         {% else %}
-        No Clay table linked yet
+        Not linked yet
         {% endif %}
-      </p>
-    </article>
+      </small>
+    </div>
   </div>
 </section>
 
