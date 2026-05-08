@@ -529,6 +529,62 @@ function handleGuideAutosaveCommit(event) {
   queueGuideRowAutosave(target, true);
 }
 
+function activateSheetTab(tabStrip, targetId, updateHash = true) {
+  const tabs = tabStrip.querySelectorAll("[data-sheet-tab]");
+  const panels = document.querySelectorAll("[data-sheet-panel]");
+  let activated = false;
+
+  tabs.forEach((tab) => {
+    const isActive = tab.getAttribute("data-sheet-target") === targetId;
+    tab.classList.toggle("is-active", isActive);
+    tab.setAttribute("aria-selected", isActive ? "true" : "false");
+    if (isActive) {
+      activated = true;
+    }
+  });
+
+  panels.forEach((panel) => {
+    const isActive = panel.id === targetId;
+    panel.classList.toggle("is-active", isActive);
+    panel.hidden = !isActive;
+  });
+
+  if (activated && updateHash) {
+    window.history.replaceState(null, "", `#${targetId}`);
+  }
+}
+
+function handleSheetTabClick(event) {
+  const tab = event.currentTarget;
+  const tabStrip = tab.closest("[data-sheet-tabs]");
+  const targetId = tab.getAttribute("data-sheet-target") || "";
+  if (!tabStrip || !targetId) {
+    return;
+  }
+  activateSheetTab(tabStrip, targetId, true);
+}
+
+function initializeSheetTabs() {
+  const tabStrip = document.querySelector("[data-sheet-tabs]");
+  if (!tabStrip) {
+    return;
+  }
+
+  const tabs = tabStrip.querySelectorAll("[data-sheet-tab]");
+  tabs.forEach((tab) => {
+    tab.addEventListener("click", handleSheetTabClick);
+  });
+
+  const hashTarget = window.location.hash.replace(/^#/, "");
+  const initialTab =
+    (hashTarget && tabStrip.querySelector(`[data-sheet-target="${hashTarget}"]`)) ||
+    tabStrip.querySelector("[data-sheet-tab]");
+
+  if (initialTab instanceof HTMLElement) {
+    activateSheetTab(tabStrip, initialTab.getAttribute("data-sheet-target") || "", false);
+  }
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   const directForms = document.querySelectorAll("[data-direct-download-form]");
   directForms.forEach((form) => {
@@ -571,4 +627,6 @@ document.addEventListener("DOMContentLoaded", () => {
     input.addEventListener("change", handleGuideAutosaveCommit);
     input.addEventListener("blur", handleGuideAutosaveCommit);
   });
+
+  initializeSheetTabs();
 });

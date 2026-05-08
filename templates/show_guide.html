@@ -47,15 +47,31 @@
 </section>
 
 <section class="panel sheet-workspace-panel">
-  <div class="sheet-tab-strip" role="tablist" aria-label="Guide sheets">
+  <div class="sheet-tab-strip workbook-tab-strip" role="tablist" aria-label="Guide sheets" data-sheet-tabs>
     {% for sheet in guide_sheets %}
-    <a class="sheet-tab{% if loop.first %} is-active{% endif %}" href="#sheet-{{ sheet.definition.key }}">{{ sheet.definition.label }}</a>
+    <button
+      class="sheet-tab workbook-tab{% if loop.first %} is-active{% endif %}"
+      type="button"
+      role="tab"
+      aria-selected="{{ 'true' if loop.first else 'false' }}"
+      aria-controls="sheet-{{ sheet.definition.key }}"
+      data-sheet-tab
+      data-sheet-target="sheet-{{ sheet.definition.key }}"
+    >
+      {{ sheet.definition.label }}
+    </button>
     {% endfor %}
   </div>
 
   <div class="sheet-stack">
     {% for sheet in guide_sheets %}
-    <section class="spreadsheet-section" id="sheet-{{ sheet.definition.key }}">
+    <section
+      class="spreadsheet-section{% if loop.first %} is-active{% endif %}"
+      id="sheet-{{ sheet.definition.key }}"
+      role="tabpanel"
+      data-sheet-panel
+      {% if not loop.first %}hidden{% endif %}
+    >
       <div class="spreadsheet-meta">
         <div>
           <h2>{{ sheet.definition.label }}</h2>

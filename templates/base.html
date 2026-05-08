@@ -13,7 +13,7 @@
         <div class="topbar-main">
           <a class="brand" href="/shows/dashboard">{{ app_name if app_name else "Trade Show Outbound" }}</a>
           <nav class="topnav">
-            <a class="topnav-link{% if current_page in ['show_dashboard', 'show_profile', 'show_guide'] %} is-active{% endif %}" href="/shows/dashboard">Trade Shows</a>
+            <a class="topnav-link{% if current_page == 'show_dashboard' %} is-active{% endif %}" href="/shows/dashboard">Trade Shows</a>
             {% if request.session.get("authenticated") %}
             <a class="topnav-link{% if current_page == 'workflow' %} is-active{% endif %}" href="/workflow">Workflow</a>
             {% endif %}
