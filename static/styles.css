@@ -886,6 +886,11 @@ button.button.subtle {
   box-shadow: none;
 }
 
+.smartlead-icon:hover {
+  border-color: rgba(93, 65, 219, 0.16);
+  background: #ffffff;
+}
+
 .smartlead-icon-missing {
   border-color: rgba(93, 65, 219, 0.12);
 }
