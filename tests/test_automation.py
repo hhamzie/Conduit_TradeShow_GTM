@@ -12,9 +12,9 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
 from app.database import Base
-from app.models import ClaySyncRow, Show, ShowStatus
+from app.models import ClaySyncRow, RunStatus, Show, ShowStatus
 from app.providers import ClayPollResult, ClayRecord, ProviderResult, SmartleadSyncResult
-from app.services import _build_prepared_lead, BulkDirectScrapeResult, DirectScrapeResult, launch_show, run_bulk_direct_scrape, sync_show_from_clay
+from app.services import _build_prepared_lead, BulkDirectScrapeResult, DirectScrapeResult, launch_show, run_bulk_direct_scrape, run_show_scrape, sync_show_from_clay, upsert_show
 
 
 def make_show(**overrides) -> Show:
@@ -180,6 +180,66 @@ class AutomationTests(unittest.TestCase):
             self.assertEqual(launch_mock.call_count, 1)
             self.assertEqual(show.status, ShowStatus.live.value)
             self.assertEqual(show.smartlead_status, "active")
+
+    def test_upsert_show_creates_record_before_scrape_and_run_show_scrape_fills_it(self) -> None:
+        with self.Session() as session, tempfile.TemporaryDirectory() as tmp_dir:
+            show, created = upsert_show(
+                session,
+                show_name="ICFF",
+                event_date_raw="2026-05-17",
+                place="New York, NY",
+                link="https://example.com/icff",
+                run_offset_days=14,
+            )
+            session.commit()
+
+            self.assertTrue(created)
+            self.assertIsNotNone(show.id)
+            self.assertEqual(show.status, ShowStatus.waiting.value)
+
+            output_path = Path(tmp_dir) / "icff.csv"
+            output_path.write_text("company_name,website_url\nAcme,https://acme.com\n", encoding="utf-8")
+
+            with patch(
+                "app.services._run_direct_scrape",
+                return_value=DirectScrapeResult(
+                    output_path=output_path,
+                    company_count=22,
+                    failure_count=1,
+                    conference_name="ICFF",
+                    conference_location="New York, NY",
+                ),
+            ):
+                result = run_show_scrape(session, show)
+
+            self.assertEqual(result.output_path, output_path)
+            self.assertEqual(show.status, ShowStatus.ready_for_review.value)
+            self.assertEqual(show.latest_export_path, str(output_path))
+            self.assertEqual(show.company_count, 22)
+            self.assertEqual(show.failure_count, 1)
+            self.assertEqual(len(show.runs), 1)
+            self.assertEqual(show.runs[0].status, RunStatus.success.value)
+
+    def test_run_show_scrape_marks_show_failed_when_scrape_raises(self) -> None:
+        with self.Session() as session:
+            show, _ = upsert_show(
+                session,
+                show_name="ICFF",
+                event_date_raw="2026-05-17",
+                place="New York, NY",
+                link="https://example.com/icff",
+                run_offset_days=14,
+            )
+            session.commit()
+
+            with patch("app.services._run_direct_scrape", side_effect=RuntimeError("scrape exploded")):
+                with self.assertRaisesRegex(RuntimeError, "scrape exploded"):
+                    run_show_scrape(session, show)
+
+            self.assertEqual(show.status, ShowStatus.failed.value)
+            self.assertEqual(show.last_error, "scrape exploded")
+            self.assertEqual(len(show.runs), 1)
+            self.assertEqual(show.runs[0].status, RunStatus.failed.value)
 
     def test_run_bulk_direct_scrape_returns_zip_with_manifest(self) -> None:
         payload = "\n".join(

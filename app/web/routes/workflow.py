@@ -16,7 +16,8 @@ from app.services import (
     create_or_update_show,
     import_shows_from_csv,
     list_shows,
-    run_single_show_scrape,
+    run_show_scrape,
+    upsert_show,
 )
 from app.web.presenters import WORKFLOW_SECTIONS, build_workflow_dashboard_view, shows_in_section
 
@@ -99,23 +100,31 @@ def add_single_show(
 def scrape_single_show(
     request: Request,
     show_name: str = Form(...),
-    event_date: str = Form(""),
+    event_date: str = Form(...),
     place: str = Form(...),
     link: str = Form(...),
+    db: Session = Depends(get_db),
 ):
+    show = None
     require_authenticated(request)
     try:
-        result = run_single_show_scrape(
+        show, _ = upsert_show(
+            db,
             show_name=show_name,
             event_date_raw=event_date,
             place=place,
             link=link,
+            run_offset_days=settings.default_run_offset_days,
         )
+        db.commit()
+        result = run_show_scrape(db, show)
     except ValueError as exc:
         request.session["single_scrape_error"] = str(exc)
         return RedirectResponse("/workflow", status_code=status.HTTP_303_SEE_OTHER)
     except Exception as exc:  # noqa: BLE001
         request.session["single_scrape_error"] = str(exc)
+        if show is not None:
+            return RedirectResponse(f"/shows/{show.id}", status_code=status.HTTP_303_SEE_OTHER)
         return RedirectResponse("/workflow", status_code=status.HTTP_303_SEE_OTHER)
 
     return FileResponse(

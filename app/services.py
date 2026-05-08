@@ -115,6 +115,49 @@ class BulkDirectScrapeResult:
     failed_count: int
 
 
+def upsert_show(
+    db: Session,
+    *,
+    show_name: str,
+    event_date_raw: str,
+    place: str,
+    link: str,
+    run_offset_days: int,
+) -> tuple[Show, bool]:
+    normalized_name = show_name.strip()
+    normalized_place = place.strip()
+    normalized_link = link.strip()
+    if not (normalized_name and event_date_raw.strip() and normalized_place and normalized_link):
+        raise ValueError("Show name, date, place, and directory URL are all required.")
+
+    event_date = parse_show_date(event_date_raw)
+    run_at = compute_run_at(event_date, run_offset_days)
+
+    existing = db.scalar(
+        select(Show).where(Show.source_url == normalized_link, Show.event_date == event_date)
+    )
+    if existing is None:
+        show = Show(
+            name=normalized_name,
+            event_date=event_date,
+            place=normalized_place,
+            source_url=normalized_link,
+            run_offset_days=run_offset_days,
+            run_at=run_at,
+            status=ShowStatus.waiting.value,
+        )
+        db.add(show)
+        db.flush()
+        return show, True
+
+    existing.name = normalized_name
+    existing.place = normalized_place
+    existing.run_offset_days = run_offset_days
+    existing.run_at = run_at
+    db.flush()
+    return existing, False
+
+
 def slugify(value: str) -> str:
     return SLUG_RE.sub("-", value.lower()).strip("-") or "show"
 
@@ -208,37 +251,15 @@ def create_or_update_show(
     link: str,
     run_offset_days: int,
 ) -> bool:
-    normalized_name = show_name.strip()
-    normalized_place = place.strip()
-    normalized_link = link.strip()
-    if not (normalized_name and event_date_raw.strip() and normalized_place and normalized_link):
-        raise ValueError("Show name, date, place, and directory URL are all required.")
-
-    event_date = parse_show_date(event_date_raw)
-    run_at = compute_run_at(event_date, run_offset_days)
-
-    existing = db.scalar(
-        select(Show).where(Show.source_url == normalized_link, Show.event_date == event_date)
+    _, created = upsert_show(
+        db,
+        show_name=show_name,
+        event_date_raw=event_date_raw,
+        place=place,
+        link=link,
+        run_offset_days=run_offset_days,
     )
-    if existing is None:
-        db.add(
-            Show(
-                name=normalized_name,
-                event_date=event_date,
-                place=normalized_place,
-                source_url=normalized_link,
-                run_offset_days=run_offset_days,
-                run_at=run_at,
-                status=ShowStatus.waiting.value,
-            )
-        )
-        return True
-
-    existing.name = normalized_name
-    existing.place = normalized_place
-    existing.run_offset_days = run_offset_days
-    existing.run_at = run_at
-    return False
+    return created
 
 
 def update_show(
@@ -335,6 +356,49 @@ def run_single_show_scrape(
         require_website=True,
         browser_mode="auto",
     )
+
+
+def run_show_scrape(db: Session, show: Show) -> DirectScrapeResult:
+    campaign_run = CampaignRun(
+        show=show,
+        status=RunStatus.running.value,
+        started_at=datetime.now(),
+    )
+    show.status = ShowStatus.scraping.value
+    show.last_error = ""
+    db.add(campaign_run)
+    db.commit()
+
+    try:
+        result = _run_direct_scrape(
+            show_name=show.name,
+            place=show.place,
+            link=show.source_url,
+            output_path=export_path_for_show(show),
+            require_website=True,
+            browser_mode="auto",
+        )
+    except Exception as exc:  # noqa: BLE001
+        campaign_run.status = RunStatus.failed.value
+        campaign_run.error_message = str(exc)
+        campaign_run.finished_at = datetime.now()
+        show.status = ShowStatus.failed.value
+        show.last_error = str(exc)
+        db.commit()
+        raise
+
+    campaign_run.status = RunStatus.success.value
+    campaign_run.output_path = str(result.output_path)
+    campaign_run.company_count = result.company_count
+    campaign_run.failure_count = result.failure_count
+    campaign_run.finished_at = datetime.now()
+    show.latest_export_path = str(result.output_path)
+    show.company_count = result.company_count
+    show.failure_count = result.failure_count
+    show.status = ShowStatus.ready_for_review.value
+    show.last_error = ""
+    db.commit()
+    return result
 
 
 def run_bulk_direct_scrape(

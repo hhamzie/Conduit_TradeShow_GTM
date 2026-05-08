@@ -80,11 +80,11 @@
       </div>
       <h2>Scrape One Trade Show</h2>
     </div>
-    <p class="lane-copy">Paste one directory or show link and get one cleaned CSV back.</p>
+    <p class="lane-copy">Paste one directory or show link, save the show into the dashboard first, then get one cleaned CSV back.</p>
     <dl class="lane-meta">
       <div><dt>Input</dt><dd>One trade show link</dd></div>
-      <div><dt>Output</dt><dd>One CSV download</dd></div>
-      <div><dt>Best for</dt><dd>Fast one-off scrapes</dd></div>
+      <div><dt>Output</dt><dd>One CSV download plus a saved show record</dd></div>
+      <div><dt>Best for</dt><dd>Fast scrapes that should still land in the dashboard</dd></div>
     </dl>
     {% if single_scrape_error %}
     <p class="error-inline">{{ single_scrape_error }}</p>
@@ -103,7 +103,7 @@
       </label>
       <label>
         <span>Show date</span>
-        <input type="text" name="event_date" placeholder="2026-05-06" />
+        <input type="text" name="event_date" placeholder="2026-05-06" required />
       </label>
       <label>
         <span>Place</span>
@@ -116,7 +116,7 @@
       <button type="submit">Scrape and Download CSV</button>
     </form>
     <p id="single-scrape-status" class="inline-status" hidden></p>
-    <p class="mini-note">Looks for booth numbers when the site exposes them.</p>
+    <p class="mini-note">This now creates or updates the trade show in the database before scraping, then fills that record with the export.</p>
   </article>
 
   <article class="panel lane-card lane-card-bulk">
