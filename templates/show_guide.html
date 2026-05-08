@@ -9,8 +9,6 @@
       <p class="muted">{{ show.event_date }} · Workbook-backed sheet view</p>
     </div>
     <div class="panel-head-actions">
-      <a class="button secondary" href="/shows/dashboard">Dashboard</a>
-      <a class="button secondary" href="/shows/{{ show.id }}">Profile</a>
       <a class="button secondary" href="/shows/{{ show.id }}/guide/download">Download Workbook</a>
       {% if can_manage %}
       <form class="workbook-upload-form" action="/shows/{{ show.id }}/guide/upload" method="post" enctype="multipart/form-data" data-auto-submit-file-form>

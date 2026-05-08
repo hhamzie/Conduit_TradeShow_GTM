@@ -29,10 +29,26 @@
 
 {% if analyses %}
 <section class="panel">
+  {% if can_manage %}
+  <form id="bulk-form-dashboard" class="section-toolbar compact bulk-select-bar dashboard-bulk-bar" action="/shows/bulk/delete" method="post" data-multi-select-form>
+    <input type="hidden" name="next_path" value="/shows/dashboard" />
+    <label class="selector-control selector-control-wide" aria-label="Select all trade shows">
+      <input type="checkbox" data-select-all />
+      <span></span>
+      <em>Select all</em>
+    </label>
+    <span class="bulk-select-count" data-select-count>0 selected</span>
+    <button class="button secondary subtle" type="submit" formaction="/shows/bulk/smartlead" data-requires-selection>Smartlead selected</button>
+    <button class="button danger subtle" type="submit" onclick="return confirm('Delete the selected shows?');" data-requires-selection>Delete selected</button>
+  </form>
+  {% endif %}
   <div class="table-wrap">
     <table class="dashboard-table">
       <thead>
         <tr>
+          {% if can_manage %}
+          <th class="selection-col"></th>
+          {% endif %}
           <th>Show</th>
           <th>Score</th>
           <th>Actions</th>
@@ -41,6 +57,14 @@
       <tbody>
         {% for analysis in analyses %}
         <tr class="dashboard-row-link" data-row-href="/shows/{{ analysis.show.id }}" title="Open show profile">
+          {% if can_manage %}
+          <td class="selection-col">
+            <label class="selector-control" aria-label="Select {{ analysis.show.name }}">
+              <input type="checkbox" name="show_ids" value="{{ analysis.show.id }}" form="bulk-form-dashboard" data-select-item />
+              <span></span>
+            </label>
+          </td>
+          {% endif %}
           <td>
             <div class="dashboard-show-cell">
               <strong>{{ analysis.show.name }}</strong>

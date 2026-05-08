@@ -52,6 +52,13 @@ def _get_show_or_404(db: Session, show_id: int):
     return show
 
 
+def _sanitize_next_path(next_path: str | None, *, fallback: str) -> str:
+    raw = str(next_path or "").strip()
+    if raw.startswith("/"):
+        return raw
+    return fallback
+
+
 def _file_response(raw_path: str, *, not_found_detail: str) -> FileResponse:
     if not raw_path:
         raise HTTPException(status_code=404, detail=not_found_detail)
@@ -195,6 +202,88 @@ def delete_show(show_id: int, request: Request, db: Session = Depends(get_db)):
     db.delete(show)
     db.commit()
     return RedirectResponse("/shows/dashboard", status_code=status.HTTP_303_SEE_OTHER)
+
+
+@router.post("/shows/bulk/delete")
+def delete_selected_shows(
+    request: Request,
+    show_ids: list[int] = Form(default_factory=list),
+    next_path: str = Form("/shows/dashboard"),
+    db: Session = Depends(get_db),
+):
+    require_authenticated(request)
+    target_path = _sanitize_next_path(next_path, fallback="/shows/dashboard")
+    unique_ids = list(dict.fromkeys(show_ids))
+    if not unique_ids:
+        request.session["flash_message"] = {
+            "tone": "warning",
+            "title": "No shows selected.",
+            "detail": "Select at least one show first.",
+        }
+        return RedirectResponse(target_path, status_code=status.HTTP_303_SEE_OTHER)
+
+    deleted = 0
+    for show_id in unique_ids:
+        show = get_show(db, show_id)
+        if show is None:
+            continue
+        db.delete(show)
+        deleted += 1
+    db.commit()
+    request.session["flash_message"] = {
+        "tone": "success",
+        "title": "Selected shows deleted.",
+        "detail": f"Deleted {deleted} show(s).",
+    }
+    return RedirectResponse(target_path, status_code=status.HTTP_303_SEE_OTHER)
+
+
+@router.post("/shows/bulk/smartlead")
+def configure_selected_smartlead(
+    request: Request,
+    show_ids: list[int] = Form(default_factory=list),
+    next_path: str = Form("/shows/dashboard"),
+    db: Session = Depends(get_db),
+):
+    require_authenticated(request)
+    target_path = _sanitize_next_path(next_path, fallback="/shows/dashboard")
+    unique_ids = list(dict.fromkeys(show_ids))
+    if not unique_ids:
+        request.session["flash_message"] = {
+            "tone": "warning",
+            "title": "No shows selected.",
+            "detail": "Select at least one show first.",
+        }
+        return RedirectResponse(target_path, status_code=status.HTTP_303_SEE_OTHER)
+
+    linked = 0
+    skipped = 0
+    failed = 0
+    for show_id in unique_ids:
+        show = get_show(db, show_id)
+        if show is None:
+            failed += 1
+            continue
+        if show.smartlead_campaign_id:
+            skipped += 1
+            continue
+
+        result = ensure_smartlead_campaign(show)
+        if result.status != "success":
+            failed += 1
+            continue
+        show.smartlead_campaign_id = result.campaign_id
+        show.smartlead_campaign_name = result.campaign_name
+        linked += 1
+
+    db.commit()
+    tone = "success" if failed == 0 else "warning"
+    request.session["flash_message"] = {
+        "tone": tone,
+        "title": "Smartlead batch setup finished.",
+        "detail": f"Linked {linked}, skipped {skipped}, failed {failed}.",
+    }
+    return RedirectResponse(target_path, status_code=status.HTTP_303_SEE_OTHER)
 
 
 @router.post("/shows/{show_id}/run-now")

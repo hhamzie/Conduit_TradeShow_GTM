@@ -594,6 +594,8 @@ function updateLeadTable(table) {
   const searchInput = panel.querySelector("[data-lead-search]");
   const resultsTarget = panel.querySelector("[data-lead-results]");
   const emptyRow = table.querySelector("[data-lead-empty]");
+  const selectAll = table.querySelector("[data-lead-select-all]");
+  const selectionItems = Array.from(table.querySelectorAll("[data-lead-select-item]"));
   const rows = Array.from(table.querySelectorAll("[data-lead-row]"));
   const limit = Number.parseInt(table.dataset.leadLimit || "10", 10) || 10;
   const query = searchInput instanceof HTMLInputElement ? searchInput.value.trim().toLowerCase() : "";
@@ -623,11 +625,21 @@ function updateLeadTable(table) {
   }
 
   if (resultsTarget) {
+    const selectedCount = selectionItems.filter((item) => item.checked).length;
     if (matchCount === 0) {
-      resultsTarget.textContent = "No matches";
+      resultsTarget.textContent = selectedCount > 0 ? `No matches · ${selectedCount} selected` : "No matches";
     } else {
-      resultsTarget.textContent = `Showing ${shownCount} of ${matchCount}`;
+      resultsTarget.textContent =
+        selectedCount > 0
+          ? `Showing ${shownCount} of ${matchCount} · ${selectedCount} selected`
+          : `Showing ${shownCount} of ${matchCount}`;
     }
+  }
+
+  if (selectAll instanceof HTMLInputElement) {
+    const selectedCount = selectionItems.filter((item) => item.checked).length;
+    selectAll.checked = selectionItems.length > 0 && selectedCount === selectionItems.length;
+    selectAll.indeterminate = selectedCount > 0 && selectedCount < selectionItems.length;
   }
 }
 
@@ -641,6 +653,81 @@ function initializeLeadTables() {
     if (searchInput instanceof HTMLInputElement) {
       searchInput.addEventListener("input", () => updateLeadTable(table));
     }
+
+    const selectAll = table.querySelector("[data-lead-select-all]");
+    if (selectAll instanceof HTMLInputElement) {
+      selectAll.addEventListener("change", () => {
+        const items = table.querySelectorAll("[data-lead-select-item]");
+        items.forEach((item) => {
+          item.checked = selectAll.checked;
+        });
+        updateLeadTable(table);
+      });
+    }
+
+    const selectionItems = table.querySelectorAll("[data-lead-select-item]");
+    selectionItems.forEach((item) => {
+      item.addEventListener("change", () => updateLeadTable(table));
+    });
+  });
+}
+
+function initializeMultiSelectForms() {
+  const batchForms = document.querySelectorAll("[data-multi-select-form]");
+  batchForms.forEach((form) => {
+    if (!(form instanceof HTMLFormElement) || !form.id) {
+      return;
+    }
+
+    const selectAll = form.querySelector("[data-select-all]");
+    const countTarget = form.querySelector("[data-select-count]");
+    const actionButtons = form.querySelectorAll("[data-requires-selection]");
+
+    const getItems = () =>
+      Array.from(document.querySelectorAll(`[form="${CSS.escape(form.id)}"][data-select-item]`)).filter(
+        (item) => item instanceof HTMLInputElement,
+      );
+
+    const syncSelectionState = () => {
+      const items = getItems();
+      const selectedCount = items.filter((item) => item.checked).length;
+
+      if (countTarget) {
+        countTarget.textContent = `${selectedCount} selected`;
+      }
+
+      actionButtons.forEach((button) => {
+        button.disabled = selectedCount === 0;
+      });
+
+      if (selectAll instanceof HTMLInputElement) {
+        selectAll.checked = items.length > 0 && selectedCount === items.length;
+        selectAll.indeterminate = selectedCount > 0 && selectedCount < items.length;
+      }
+    };
+
+    if (selectAll instanceof HTMLInputElement) {
+      selectAll.addEventListener("change", () => {
+        const items = getItems();
+        items.forEach((item) => {
+          item.checked = selectAll.checked;
+        });
+        syncSelectionState();
+      });
+    }
+
+    getItems().forEach((item) => {
+      item.addEventListener("change", syncSelectionState);
+    });
+
+    form.addEventListener("submit", (event) => {
+      const selectedCount = getItems().filter((item) => item.checked).length;
+      if (selectedCount === 0) {
+        event.preventDefault();
+      }
+    });
+
+    syncSelectionState();
   });
 }
 
@@ -701,5 +788,6 @@ document.addEventListener("DOMContentLoaded", () => {
 
   initializeSheetTabs();
   initializeLeadTables();
+  initializeMultiSelectForms();
   initializeDismissibleNotices();
 });

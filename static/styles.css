@@ -414,6 +414,14 @@ button:hover,
   box-shadow: 0 14px 30px rgba(31, 86, 203, 0.22);
 }
 
+button:disabled,
+.button:disabled {
+  cursor: not-allowed;
+  opacity: 0.52;
+  transform: none;
+  box-shadow: none;
+}
+
 .button.secondary {
   background: rgba(248, 251, 255, 0.98);
   color: var(--accent-dark);
@@ -445,6 +453,80 @@ button.button.subtle {
   border-radius: 18px;
   border: 1px solid var(--line);
   background: rgba(255, 255, 255, 0.45);
+}
+
+.selection-col {
+  width: 52px;
+  min-width: 52px;
+  text-align: center;
+}
+
+.selector-control {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.selector-control input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.selector-control span {
+  position: relative;
+  width: 18px;
+  height: 18px;
+  border-radius: 6px;
+  border: 1px solid rgba(76, 102, 141, 0.26);
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.92);
+}
+
+.selector-control input:checked + span {
+  border-color: var(--accent-dark);
+  background: var(--accent);
+}
+
+.selector-control input:checked + span::after {
+  content: "";
+  position: absolute;
+  left: 5px;
+  top: 2px;
+  width: 5px;
+  height: 9px;
+  border: solid #fff;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+
+.selector-control-wide {
+  font-size: 0.88rem;
+}
+
+.selector-control-wide em {
+  font-style: normal;
+  font-weight: 700;
+  color: var(--ink-soft);
+}
+
+.bulk-select-bar {
+  justify-content: flex-start;
+  gap: 12px;
+}
+
+.bulk-select-count {
+  color: var(--muted);
+  font-size: 0.86rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.dashboard-bulk-bar {
+  margin-bottom: 14px;
 }
 
 .stats-grid {
@@ -629,6 +711,8 @@ button.button.subtle {
 
 .show-card {
   display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
   gap: 16px;
   padding: 20px;
   border: 1px solid var(--line);
@@ -1473,6 +1557,10 @@ button.button.subtle {
   letter-spacing: -0.02em;
 }
 
+.show-card-select {
+  padding-top: 3px;
+}
+
 .show-subtitle {
   margin: 0;
   color: var(--ink-soft);
@@ -1548,6 +1636,7 @@ button.button.subtle {
   flex-wrap: wrap;
   align-items: center;
   gap: 10px;
+  justify-content: flex-end;
 }
 
 .show-card-side form {
@@ -2002,7 +2091,7 @@ th {
 
 .profile-overview-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 320px);
   gap: 14px;
 }
 
@@ -2154,17 +2243,18 @@ th {
 
 .lead-table-wrap {
   overflow: auto;
+  max-height: 360px;
 }
 
 .lead-table {
   min-width: 620px;
 }
 
-.lead-table td:nth-child(1) {
+.lead-table td:nth-child(2) {
   min-width: 220px;
 }
 
-.lead-table td:nth-child(3) {
+.lead-table td:nth-child(4) {
   min-width: 200px;
 }
 
