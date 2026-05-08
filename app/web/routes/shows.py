@@ -376,6 +376,8 @@ async def update_guide_row_route(show_id: int, row_id: int, request: Request, db
     row = _get_guide_row_or_404(db, show_id, row_id)
     payload = dict(await request.form())
     update_guide_row(db, row=row, payload=payload)
+    if request.headers.get("x-guide-autosave") == "1":
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
     return RedirectResponse(f"/shows/{show_id}#sheet-{row.sheet_key}", status_code=status.HTTP_303_SEE_OTHER)
 
 

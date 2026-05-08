@@ -714,6 +714,57 @@ class AutomationTests(unittest.TestCase):
 
         asyncio.run(run_test())
 
+    def test_update_guide_row_route_supports_autosave_requests(self) -> None:
+        async def run_test() -> None:
+            from app.main import update_guide_row_route
+            from app.guide_services import import_trade_show_guide_workbook
+            from app.show_guides import parse_guide_row_values
+            from starlette.requests import Request
+
+            with self.Session() as session:
+                show = make_show()
+                session.add(show)
+                session.commit()
+                import_trade_show_guide_workbook(session, show=show, workbook_bytes=build_guide_workbook_file())
+                row = session.scalars(select(ShowGuideRow).where(ShowGuideRow.show_id == show.id)).first()
+                assert row is not None
+
+                scope = {
+                    "type": "http",
+                    "method": "POST",
+                    "path": f"/shows/{show.id}/guide/{row.id}/update",
+                    "headers": [
+                        (b"content-type", b"application/x-www-form-urlencoded"),
+                        (b"x-guide-autosave", b"1"),
+                    ],
+                    "session": {},
+                }
+                body = b"company_name=Updated+Company&booth_number=3254"
+
+                async def receive() -> dict[str, object]:
+                    nonlocal body
+                    chunk = body
+                    body = b""
+                    return {"type": "http.request", "body": chunk, "more_body": False}
+
+                request = Request(scope, receive)
+
+                with patch("app.web.routes.shows.require_authenticated"):
+                    response = await update_guide_row_route(
+                        show_id=show.id,
+                        row_id=row.id,
+                        request=request,
+                        db=session,
+                    )
+
+                self.assertEqual(response.status_code, 204)
+                session.refresh(row)
+                self.assertEqual(parse_guide_row_values(row)["company_name"], "Updated Company")
+
+        import asyncio
+
+        asyncio.run(run_test())
+
     def test_download_guide_workbook_route_returns_xlsx(self) -> None:
         from app.main import download_guide_workbook
         from app.guide_services import import_trade_show_guide_workbook

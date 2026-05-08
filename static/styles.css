@@ -1235,6 +1235,24 @@ button.button.subtle {
   font-weight: 700;
 }
 
+.sheet-meta-tail {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.sheet-edit-hint {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(47, 109, 246, 0.08);
+  color: var(--accent-dark);
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
 .sheet-tab-strip {
   display: flex;
   flex-wrap: wrap;
@@ -1364,21 +1382,30 @@ button.button.subtle {
   background: rgba(47, 109, 246, 0.03);
 }
 
-.spreadsheet-table td:not(.spreadsheet-actions-cell):not(.sheet-row-index) {
+.spreadsheet-table td:not(.sheet-row-index) {
   padding: 10px 12px;
   font-size: 0.94rem;
   line-height: 1.4;
 }
 
-.spreadsheet-actions-cell {
-  min-width: 150px;
-  padding: 10px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  position: sticky;
-  right: 0;
-  background: white;
+.spreadsheet-table tr[data-guide-row-state="dirty"] .sheet-row-index {
+  background: rgba(154, 106, 18, 0.12);
+  color: var(--warning);
+}
+
+.spreadsheet-table tr[data-guide-row-state="saving"] .sheet-row-index {
+  background: rgba(47, 109, 246, 0.12);
+  color: var(--accent-dark);
+}
+
+.spreadsheet-table tr[data-guide-row-state="saved"] .sheet-row-index {
+  background: rgba(20, 122, 85, 0.12);
+  color: var(--success);
+}
+
+.spreadsheet-table tr[data-guide-row-state="error"] .sheet-row-index {
+  background: rgba(186, 60, 77, 0.12);
+  color: var(--danger);
 }
 
 @media (max-width: 960px) {

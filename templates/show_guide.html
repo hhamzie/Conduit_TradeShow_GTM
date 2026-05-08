@@ -61,7 +61,12 @@
           <h2>{{ sheet.definition.label }}</h2>
           <p class="muted">{{ sheet.definition.description }}</p>
         </div>
-        <span class="sheet-count">{{ sheet.rows|length }} row(s)</span>
+        <div class="sheet-meta-tail">
+          {% if can_manage %}
+          <span class="sheet-edit-hint">Auto-saves</span>
+          {% endif %}
+          <span class="sheet-count">{{ sheet.rows|length }} row(s)</span>
+        </div>
       </div>
 
       <div class="spreadsheet-frame">
@@ -73,17 +78,14 @@
                 {% for field in sheet.definition.fields %}
                 <th>{{ field.label }}</th>
                 {% endfor %}
-                {% if can_manage %}
-                <th class="sheet-actions-head">Actions</th>
-                {% endif %}
               </tr>
             </thead>
             <tbody>
               {% for row in sheet.rows %}
               {% if can_manage %}
               {% set form_id = "guide-row-" ~ row.id %}
-              <form id="{{ form_id }}" action="/shows/{{ show.id }}/guide/{{ row.id }}/update" method="post"></form>
-              <tr>
+              <form id="{{ form_id }}" class="guide-inline-form" action="/shows/{{ show.id }}/guide/{{ row.id }}/update" method="post" data-guide-row-form></form>
+              <tr data-guide-row-form-id="{{ form_id }}" data-guide-row-state="idle">
                 <td class="sheet-row-index">{{ loop.index }}</td>
                 {% for field in sheet.definition.fields %}
                 <td>
@@ -93,13 +95,10 @@
                     value="{{ row.values.get(field.key, '') }}"
                     placeholder="{{ field.placeholder }}"
                     form="{{ form_id }}"
+                    data-guide-autosave-input
                   />
                 </td>
                 {% endfor %}
-                <td class="spreadsheet-actions-cell">
-                  <button class="button subtle" type="submit" form="{{ form_id }}">Save</button>
-                  <button class="button danger subtle" type="submit" form="{{ form_id }}" formaction="/shows/{{ show.id }}/guide/{{ row.id }}/delete" onclick="return confirm('Delete this guide row?');">Delete</button>
-                </td>
               </tr>
               {% else %}
               <tr>
@@ -111,7 +110,7 @@
               {% endif %}
               {% else %}
               <tr>
-                <td colspan="{{ sheet.definition.fields|length + (2 if can_manage else 1) }}" class="empty">No rows in this sheet yet.</td>
+                <td colspan="{{ sheet.definition.fields|length + 1 }}" class="empty">No rows in this sheet yet.</td>
               </tr>
               {% endfor %}
             </tbody>

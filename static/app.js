@@ -396,6 +396,139 @@ function handleFlashModalKeydown(event) {
   }
 }
 
+const guideRowAutosaveTimers = new Map();
+const guideRowAutosaveControllers = new Map();
+const guideRowAutosaveStateTimers = new Map();
+
+function getGuideRowStateTarget(form) {
+  return document.querySelector(`[data-guide-row-form-id="${form.id}"]`);
+}
+
+function setGuideRowState(form, state) {
+  const row = getGuideRowStateTarget(form);
+  if (!row) {
+    return;
+  }
+  row.dataset.guideRowState = state;
+}
+
+function clearGuideRowStateTimer(formId) {
+  const timer = guideRowAutosaveStateTimers.get(formId);
+  if (timer) {
+    window.clearTimeout(timer);
+    guideRowAutosaveStateTimers.delete(formId);
+  }
+}
+
+function queueGuideRowStateReset(form, delayMs) {
+  clearGuideRowStateTimer(form.id);
+  guideRowAutosaveStateTimers.set(
+    form.id,
+    window.setTimeout(() => {
+      setGuideRowState(form, "idle");
+      guideRowAutosaveStateTimers.delete(form.id);
+    }, delayMs),
+  );
+}
+
+function buildGuideRowFormData(form) {
+  const payload = new FormData();
+  const fields = document.querySelectorAll(`[form="${form.id}"][name]`);
+  fields.forEach((field) => {
+    if (field.disabled) {
+      return;
+    }
+    if (field instanceof HTMLInputElement && field.type === "file") {
+      if (field.files && field.files.length > 0) {
+        payload.set(field.name, field.files[0]);
+      }
+      return;
+    }
+    payload.set(field.name, field.value);
+  });
+  return payload;
+}
+
+async function saveGuideRowForm(form) {
+  clearGuideRowStateTimer(form.id);
+  const existingController = guideRowAutosaveControllers.get(form.id);
+  if (existingController) {
+    existingController.abort();
+  }
+
+  const controller = new AbortController();
+  guideRowAutosaveControllers.set(form.id, controller);
+  setGuideRowState(form, "saving");
+
+  try {
+    const response = await fetch(form.action, {
+      method: (form.method || "POST").toUpperCase(),
+      body: buildGuideRowFormData(form),
+      credentials: "same-origin",
+      headers: {
+        "X-Guide-Autosave": "1",
+      },
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      throw new Error(`Guide row save failed (${response.status}).`);
+    }
+
+    setGuideRowState(form, "saved");
+    queueGuideRowStateReset(form, 1200);
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      return;
+    }
+    setGuideRowState(form, "error");
+    queueGuideRowStateReset(form, 1800);
+  } finally {
+    if (guideRowAutosaveControllers.get(form.id) === controller) {
+      guideRowAutosaveControllers.delete(form.id);
+    }
+  }
+}
+
+function queueGuideRowAutosave(input, immediate = false) {
+  const formId = input.getAttribute("form") || "";
+  const form = formId ? document.getElementById(formId) : null;
+  if (!(form instanceof HTMLFormElement)) {
+    return;
+  }
+
+  const existingTimer = guideRowAutosaveTimers.get(form.id);
+  if (existingTimer) {
+    window.clearTimeout(existingTimer);
+  }
+
+  setGuideRowState(form, "dirty");
+  const delayMs = immediate ? 80 : 450;
+  guideRowAutosaveTimers.set(
+    form.id,
+    window.setTimeout(() => {
+      guideRowAutosaveTimers.delete(form.id);
+      void saveGuideRowForm(form);
+    }, delayMs),
+  );
+}
+
+function handleGuideAutosaveInput(event) {
+  const target = event.currentTarget;
+  if (!(target instanceof HTMLInputElement)) {
+    return;
+  }
+  queueGuideRowAutosave(target, false);
+}
+
+function handleGuideAutosaveCommit(event) {
+  const target = event.currentTarget;
+  if (!(target instanceof HTMLInputElement)) {
+    return;
+  }
+  queueGuideRowAutosave(target, true);
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   const directForms = document.querySelectorAll("[data-direct-download-form]");
   directForms.forEach((form) => {
@@ -431,4 +564,11 @@ document.addEventListener("DOMContentLoaded", () => {
     flashModal.addEventListener("click", handleFlashModalClick);
     document.addEventListener("keydown", handleFlashModalKeydown);
   }
+
+  const guideAutosaveInputs = document.querySelectorAll("[data-guide-autosave-input]");
+  guideAutosaveInputs.forEach((input) => {
+    input.addEventListener("input", handleGuideAutosaveInput);
+    input.addEventListener("change", handleGuideAutosaveCommit);
+    input.addEventListener("blur", handleGuideAutosaveCommit);
+  });
 });
