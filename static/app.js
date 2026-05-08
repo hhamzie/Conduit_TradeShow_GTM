@@ -288,6 +288,19 @@ function handleAutoSubmitFileFormChange(event) {
   form.requestSubmit();
 }
 
+function handleDashboardRowClick(event) {
+  const row = event.currentTarget;
+  const interactiveTarget = event.target.closest("a, button, input, label, summary, details, form");
+  if (interactiveTarget) {
+    return;
+  }
+  const href = row.dataset.rowHref || "";
+  if (!href) {
+    return;
+  }
+  window.location.href = href;
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   const directForms = document.querySelectorAll("[data-direct-download-form]");
   directForms.forEach((form) => {
@@ -302,5 +315,10 @@ document.addEventListener("DOMContentLoaded", () => {
   const fileForms = document.querySelectorAll("[data-auto-submit-file-form] input[type='file']");
   fileForms.forEach((input) => {
     input.addEventListener("change", handleAutoSubmitFileFormChange);
+  });
+
+  const dashboardRows = document.querySelectorAll("[data-row-href]");
+  dashboardRows.forEach((row) => {
+    row.addEventListener("click", handleDashboardRowClick);
   });
 });

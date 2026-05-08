@@ -5,29 +5,24 @@
   <div class="panel-head intelligence-hero-head">
     <div>
       <p class="hero-kicker">Trade Show Dashboard</p>
-      <h1>Shows ranked by guide quality.</h1>
-      <p class="hero-copy">Higher score means stronger guide coverage and more sales plus support reps per company.</p>
+      <h1>Trade Shows</h1>
     </div>
     {% if can_manage %}
-    <a class="button" href="/workflow">Open Workflow</a>
+    <a class="button secondary discreet-workflow-link" href="/workflow">Workflow</a>
     {% endif %}
   </div>
-  <div class="stats-grid stats-grid-compact">
-    <article class="stat-card">
-      <span class="stat-label">Tracked</span>
-      <strong class="stat-value">{{ tracked_count }}</strong>
+  <div class="dashboard-mini-stats">
+    <article class="mini-stat-card">
+      <span class="mini-stat-label">Upcoming</span>
+      <strong class="mini-stat-value">{{ upcoming_count }}</strong>
     </article>
-    <article class="stat-card">
-      <span class="stat-label">Avg Score</span>
-      <strong class="stat-value">{{ average_guide_score }}</strong>
+    <article class="mini-stat-card">
+      <span class="mini-stat-label">Email Campaigns</span>
+      <strong class="mini-stat-value">{{ smartlead_campaign_count }}</strong>
     </article>
-    <article class="stat-card">
-      <span class="stat-label">Guides Ready</span>
-      <strong class="stat-value">{{ guide_ready_count }}</strong>
-    </article>
-    <article class="stat-card">
-      <span class="stat-label">Exhibitors</span>
-      <strong class="stat-value">{{ total_exhibitors }}</strong>
+    <article class="mini-stat-card">
+      <span class="mini-stat-label">Guides Ready</span>
+      <strong class="mini-stat-value">{{ guide_ready_count }}</strong>
     </article>
   </div>
 </section>
@@ -45,12 +40,11 @@
       </thead>
       <tbody>
         {% for analysis in analyses %}
-        <tr>
+        <tr class="dashboard-row-link" data-row-href="/shows/{{ analysis.show.id }}" title="Open show profile">
           <td>
             <div class="dashboard-show-cell">
               <strong>{{ analysis.show.name }}</strong>
-              <span class="muted">{{ analysis.show.place }} · {{ analysis.show.event_date }}</span>
-              <span class="muted">{{ analysis.exhibitor_count }} exhibitors · {{ analysis.show.status }}</span>
+              <span class="muted">{{ analysis.show.event_date }} · {{ analysis.exhibitor_count }} exhibitors{% if analysis.show.status %} · {{ analysis.show.status }}{% endif %}</span>
             </div>
           </td>
           <td>
@@ -92,7 +86,18 @@
               <a class="icon-button guide-icon guide-icon-missing" href="/shows/{{ analysis.show.id }}/guide" data-tooltip="Guide not built yet" aria-label="Open guide">&#128214;</a>
               {% endif %}
 
-              <a class="icon-button profile-icon" href="/shows/{{ analysis.show.id }}" data-tooltip="Show profile">&#9638;</a>
+              {% if can_manage %}
+              <details class="action-menu">
+                <summary class="icon-button profile-icon" data-tooltip="More actions" aria-label="More actions">&#8942;</summary>
+                <div class="action-menu-panel">
+                  <form action="/shows/{{ analysis.show.id }}/delete" method="post" onsubmit="return confirm('Delete this show from the dashboard?');">
+                    <button class="action-menu-link action-menu-button danger-link" type="submit">Delete show</button>
+                  </form>
+                </div>
+              </details>
+              {% else %}
+              <span class="icon-button profile-icon" data-tooltip="Open row for profile">&#8942;</span>
+              {% endif %}
             </div>
           </td>
         </tr>

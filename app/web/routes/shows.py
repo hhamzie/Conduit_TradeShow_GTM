@@ -82,8 +82,8 @@ def show_dashboard(request: Request, db: Session = Depends(get_db)):
             title="Show Dashboard",
             analyses=analyses,
             tracked_count=len(analyses),
-            high_priority_count=sum(1 for analysis in analyses if analysis.priority_slug == "high"),
-            export_ready_count=sum(1 for analysis in analyses if analysis.export_ready),
+            upcoming_count=sum(1 for analysis in analyses if analysis.days_until_event >= 0),
+            smartlead_campaign_count=sum(1 for analysis in analyses if analysis.show.smartlead_campaign_id),
             guide_ready_count=sum(1 for analysis in analyses if analysis.guide_company_count > 0),
             average_guide_score=(
                 round(sum(analysis.guide_score for analysis in analyses) / len(analyses))
