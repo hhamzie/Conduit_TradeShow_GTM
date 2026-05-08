@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 
-from app.models import Show
+from app.models import RunStatus, Show
 
 
 WORKFLOW_SECTIONS = {"active", "scheduled_later", "completed"}
+RECENT_COMPLETION_WINDOW = timedelta(minutes=20)
 
 
 @dataclass(frozen=True)
@@ -68,13 +69,26 @@ def summarize_show_error(error_text: str) -> str:
     return compact
 
 
-def build_show_notice(show: Show) -> ShowNotice | None:
+def _has_recent_successful_scrape(show: Show, now: datetime) -> bool:
+    for run in show.runs:
+        if run.status != RunStatus.success.value:
+            continue
+        if run.finished_at is None:
+            continue
+        return now - run.finished_at <= RECENT_COMPLETION_WINDOW
+    return False
+
+
+def build_show_notice(show: Show, now: datetime) -> ShowNotice | None:
     if show.status == "failed":
         return ShowNotice(
             tone="danger",
             title="Scrape needs attention",
             detail=summarize_show_error(show.last_error) or "The latest scrape attempt failed.",
         )
+
+    if not _has_recent_successful_scrape(show, now):
+        return None
 
     if show.company_count > 0:
         details: list[str] = []
@@ -252,7 +266,7 @@ def build_show_card(show: Show, now: datetime) -> ShowCard:
     return ShowCard(
         show=show,
         error_summary=summarize_show_error(show.last_error),
-        notice=build_show_notice(show),
+        notice=build_show_notice(show, now),
         step_label=flow["step"],
         next_action=flow["next_action"],
         section=flow["section"],
