@@ -16,6 +16,7 @@ from app.services import (
     create_or_update_show,
     import_shows_from_csv,
     list_shows,
+    register_bulk_shows,
     run_show_scrape,
     upsert_show,
 )
@@ -164,11 +165,15 @@ async def scrape_many_shows(
         return RedirectResponse("/workflow", status_code=status.HTTP_303_SEE_OTHER)
 
     try:
-        summary = import_shows_from_csv(db, payload, settings.default_run_offset_days)
+        summary, queued_shows = register_bulk_shows(db, payload, settings.default_run_offset_days)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    job_id = bulk_scrape_jobs.start_job(payload, run_offset_days=settings.default_run_offset_days)
+    job_id = bulk_scrape_jobs.start_job(
+        payload,
+        run_offset_days=settings.default_run_offset_days,
+        queued_shows=queued_shows,
+    )
     return JSONResponse(
         {
             "job_id": job_id,

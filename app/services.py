@@ -113,6 +113,16 @@ class BulkDirectScrapeResult:
     show_count: int
     success_count: int
     failed_count: int
+    skipped_count: int
+
+
+@dataclass(frozen=True)
+class QueuedBulkShow:
+    show_id: int
+    show_name: str
+    event_date_raw: str
+    place: str
+    link: str
 
 
 def _parse_bulk_csv_payload(payload: bytes) -> tuple[list[dict[str, str]], dict[str, str]]:
@@ -419,16 +429,22 @@ def run_bulk_direct_scrape(
     *,
     db: Session | None = None,
     run_offset_days: int | None = None,
+    queued_shows: list[QueuedBulkShow] | None = None,
 ) -> BulkDirectScrapeResult:
     settings = get_settings()
+    if db is not None and queued_shows is not None:
+        return _run_bulk_direct_scrape_queue(
+            queued_shows,
+            settings,
+            progress_callback=progress_callback,
+            db=db,
+        )
     rows, headers = _parse_bulk_csv_payload(payload)
     return _run_bulk_direct_scrape_rows(
         rows,
         headers,
         settings,
         progress_callback,
-        db=db,
-        run_offset_days=run_offset_days,
     )
 
 
@@ -437,9 +453,6 @@ def _run_bulk_direct_scrape_rows(
     headers: dict[str, str],
     settings,
     progress_callback: Callable[[int, int, str, str], None] | None = None,
-    *,
-    db: Session | None = None,
-    run_offset_days: int | None = None,
 ) -> BulkDirectScrapeResult:
     total_rows = len(rows)
 
@@ -448,6 +461,7 @@ def _run_bulk_direct_scrape_rows(
     manifest_rows: list[dict[str, str | int]] = []
     success_count = 0
     failed_count = 0
+    skipped_count = 0
 
     with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         for row_number, row in enumerate(rows, start=2):
@@ -491,33 +505,16 @@ def _run_bulk_direct_scrape_rows(
                         show_name,
                         f"Scraping {show_name} ({success_count + failed_count + 1}/{total_rows})",
                     )
-                if db is not None:
-                    show, _ = upsert_show(
-                        db,
-                        show_name=show_name,
-                        event_date_raw=event_date_raw,
-                        place=place,
-                        link=link,
-                        run_offset_days=run_offset_days or settings.default_run_offset_days,
-                    )
-                    db.commit()
-                    result = run_show_scrape(
-                        db,
-                        show,
-                        workers=max(1, min(settings.bulk_scraper_workers, 2)),
-                    )
-                    relative_name = Path(show.latest_export_path or result.output_path).name
-                else:
-                    result = _run_direct_scrape(
-                        show_name=show_name,
-                        place=place,
-                        link=link,
-                        output_path=output_path,
-                        require_website=True,
-                        browser_mode="auto",
-                        workers=max(1, min(settings.bulk_scraper_workers, 2)),
-                    )
-                    relative_name = output_path.name
+                result = _run_direct_scrape(
+                    show_name=show_name,
+                    place=place,
+                    link=link,
+                    output_path=output_path,
+                    require_website=True,
+                    browser_mode="auto",
+                    workers=max(1, min(settings.bulk_scraper_workers, 2)),
+                )
+                relative_name = output_path.name
                 archive.write(result.output_path, arcname=relative_name)
                 manifest_rows.append(
                     {
@@ -590,15 +587,162 @@ def _run_bulk_direct_scrape_rows(
         show_count=len(manifest_rows),
         success_count=success_count,
         failed_count=failed_count,
+        skipped_count=skipped_count,
     )
 
 
-def import_shows_from_csv(db: Session, payload: bytes, run_offset_days: int) -> ImportSummary:
+def _run_bulk_direct_scrape_queue(
+    queued_shows: list[QueuedBulkShow],
+    settings,
+    *,
+    progress_callback: Callable[[int, int, str, str], None] | None = None,
+    db: Session,
+) -> BulkDirectScrapeResult:
+    total_rows = len(queued_shows)
+
+    archive_path = direct_bulk_archive_path()
+    archive_path.parent.mkdir(parents=True, exist_ok=True)
+    manifest_rows: list[dict[str, str | int]] = []
+    success_count = 0
+    failed_count = 0
+    skipped_count = 0
+
+    with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for item in queued_shows:
+            if progress_callback is not None:
+                progress_callback(
+                    success_count + failed_count + skipped_count,
+                    total_rows,
+                    item.show_name,
+                    f"Checking queue for {item.show_name} ({success_count + failed_count + skipped_count + 1}/{total_rows})",
+                )
+
+            show = db.get(Show, item.show_id)
+            if show is None:
+                skipped_count += 1
+                manifest_rows.append(
+                    {
+                        "show_name": item.show_name,
+                        "event_date": item.event_date_raw,
+                        "place": item.place,
+                        "source_url": item.link,
+                        "status": "skipped",
+                        "company_count": 0,
+                        "failure_count": 0,
+                        "csv_file": "",
+                        "error": "Removed from dashboard before scrape started.",
+                    }
+                )
+                if progress_callback is not None:
+                    progress_callback(
+                        success_count + failed_count + skipped_count,
+                        total_rows,
+                        item.show_name,
+                        f"Skipped {item.show_name} because it was removed from the dashboard.",
+                    )
+                continue
+
+            try:
+                if progress_callback is not None:
+                    progress_callback(
+                        success_count + failed_count + skipped_count,
+                        total_rows,
+                        show.name,
+                        f"Scraping {show.name} ({success_count + failed_count + skipped_count + 1}/{total_rows})",
+                    )
+                result = run_show_scrape(
+                    db,
+                    show,
+                    workers=max(1, min(settings.bulk_scraper_workers, 2)),
+                )
+                relative_name = Path(show.latest_export_path or result.output_path).name
+                archive.write(result.output_path, arcname=relative_name)
+                manifest_rows.append(
+                    {
+                        "show_name": show.name,
+                        "event_date": show.event_date.isoformat(),
+                        "place": show.place,
+                        "source_url": show.source_url,
+                        "status": "success",
+                        "company_count": result.company_count,
+                        "failure_count": result.failure_count,
+                        "csv_file": relative_name,
+                        "error": "",
+                    }
+                )
+                success_count += 1
+                if progress_callback is not None:
+                    progress_callback(
+                        success_count + failed_count + skipped_count,
+                        total_rows,
+                        show.name,
+                        f"Finished {show.name} ({success_count + failed_count + skipped_count}/{total_rows})",
+                    )
+            except Exception as exc:  # noqa: BLE001
+                failed_count += 1
+                manifest_rows.append(
+                    {
+                        "show_name": show.name,
+                        "event_date": show.event_date.isoformat(),
+                        "place": show.place,
+                        "source_url": show.source_url,
+                        "status": "failed",
+                        "company_count": 0,
+                        "failure_count": 0,
+                        "csv_file": "",
+                        "error": str(exc),
+                    }
+                )
+                if progress_callback is not None:
+                    progress_callback(
+                        success_count + failed_count + skipped_count,
+                        total_rows,
+                        show.name,
+                        f"Failed {show.name}: {exc}",
+                    )
+            finally:
+                gc.collect()
+
+        manifest_buffer = io.StringIO()
+        writer = csv.DictWriter(
+            manifest_buffer,
+            fieldnames=[
+                "show_name",
+                "event_date",
+                "place",
+                "source_url",
+                "status",
+                "company_count",
+                "failure_count",
+                "csv_file",
+                "error",
+            ],
+        )
+        writer.writeheader()
+        for manifest_row in manifest_rows:
+            writer.writerow(manifest_row)
+        archive.writestr("manifest.csv", manifest_buffer.getvalue().encode("utf-8"))
+
+    return BulkDirectScrapeResult(
+        archive_path=archive_path,
+        show_count=len(manifest_rows),
+        success_count=success_count,
+        failed_count=failed_count,
+        skipped_count=skipped_count,
+    )
+
+
+def register_bulk_shows(
+    db: Session,
+    payload: bytes,
+    run_offset_days: int,
+) -> tuple[ImportSummary, list[QueuedBulkShow]]:
     rows, headers = _parse_bulk_csv_payload(payload)
 
     created = 0
     updated = 0
     skipped = 0
+    queued_shows: list[QueuedBulkShow] = []
 
     for row in rows:
         show_name = (row.get(headers["show"]) or "").strip()
@@ -610,20 +754,35 @@ def import_shows_from_csv(db: Session, payload: bytes, run_offset_days: int) -> 
             skipped += 1
             continue
 
-        if create_or_update_show(
+        show, created_now = upsert_show(
             db,
             show_name=show_name,
             event_date_raw=event_date_raw,
             place=place,
             link=link,
             run_offset_days=run_offset_days,
-        ):
+        )
+        if created_now:
             created += 1
         else:
             updated += 1
+        queued_shows.append(
+            QueuedBulkShow(
+                show_id=show.id,
+                show_name=show_name,
+                event_date_raw=event_date_raw,
+                place=place,
+                link=link,
+            )
+        )
 
     db.commit()
-    return ImportSummary(created=created, updated=updated, skipped=skipped)
+    return ImportSummary(created=created, updated=updated, skipped=skipped), queued_shows
+
+
+def import_shows_from_csv(db: Session, payload: bytes, run_offset_days: int) -> ImportSummary:
+    summary, _ = register_bulk_shows(db, payload, run_offset_days)
+    return summary
 
 
 def list_shows(db: Session) -> list[Show]:

@@ -16,7 +16,7 @@ from app.config import get_settings
 from app.database import Base
 from app.models import ClaySyncRow, RunStatus, Show, ShowStatus
 from app.providers import ClayPollResult, ClayRecord, ProviderResult, SmartleadSyncResult
-from app.services import _build_prepared_lead, BulkDirectScrapeResult, DirectScrapeResult, launch_show, run_bulk_direct_scrape, run_show_scrape, sync_show_from_clay, upsert_show
+from app.services import _build_prepared_lead, BulkDirectScrapeResult, DirectScrapeResult, launch_show, register_bulk_shows, run_bulk_direct_scrape, run_show_scrape, sync_show_from_clay, upsert_show
 
 
 def make_show(**overrides) -> Show:
@@ -291,6 +291,7 @@ class AutomationTests(unittest.TestCase):
 
             self.assertIsInstance(result, BulkDirectScrapeResult)
             self.assertEqual(result.success_count, 2)
+            self.assertEqual(result.skipped_count, 0)
             self.assertTrue(archive_path.exists())
             with zipfile.ZipFile(archive_path) as archive:
                 names = set(archive.namelist())
@@ -340,9 +341,12 @@ class AutomationTests(unittest.TestCase):
                 patch("app.services.direct_bulk_archive_path", return_value=archive_path),
                 patch("app.services._run_direct_scrape", side_effect=results),
             ):
-                result = run_bulk_direct_scrape(payload, db=session, run_offset_days=14)
+                summary, queued_shows = register_bulk_shows(session, payload, 14)
+                result = run_bulk_direct_scrape(payload, db=session, run_offset_days=14, queued_shows=queued_shows)
 
+            self.assertEqual(summary.created, 2)
             self.assertEqual(result.success_count, 2)
+            self.assertEqual(result.skipped_count, 0)
             shows = session.scalars(select(Show).order_by(Show.event_date.asc())).all()
             self.assertEqual(len(shows), 2)
             self.assertEqual(shows[0].status, ShowStatus.ready_for_review.value)
@@ -351,6 +355,50 @@ class AutomationTests(unittest.TestCase):
             self.assertEqual(shows[1].status, ShowStatus.ready_for_review.value)
             self.assertEqual(shows[1].company_count, 12)
             self.assertTrue(shows[1].latest_export_path.endswith("high-point_2026-10-24.csv"))
+
+    def test_run_bulk_direct_scrape_skips_deleted_queued_show(self) -> None:
+        payload = "\n".join(
+            [
+                "Show,Date,Place,Link",
+                "Luxe Pack,2026-05-06,New York City,https://example.com/luxe",
+                "High Point,2026-10-24,High Point,https://example.com/highpoint",
+            ]
+        ).encode("utf-8")
+
+        with self.Session() as session, tempfile.TemporaryDirectory() as tmp_dir:
+            archive_path = Path(tmp_dir) / "bulk.zip"
+            created_file = Path(tmp_dir) / "luxe-pack_2026-05-06.csv"
+            created_file.write_text("company_name,website_url\nAcme,https://acme.com\n", encoding="utf-8")
+
+            summary, queued_shows = register_bulk_shows(session, payload, 14)
+            self.assertEqual(summary.created, 2)
+
+            show_to_delete = session.get(Show, queued_shows[1].show_id)
+            assert show_to_delete is not None
+            session.delete(show_to_delete)
+            session.commit()
+
+            with (
+                patch("app.services.direct_bulk_archive_path", return_value=archive_path),
+                patch(
+                    "app.services._run_direct_scrape",
+                    return_value=DirectScrapeResult(
+                        output_path=created_file,
+                        company_count=10,
+                        failure_count=0,
+                        conference_name="Luxe Pack",
+                        conference_location="New York City",
+                    ),
+                ),
+            ):
+                result = run_bulk_direct_scrape(payload, db=session, run_offset_days=14, queued_shows=queued_shows)
+
+            self.assertEqual(result.success_count, 1)
+            self.assertEqual(result.failed_count, 0)
+            self.assertEqual(result.skipped_count, 1)
+            remaining_shows = session.scalars(select(Show).order_by(Show.event_date.asc())).all()
+            self.assertEqual(len(remaining_shows), 1)
+            self.assertEqual(remaining_shows[0].name, "Luxe Pack")
 
     def test_bulk_scrape_route_starts_background_job(self) -> None:
         async def run_test() -> None:
@@ -381,6 +429,7 @@ class AutomationTests(unittest.TestCase):
             self.assertEqual(start_job_mock.call_count, 1)
             self.assertIn(b"Luxe Pack", start_job_mock.call_args.args[0])
             self.assertEqual(start_job_mock.call_args.kwargs["run_offset_days"], 14)
+            self.assertEqual(len(start_job_mock.call_args.kwargs["queued_shows"]), 1)
 
         import asyncio
 
