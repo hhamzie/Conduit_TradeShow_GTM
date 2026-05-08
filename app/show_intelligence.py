@@ -8,6 +8,7 @@ import re
 from urllib.parse import urlparse
 
 from app.models import Show
+from app.show_guides import parse_guide_row_values
 
 
 HEADER_NORMALIZER = re.compile(r"[^a-z0-9]+")
@@ -55,6 +56,15 @@ class ShowVisitAnalysis:
     capture_checklist: tuple[str, ...]
     company_profiles: tuple[CompanyProfile, ...]
     sample_company_names: tuple[str, ...]
+    guide_score: int
+    guide_score_label: str
+    guide_score_slug: str
+    guide_company_count: int
+    guide_sales_total: int
+    guide_support_total: int
+    guide_people_total: int
+    guide_average_people_per_company: float
+    guide_context: tuple[str, ...]
     exhibitor_count: int
     export_company_count: int
     website_count: int
@@ -163,6 +173,7 @@ def build_show_analyses(
     return sorted(
         analyses,
         key=lambda analysis: (
+            -analysis.guide_score,
             -analysis.priority_score,
             analysis.days_until_event < 0,
             abs(analysis.days_until_event),
@@ -188,6 +199,7 @@ def build_show_analysis(
     booth_coverage_percent = _safe_percent(booth_count, export_company_count)
     days_until_event = (show.event_date - today).days
     export_ready = bool(company_rows)
+    guide_score = _compute_guide_score(show=show, exhibitor_count=exhibitor_count)
 
     priority_score = _compute_priority_score(
         exhibitor_count=exhibitor_count,
@@ -245,6 +257,15 @@ def build_show_analysis(
         capture_checklist=playbook.capture,
         company_profiles=company_profiles,
         sample_company_names=sample_company_names,
+        guide_score=guide_score["score"],
+        guide_score_label=guide_score["label"],
+        guide_score_slug=guide_score["slug"],
+        guide_company_count=guide_score["guide_company_count"],
+        guide_sales_total=guide_score["sales_total"],
+        guide_support_total=guide_score["support_total"],
+        guide_people_total=guide_score["people_total"],
+        guide_average_people_per_company=guide_score["average_people_per_company"],
+        guide_context=guide_score["context"],
         exhibitor_count=exhibitor_count,
         export_company_count=export_company_count,
         website_count=website_count,
@@ -439,6 +460,77 @@ def _rank_company_rows(rows: list[dict[str, str]]) -> list[dict[str, str]]:
             row["company_name"].lower(),
         ),
     )
+
+
+def _parse_int(value: str) -> int:
+    digits = re.sub(r"[^0-9-]+", "", value.strip())
+    if not digits or digits == "-":
+        return 0
+    try:
+        return max(0, int(digits))
+    except ValueError:
+        return 0
+
+
+def _guide_company_rows(show: Show) -> list[dict[str, str]]:
+    return [
+        parse_guide_row_values(row)
+        for row in show.guide_rows
+        if row.sheet_key == "company_summary"
+    ]
+
+
+def _compute_guide_score(show: Show, *, exhibitor_count: int) -> dict[str, object]:
+    guide_rows = _guide_company_rows(show)
+    guide_company_count = len(guide_rows)
+    sales_total = sum(_parse_int(row.get("sales_team_size", "")) for row in guide_rows)
+    support_total = sum(_parse_int(row.get("customer_service_team_size", "")) for row in guide_rows)
+    people_total = sales_total + support_total
+    base_count = max(exhibitor_count, guide_company_count, 1)
+    coverage_ratio = min(1.0, guide_company_count / base_count)
+    people_per_company = people_total / guide_company_count if guide_company_count else 0.0
+    density_ratio = min(1.0, people_per_company / 20.0)
+    score = int(round((density_ratio * 70) + (coverage_ratio * 30)))
+
+    if score >= 70:
+        label = "Good"
+        slug = "good"
+    elif score >= 45:
+        label = "Medium"
+        slug = "medium"
+    else:
+        label = "Bad"
+        slug = "bad"
+
+    if guide_company_count == 0:
+        context = (
+            "No guide rows yet.",
+            "Build the guide first.",
+        )
+    elif people_total == 0:
+        context = (
+            f"{guide_company_count} guide companies.",
+            "Team sizes still empty.",
+        )
+    else:
+        coverage_percent = int(round(coverage_ratio * 100))
+        context = (
+            f"{people_total} sales + support reps.",
+            f"{people_per_company:.1f} reps per company.",
+            f"{coverage_percent}% company coverage.",
+        )
+
+    return {
+        "score": max(0, min(100, score)),
+        "label": label,
+        "slug": slug,
+        "guide_company_count": guide_company_count,
+        "sales_total": sales_total,
+        "support_total": support_total,
+        "people_total": people_total,
+        "average_people_per_company": round(people_per_company, 1),
+        "context": context,
+    }
 
 
 def _load_company_rows(raw_path: str) -> list[dict[str, str]]:

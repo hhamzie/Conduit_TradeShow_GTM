@@ -1,0 +1,131 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="panel">
+  <div class="panel-head">
+    <div>
+      <h1>{{ show.name }} Guide</h1>
+      <p>{{ show.place }} · {{ show.event_date }}</p>
+    </div>
+    <div class="panel-head-actions">
+      <a class="button secondary" href="/shows/dashboard">Dashboard</a>
+      <a class="button secondary" href="/shows/{{ show.id }}">Profile</a>
+      {% if can_manage and show.latest_export_path and analysis.guide_company_count == 0 %}
+      <form action="/shows/{{ show.id }}/guide/build" method="post">
+        <button type="submit">Build Guide</button>
+      </form>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="guide-summary-grid">
+    <article class="detail-card">
+      <h2>Guide Score</h2>
+      <p><span class="rating-pill rating-{{ analysis.guide_score_slug }}">{{ analysis.guide_score_label }}</span></p>
+      <p><strong>{{ analysis.guide_score }}/100</strong></p>
+    </article>
+    <article class="detail-card">
+      <h2>Team Signal</h2>
+      <p><strong>{{ analysis.guide_people_total }}</strong> sales + support reps</p>
+      <p class="muted">{{ analysis.guide_company_count }} guide companies · {{ "%.1f"|format(analysis.guide_average_people_per_company) }} avg</p>
+    </article>
+    <article class="detail-card">
+      <h2>Links</h2>
+      <p><a href="{{ show.source_url }}" target="_blank" rel="noreferrer">Source directory</a></p>
+      {% if show.clay_table_url %}
+      <p><a href="{{ show.clay_table_url }}" target="_blank" rel="noreferrer">Clay table</a></p>
+      {% endif %}
+      {% if show.smartlead_campaign_id %}
+      <p><a href="{{ smartlead_campaign_url }}" target="_blank" rel="noreferrer">Smartlead campaign</a></p>
+      {% endif %}
+    </article>
+  </div>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <div>
+      <h2>Guide Sheets</h2>
+      <p>Editable guide rows stored in the database.</p>
+    </div>
+    {% if can_manage %}
+    <form action="/shows/{{ show.id }}/guide/build" method="post">
+      <button type="submit">Build Guide</button>
+    </form>
+    {% endif %}
+  </div>
+
+  <div class="guide-sheet-stack">
+    {% for sheet in guide_sheets %}
+    <section class="guide-sheet-card" id="sheet-{{ sheet.definition.key }}">
+      <div class="guide-sheet-head">
+        <div>
+          <h3>{{ sheet.definition.label }}</h3>
+          <p class="muted">{{ sheet.definition.description }}</p>
+        </div>
+        <span class="sheet-count">{{ sheet.rows|length }} row(s)</span>
+      </div>
+
+      <div class="table-wrap">
+        <table class="guide-table">
+          <thead>
+            <tr>
+              {% for field in sheet.definition.fields %}
+              <th>{{ field.label }}</th>
+              {% endfor %}
+              {% if can_manage %}
+              <th>Actions</th>
+              {% endif %}
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in sheet.rows %}
+            {% if can_manage %}
+            {% set form_id = "guide-row-" ~ row.id %}
+            <form id="{{ form_id }}" action="/shows/{{ show.id }}/guide/{{ row.id }}/update" method="post"></form>
+            <tr>
+              {% for field in sheet.definition.fields %}
+              <td>
+                <input type="{{ field.input_type }}" name="{{ field.key }}" value="{{ row.values.get(field.key, '') }}" placeholder="{{ field.placeholder }}" form="{{ form_id }}" />
+              </td>
+              {% endfor %}
+              <td class="guide-actions-cell">
+                <button class="button subtle" type="submit" form="{{ form_id }}">Save</button>
+                <button class="button danger subtle" type="submit" form="{{ form_id }}" formaction="/shows/{{ show.id }}/guide/{{ row.id }}/delete" onclick="return confirm('Delete this guide row?');">Delete</button>
+              </td>
+            </tr>
+            {% else %}
+            <tr>
+              {% for field in sheet.definition.fields %}
+              <td>{{ row.values.get(field.key, "") or "-" }}</td>
+              {% endfor %}
+            </tr>
+            {% endif %}
+            {% else %}
+            <tr>
+              <td colspan="{{ sheet.definition.fields|length + (1 if can_manage else 0) }}" class="empty">No rows yet.</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+
+      {% if can_manage %}
+      <details class="guide-add-row">
+        <summary>Add row to {{ sheet.definition.label }}</summary>
+        <form class="guide-row-form" action="/shows/{{ show.id }}/guide/{{ sheet.definition.key }}/add" method="post">
+          {% for field in sheet.definition.fields %}
+          <label>
+            <span>{{ field.label }}</span>
+            <input type="{{ field.input_type }}" name="{{ field.key }}" placeholder="{{ field.placeholder }}" />
+          </label>
+          {% endfor %}
+          <button type="submit">Add Row</button>
+        </form>
+      </details>
+      {% endif %}
+    </section>
+    {% endfor %}
+  </div>
+</section>
+{% endblock %}

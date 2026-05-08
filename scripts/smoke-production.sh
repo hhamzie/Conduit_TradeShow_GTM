@@ -50,4 +50,4 @@ printf '%s' "${ROOT_HEADERS}" | grep -qi "^location: /shows/dashboard"
 
 DASHBOARD_HTML="$(curl -fsS "http://127.0.0.1:${PORT}/shows/dashboard")"
 printf '%s' "${DASHBOARD_HTML}" | grep -q "<title>Show Dashboard</title>"
-printf '%s' "${DASHBOARD_HTML}" | grep -q "Trade Show Intelligence"
+printf '%s' "${DASHBOARD_HTML}" | grep -q "Trade Show Dashboard"

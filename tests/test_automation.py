@@ -627,6 +627,20 @@ class AutomationTests(unittest.TestCase):
             self.assertEqual(rebuild_mock.call_count, 1)
             self.assertEqual(request.session["flash_message"]["title"], "Trade show guide built.")
 
+    def test_show_guide_route_renders_separate_guide_page(self) -> None:
+        from app.main import show_guide
+        from starlette.requests import Request
+
+        request = Request({"type": "http", "method": "GET", "path": "/shows/1/guide", "headers": [], "session": {}})
+        with self.Session() as session:
+            show = make_show()
+            session.add(show)
+            session.commit()
+
+            response = show_guide(show_id=show.id, request=request, db=session)
+
+            self.assertEqual(response.status_code, 200)
+
 
 if __name__ == "__main__":
     unittest.main()

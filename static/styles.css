@@ -517,6 +517,28 @@ button.button.subtle {
   gap: 10px;
 }
 
+.dashboard-show-cell,
+.dashboard-context-cell,
+.dashboard-action-cell,
+.rating-cell {
+  display: grid;
+  gap: 6px;
+}
+
+.dashboard-show-cell strong,
+.rating-cell strong {
+  font-size: 1rem;
+}
+
+.dashboard-action-cell {
+  align-items: start;
+}
+
+.dashboard-table td,
+.dashboard-table th {
+  vertical-align: top;
+}
+
 .edit-show-form,
 .guide-row-form,
 .guide-sheet-stack {
@@ -538,6 +560,13 @@ button.button.subtle {
   background: rgba(255, 255, 255, 0.7);
   display: grid;
   gap: 12px;
+}
+
+.profile-context-grid,
+.guide-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
 }
 
 .edit-show-form {
@@ -632,6 +661,65 @@ button.button.subtle {
 .score-badge strong {
   font-size: 2rem;
   letter-spacing: -0.05em;
+}
+
+.rating-good {
+  background: rgba(20, 122, 85, 0.1);
+  color: var(--success);
+  border-color: rgba(20, 122, 85, 0.14);
+}
+
+.rating-medium {
+  background: rgba(154, 106, 18, 0.12);
+  color: var(--warning);
+  border-color: rgba(154, 106, 18, 0.14);
+}
+
+.rating-bad {
+  background: rgba(186, 60, 77, 0.1);
+  color: var(--danger);
+  border-color: rgba(186, 60, 77, 0.12);
+}
+
+.rating-pill,
+.status-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: fit-content;
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.status-chip-success {
+  color: var(--success);
+  border-color: rgba(20, 122, 85, 0.18);
+  background: rgba(20, 122, 85, 0.08);
+}
+
+.icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+  border: 1px solid var(--line-strong);
+  background: rgba(247, 250, 255, 0.95);
+  color: var(--ink);
+  text-decoration: none;
+  font-size: 1.15rem;
+}
+
+.icon-button:hover {
+  border-color: rgba(47, 109, 246, 0.28);
+  background: rgba(255, 255, 255, 1);
 }
 
 .priority-high {

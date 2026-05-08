@@ -4,9 +4,9 @@
 <section class="panel intelligence-hero-panel">
   <div class="panel-head intelligence-hero-head">
     <div>
-      <p class="hero-kicker">Trade Show Intelligence</p>
-      <h1>Every show, ranked fast.</h1>
-      <p class="hero-copy">See the verdict, core metrics, and next action for each show.</p>
+      <p class="hero-kicker">Trade Show Dashboard</p>
+      <h1>Shows ranked by guide quality.</h1>
+      <p class="hero-copy">Higher score means stronger guide coverage and more sales plus support reps per company.</p>
     </div>
     {% if can_manage %}
     <a class="button" href="/workflow">Open Workflow</a>
@@ -14,123 +14,102 @@
   </div>
   <div class="stats-grid stats-grid-compact">
     <article class="stat-card">
-      <span class="stat-label">Tracked Shows</span>
+      <span class="stat-label">Tracked</span>
       <strong class="stat-value">{{ tracked_count }}</strong>
     </article>
     <article class="stat-card">
-      <span class="stat-label">High Priority</span>
-      <strong class="stat-value">{{ high_priority_count }}</strong>
+      <span class="stat-label">Good</span>
+      <strong class="stat-value">{{ good_rating_count }}</strong>
     </article>
     <article class="stat-card">
-      <span class="stat-label">Exports Ready</span>
-      <strong class="stat-value">{{ export_ready_count }}</strong>
+      <span class="stat-label">Guides Ready</span>
+      <strong class="stat-value">{{ guide_ready_count }}</strong>
     </article>
     <article class="stat-card">
-      <span class="stat-label">Total Exhibitors</span>
+      <span class="stat-label">Exhibitors</span>
       <strong class="stat-value">{{ total_exhibitors }}</strong>
     </article>
   </div>
-  <p class="mini-note">Score = size, timing, and usable data.</p>
 </section>
 
 {% if analyses %}
-<section class="intelligence-grid">
-  {% for analysis in analyses %}
-  <article class="panel intelligence-card">
-    <div class="analysis-head">
-      <div>
-        <p class="eyebrow">{{ analysis.theme_label }}</p>
-        <h2>{{ analysis.show.name }}</h2>
-        <p class="show-subtitle">{{ analysis.show.place }} · {{ analysis.show.event_date }}</p>
-      </div>
-      <div class="score-badge priority-{{ analysis.priority_slug }}">
-        <span>{{ analysis.priority_label }}</span>
-        <strong>{{ analysis.priority_score }}</strong>
-      </div>
-    </div>
-
-    <p class="analysis-summary">{{ analysis.recommendation }}</p>
-
-    <div class="metric-strip">
-      <div class="metric-tile">
-        <span>Exhibitors</span>
-        <strong>{{ analysis.exhibitor_count }}</strong>
-      </div>
-      <div class="metric-tile">
-        <span>Websites</span>
-        <strong>{{ analysis.website_coverage_percent }}%</strong>
-      </div>
-      <div class="metric-tile">
-        <span>Booths</span>
-        <strong>{{ analysis.booth_coverage_percent }}%</strong>
-      </div>
-      <div class="metric-tile">
-        <span>Timing</span>
-        <strong>{% if analysis.days_until_event >= 0 %}{{ analysis.days_until_event }}d{% else %}Past{% endif %}</strong>
-      </div>
-    </div>
-
-    <div class="analysis-columns">
-      <div class="analysis-column">
-        <h3>Why</h3>
-        <ul class="simple-list">
-          {% for item in analysis.reasons %}
-          <li>{{ item }}</li>
-          {% endfor %}
-        </ul>
-      </div>
-      <div class="analysis-column">
-        <h3>Watchouts</h3>
-        <ul class="simple-list">
-          {% for item in analysis.risks %}
-          <li>{{ item }}</li>
-          {% endfor %}
-        </ul>
-      </div>
-    </div>
-
-    <div class="playbook-grid">
-      <article class="playbook-card">
-        <h3>Meet</h3>
-        <ul class="simple-list">
-          {% for item in analysis.who_to_meet[:3] %}
-          <li>{{ item }}</li>
-          {% endfor %}
-        </ul>
-      </article>
-      <article class="playbook-card">
-        <h3>Ask</h3>
-        <ul class="simple-list">
-          {% for item in analysis.questions_to_ask[:3] %}
-          <li>{{ item }}</li>
-          {% endfor %}
-        </ul>
-      </article>
-      <article class="playbook-card">
-        <h3>Targets</h3>
-        <ul class="simple-list">
-          {% for item in analysis.sample_company_names %}
-          <li>{{ item }}</li>
-          {% else %}
-          <li>Run the export to populate company profiles.</li>
-          {% endfor %}
-        </ul>
-      </article>
-    </div>
-
-    <div class="card-action-row">
-      <a class="button secondary" href="/shows/{{ analysis.show.id }}">Open Show Profile</a>
-      {% if can_manage %}
-      {% if analysis.export_ready %}
-      <form action="/shows/{{ analysis.show.id }}/guide/build" method="post">
-        <button class="button secondary" type="submit">Build Guide</button>
-      </form>
-      {% endif %}
-      <a class="button secondary" href="{{ analysis.show.source_url }}" target="_blank" rel="noreferrer">Source Directory</a>
-      {% endif %}
-    </div>
-  </article>
-  {% endfor %}
+<section class="panel">
+  <div class="table-wrap">
+    <table class="dashboard-table">
+      <thead>
+        <tr>
+          <th>Show</th>
+          <th>Rating</th>
+          <th>Guide Signal</th>
+          <th>Context</th>
+          <th>Smartlead</th>
+          <th>Guide</th>
+          <th>Profile</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for analysis in analyses %}
+        <tr>
+          <td>
+            <div class="dashboard-show-cell">
+              <strong>{{ analysis.show.name }}</strong>
+              <span class="muted">{{ analysis.show.place }} · {{ analysis.show.event_date }}</span>
+              <span class="muted">{{ analysis.exhibitor_count }} exhibitors · {{ analysis.show.status }}</span>
+            </div>
+          </td>
+          <td>
+            <div class="rating-cell">
+              <span class="rating-pill rating-{{ analysis.guide_score_slug }}">{{ analysis.guide_score_label }}</span>
+              <strong>{{ analysis.guide_score }}/100</strong>
+            </div>
+          </td>
+          <td>
+            <div class="dashboard-context-cell">
+              <strong>{{ analysis.guide_people_total }}</strong>
+              <span class="muted">sales + support reps</span>
+              <span class="muted">{{ analysis.guide_company_count }} guide companies · {{ "%.1f"|format(analysis.guide_average_people_per_company) }} avg</span>
+            </div>
+          </td>
+          <td>
+            <div class="dashboard-context-cell">
+              {% for line in analysis.guide_context %}
+              <span>{{ line }}</span>
+              {% endfor %}
+            </div>
+          </td>
+          <td>
+            <div class="dashboard-action-cell">
+              {% if analysis.show.smartlead_campaign_id %}
+              <span class="status-chip status-chip-success">Done</span>
+              <a class="button secondary" href="https://app.smartlead.ai/app/campaigns/{{ analysis.show.smartlead_campaign_id }}" target="_blank" rel="noreferrer">Open</a>
+              {% elif can_manage %}
+              <form action="/shows/{{ analysis.show.id }}/smartlead/setup" method="post">
+                <input type="hidden" name="campaign_mode" value="smart" />
+                <button class="button secondary" type="submit">Add</button>
+              </form>
+              {% else %}
+              <span class="status-chip">Not added</span>
+              {% endif %}
+            </div>
+          </td>
+          <td>
+            <div class="dashboard-action-cell">
+              {% if can_manage and analysis.export_ready and analysis.guide_company_count == 0 %}
+              <form action="/shows/{{ analysis.show.id }}/guide/build" method="post">
+                <button class="button secondary" type="submit">Build</button>
+              </form>
+              {% endif %}
+              <a class="icon-button" href="/shows/{{ analysis.show.id }}/guide" title="Open trade show guide" aria-label="Open trade show guide">&#128214;</a>
+            </div>
+          </td>
+          <td>
+            <a class="button secondary" href="/shows/{{ analysis.show.id }}">Open</a>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
 </section>
 {% else %}
 <section class="panel">

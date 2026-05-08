@@ -100,12 +100,12 @@
     <div class="analysis-head">
       <div>
         <p class="eyebrow">{{ analysis.theme_label }}</p>
-        <h2>Visit Analysis</h2>
+        <h2>Show Signal</h2>
         <p class="muted">{{ analysis.theme_summary }}</p>
       </div>
-      <div class="score-badge priority-{{ analysis.priority_slug }}">
-        <span>{{ analysis.priority_label }}</span>
-        <strong>{{ analysis.priority_score }}</strong>
+      <div class="score-badge rating-{{ analysis.guide_score_slug }}">
+        <span>{{ analysis.guide_score_label }}</span>
+        <strong>{{ analysis.guide_score }}/100</strong>
       </div>
     </div>
     <p class="analysis-summary">{{ analysis.recommendation }}</p>
@@ -129,56 +129,18 @@
       </div>
     </div>
 
-    <div class="analysis-columns">
-      <div class="analysis-column">
-        <h3>Why</h3>
-        <ul class="simple-list">
-          {% for item in analysis.reasons %}
-          <li>{{ item }}</li>
-          {% endfor %}
-        </ul>
+    <div class="profile-context-grid">
+      <div class="detail-card">
+        <h3>Guide Signal</h3>
+        <p><strong>{{ analysis.guide_people_total }}</strong> sales + support reps</p>
+        <p class="muted">{{ analysis.guide_company_count }} guide companies · {{ "%.1f"|format(analysis.guide_average_people_per_company) }} avg</p>
       </div>
-      <div class="analysis-column">
-        <h3>Watchouts</h3>
-        <ul class="simple-list">
-          {% for item in analysis.risks %}
-          <li>{{ item }}</li>
-          {% endfor %}
-        </ul>
+      <div class="detail-card">
+        <h3>Context</h3>
+        {% for item in analysis.guide_context %}
+        <p class="muted">{{ item }}</p>
+        {% endfor %}
       </div>
-    </div>
-
-    <div class="playbook-grid">
-      <article class="playbook-card">
-        <h3>Meet</h3>
-        <ul class="simple-list">
-          {% for item in analysis.who_to_meet %}
-          <li>{{ item }}</li>
-          {% endfor %}
-        </ul>
-      </article>
-      <article class="playbook-card">
-        <h3>Ask</h3>
-        <ul class="simple-list">
-          {% for item in analysis.questions_to_ask %}
-          <li>{{ item }}</li>
-          {% endfor %}
-        </ul>
-      </article>
-      <article class="playbook-card">
-        <h3>Capture</h3>
-        <ul class="simple-list">
-          {% for item in analysis.capture_checklist %}
-          <li>{{ item }}</li>
-          {% endfor %}
-        </ul>
-      </article>
-    </div>
-
-    <div class="next-step-strip">
-      {% for item in analysis.next_steps %}
-      <p>{{ item }}</p>
-      {% endfor %}
     </div>
   </div>
 
@@ -210,7 +172,8 @@
       <button type="submit">Smart Setup Smartlead</button>
     </form>
     {% endif %}
-    {% if export_path %}
+    <a class="button secondary" href="/shows/{{ show.id }}/guide">Open Guide</a>
+    {% if export_path and analysis.guide_company_count == 0 %}
     <form action="/shows/{{ show.id }}/guide/build" method="post">
       <button type="submit">Build Guide</button>
     </form>
@@ -232,8 +195,14 @@
   {% endif %}
 
   <div class="detail-card detail-stack">
-    <h2>Source</h2>
+    <h2>Links</h2>
     <p><a href="{{ show.source_url }}" target="_blank" rel="noreferrer">{{ show.source_url }}</a></p>
+    {% if show.clay_table_url %}
+    <p><a href="{{ show.clay_table_url }}" target="_blank" rel="noreferrer">Open Clay table</a></p>
+    {% endif %}
+    {% if show.smartlead_campaign_id %}
+    <p><a href="{{ smartlead_campaign_url }}" target="_blank" rel="noreferrer">Open Smartlead campaign</a></p>
+    {% endif %}
     {% if show.last_error and can_manage %}
     <h2>Latest Error Summary</h2>
     <p class="show-error">{{ error_summary }}</p>
@@ -283,144 +252,41 @@
 <section class="panel">
   <div class="panel-head">
     <div>
-      <h2>Guide Sheets</h2>
-      <p>Editable guide rows stored in the database.</p>
-    </div>
-    {% if can_manage %}
-    <form action="/shows/{{ show.id }}/guide/build" method="post">
-      <button type="submit">Build Guide</button>
-    </form>
-    {% endif %}
-  </div>
-
-  <div class="guide-sheet-stack">
-    {% for sheet in guide_sheets %}
-    <section class="guide-sheet-card" id="sheet-{{ sheet.definition.key }}">
-      <div class="guide-sheet-head">
-        <div>
-          <h3>{{ sheet.definition.label }}</h3>
-          <p class="muted">{{ sheet.definition.description }}</p>
-        </div>
-        <span class="sheet-count">{{ sheet.rows|length }} row(s)</span>
-      </div>
-
-      <div class="table-wrap">
-        <table class="guide-table">
-          <thead>
-            <tr>
-              {% for field in sheet.definition.fields %}
-              <th>{{ field.label }}</th>
-              {% endfor %}
-              {% if can_manage %}
-              <th>Actions</th>
-              {% endif %}
-            </tr>
-          </thead>
-          <tbody>
-            {% for row in sheet.rows %}
-            {% if can_manage %}
-            {% set form_id = "guide-row-" ~ row.id %}
-            <form id="{{ form_id }}" action="/shows/{{ show.id }}/guide/{{ row.id }}/update" method="post"></form>
-            <tr>
-              {% for field in sheet.definition.fields %}
-              <td>
-                <input type="{{ field.input_type }}" name="{{ field.key }}" value="{{ row.values.get(field.key, '') }}" placeholder="{{ field.placeholder }}" form="{{ form_id }}" />
-              </td>
-              {% endfor %}
-              <td class="guide-actions-cell">
-                <button class="button subtle" type="submit" form="{{ form_id }}">Save</button>
-                <button class="button danger subtle" type="submit" form="{{ form_id }}" formaction="/shows/{{ show.id }}/guide/{{ row.id }}/delete" onclick="return confirm('Delete this guide row?');">Delete</button>
-              </td>
-            </tr>
-            {% else %}
-            <tr>
-              {% for field in sheet.definition.fields %}
-              <td>{{ row.values.get(field.key, "") or "-" }}</td>
-              {% endfor %}
-            </tr>
-            {% endif %}
-            {% else %}
-            <tr>
-              <td colspan="{{ sheet.definition.fields|length + (1 if can_manage else 0) }}" class="empty">No rows yet.</td>
-            </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
-
-      {% if can_manage %}
-      <details class="guide-add-row">
-        <summary>Add row to {{ sheet.definition.label }}</summary>
-        <form class="guide-row-form" action="/shows/{{ show.id }}/guide/{{ sheet.definition.key }}/add" method="post">
-          {% for field in sheet.definition.fields %}
-          <label>
-            <span>{{ field.label }}</span>
-            <input type="{{ field.input_type }}" name="{{ field.key }}" placeholder="{{ field.placeholder }}" />
-          </label>
-          {% endfor %}
-          <button type="submit">Add Row</button>
-        </form>
-      </details>
-      {% endif %}
-    </section>
-    {% endfor %}
-  </div>
-</section>
-
-<section class="panel">
-  <div class="panel-head">
-    <div>
       <h2>Company Profiles</h2>
       <p>{{ analysis.export_company_count }} rows{% if analysis.company_profiles %} · showing top {{ analysis.company_profiles|length }}{% endif %}</p>
     </div>
   </div>
 
   {% if analysis.company_profiles %}
-  <div class="company-grid">
-    {% for company in analysis.company_profiles %}
-    <article class="company-card">
-      <div class="company-card-top">
-        <div>
-          <h3>{{ company.name }}</h3>
-          <p class="muted">
-            {% if company.domain %}{{ company.domain }}{% else %}Website missing{% endif %}
-            {% if company.booth_number %} · Booth {{ company.booth_number }}{% endif %}
-          </p>
-        </div>
-        <span class="priority-pill priority-{{ company.priority_slug }}">{{ company.priority_label }}</span>
-      </div>
-      {% if company.website_url %}
-      <p><a href="{{ company.website_url }}" target="_blank" rel="noreferrer">{{ company.website_url }}</a></p>
-      {% endif %}
-      <p class="company-rationale">{{ company.rationale }}</p>
-      <div class="company-guide-grid">
-        <div>
-          <h4>Meet</h4>
-          <ul class="simple-list">
-            {% for item in company.who_to_meet %}
-            <li>{{ item }}</li>
-            {% endfor %}
-          </ul>
-        </div>
-        <div>
-          <h4>Questions</h4>
-          <ul class="simple-list">
-            {% for item in company.questions %}
-            <li>{{ item }}</li>
-            {% endfor %}
-          </ul>
-        </div>
-        <div>
-          <h4>Capture</h4>
-          <ul class="simple-list">
-            {% for item in company.capture %}
-            <li>{{ item }}</li>
-            {% endfor %}
-          </ul>
-        </div>
-      </div>
-    </article>
-    {% endfor %}
+  <div class="table-wrap">
+    <table class="dashboard-table">
+      <thead>
+        <tr>
+          <th>Company</th>
+          <th>Booth</th>
+          <th>Website</th>
+          <th>Context</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for company in analysis.company_profiles %}
+        <tr>
+          <td>
+            <strong>{{ company.name }}</strong>
+          </td>
+          <td>{{ company.booth_number or "-" }}</td>
+          <td>
+            {% if company.website_url %}
+            <a href="{{ company.website_url }}" target="_blank" rel="noreferrer">{{ company.domain or company.website_url }}</a>
+            {% else %}
+            -
+            {% endif %}
+          </td>
+          <td>{{ company.rationale }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
   </div>
   {% else %}
   <div class="empty-state">

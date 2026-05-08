@@ -32,6 +32,12 @@ from app.web.presenters import build_show_notice, summarize_show_error
 router = APIRouter()
 
 
+def _smartlead_campaign_url(campaign_id: int | None) -> str:
+    if campaign_id:
+        return f"https://app.smartlead.ai/app/campaigns/{campaign_id}"
+    return "https://app.smartlead.ai/app/campaigns"
+
+
 def _get_show_or_404(db: Session, show_id: int):
     show = get_show(db, show_id)
     if show is None:
@@ -72,6 +78,8 @@ def show_dashboard(request: Request, db: Session = Depends(get_db)):
             tracked_count=len(analyses),
             high_priority_count=sum(1 for analysis in analyses if analysis.priority_slug == "high"),
             export_ready_count=sum(1 for analysis in analyses if analysis.export_ready),
+            guide_ready_count=sum(1 for analysis in analyses if analysis.guide_company_count > 0),
+            good_rating_count=sum(1 for analysis in analyses if analysis.guide_score_label == "Good"),
             total_exhibitors=sum(analysis.exhibitor_count for analysis in analyses),
         ),
     )
@@ -99,6 +107,25 @@ def show_detail(show_id: int, request: Request, db: Session = Depends(get_db)):
             notice=build_show_notice(show),
             error_summary=summarize_show_error(show.last_error),
             smartlead_campaign_options=list_smartlead_campaign_options() if can_manage(request) else [],
+            smartlead_campaign_url=_smartlead_campaign_url(show.smartlead_campaign_id),
+        ),
+    )
+
+
+@router.get("/shows/{show_id}/guide")
+def show_guide(show_id: int, request: Request, db: Session = Depends(get_db)):
+    show = _get_show_or_404(db, show_id)
+    return templates.TemplateResponse(
+        "show_guide.html",
+        template_context(
+            request,
+            current_page="show_dashboard",
+            can_manage=can_manage(request),
+            title=f"{show.name} Guide",
+            show=show,
+            analysis=build_show_analysis(show, today=datetime.now().date(), company_limit=18),
+            guide_sheets=build_guide_sheet_views(show),
+            smartlead_campaign_url=_smartlead_campaign_url(show.smartlead_campaign_id),
         ),
     )
 
