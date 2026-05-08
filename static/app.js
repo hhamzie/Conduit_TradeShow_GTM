@@ -303,6 +303,126 @@ function handleDashboardRowClick(event) {
 
 let activeTooltipTarget = null;
 let floatingTooltip = null;
+let activeActionMenuDetails = null;
+let activeActionMenuPanel = null;
+
+function positionFloatingActionMenu(details, panel) {
+  const summary = details.querySelector("summary");
+  if (!(summary instanceof HTMLElement)) {
+    return;
+  }
+
+  panel.classList.add("is-floating");
+  panel.style.top = "0px";
+  panel.style.left = "0px";
+  panel.style.right = "auto";
+
+  const summaryRect = summary.getBoundingClientRect();
+  const panelRect = panel.getBoundingClientRect();
+  const viewportWidth = window.innerWidth;
+  const viewportHeight = window.innerHeight;
+
+  let left = summaryRect.right - panelRect.width;
+  let top = summaryRect.bottom + 10;
+
+  if (left < 8) {
+    left = 8;
+  }
+  if (left + panelRect.width > viewportWidth - 8) {
+    left = viewportWidth - panelRect.width - 8;
+  }
+  if (top + panelRect.height > viewportHeight - 8) {
+    top = Math.max(8, summaryRect.top - panelRect.height - 10);
+  }
+
+  panel.style.left = `${left}px`;
+  panel.style.top = `${top}px`;
+}
+
+function restoreFloatingActionMenu(details, panel) {
+  const mount = details.querySelector("[data-action-menu-mount]");
+  if (!(mount instanceof HTMLElement)) {
+    return;
+  }
+  mount.after(panel);
+  panel.classList.remove("is-floating");
+  panel.style.top = "";
+  panel.style.left = "";
+  panel.style.right = "";
+}
+
+function closeActiveFloatingActionMenu() {
+  if (activeActionMenuDetails instanceof HTMLDetailsElement) {
+    activeActionMenuDetails.open = false;
+  }
+}
+
+function handleActionMenuDocumentClick(event) {
+  if (!(activeActionMenuDetails instanceof HTMLDetailsElement) || !(activeActionMenuPanel instanceof HTMLElement)) {
+    return;
+  }
+
+  const summary = activeActionMenuDetails.querySelector("summary");
+  const target = event.target;
+  if (
+    target instanceof Node &&
+    (activeActionMenuPanel.contains(target) || (summary instanceof HTMLElement && summary.contains(target)))
+  ) {
+    return;
+  }
+
+  closeActiveFloatingActionMenu();
+}
+
+function handleActionMenuViewportChange() {
+  if (!(activeActionMenuDetails instanceof HTMLDetailsElement) || !(activeActionMenuPanel instanceof HTMLElement)) {
+    return;
+  }
+  positionFloatingActionMenu(activeActionMenuDetails, activeActionMenuPanel);
+}
+
+function initializeActionMenus() {
+  const actionMenus = document.querySelectorAll(".action-menu");
+  actionMenus.forEach((details) => {
+    if (!(details instanceof HTMLDetailsElement)) {
+      return;
+    }
+
+    const panel = details.querySelector(".action-menu-panel");
+    if (!(panel instanceof HTMLElement)) {
+      return;
+    }
+
+    if (!details.querySelector("[data-action-menu-mount]")) {
+      const mount = document.createElement("span");
+      mount.hidden = true;
+      mount.dataset.actionMenuMount = "true";
+      panel.before(mount);
+    }
+
+    details.addEventListener("toggle", () => {
+      if (details.open) {
+        if (activeActionMenuDetails && activeActionMenuDetails !== details) {
+          closeActiveFloatingActionMenu();
+        }
+        document.body.appendChild(panel);
+        positionFloatingActionMenu(details, panel);
+        activeActionMenuDetails = details;
+        activeActionMenuPanel = panel;
+      } else {
+        restoreFloatingActionMenu(details, panel);
+        if (activeActionMenuDetails === details) {
+          activeActionMenuDetails = null;
+          activeActionMenuPanel = null;
+        }
+      }
+    });
+  });
+
+  document.addEventListener("click", handleActionMenuDocumentClick);
+  window.addEventListener("resize", handleActionMenuViewportChange);
+  window.addEventListener("scroll", handleActionMenuViewportChange, true);
+}
 
 function ensureFloatingTooltip() {
   if (floatingTooltip) {
@@ -787,6 +907,7 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   initializeSheetTabs();
+  initializeActionMenus();
   initializeLeadTables();
   initializeMultiSelectForms();
   initializeDismissibleNotices();

@@ -235,7 +235,7 @@ h2 {
 
 .lane-card {
   position: relative;
-  overflow: hidden;
+  overflow: visible;
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -994,6 +994,11 @@ button.button.subtle {
   display: grid;
   gap: 6px;
   z-index: 20;
+}
+
+.action-menu-panel.is-floating {
+  position: fixed;
+  z-index: 1200;
 }
 
 .action-menu-link,
