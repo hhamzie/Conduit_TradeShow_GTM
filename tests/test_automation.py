@@ -9,12 +9,13 @@ import unittest
 import zipfile
 from unittest.mock import patch
 
+from openpyxl import Workbook
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
 from app.config import get_settings
 from app.database import Base
-from app.models import ClaySyncRow, RunStatus, Show, ShowStatus
+from app.models import ClaySyncRow, RunStatus, Show, ShowGuideRow, ShowStatus
 from app.providers import ClayPollResult, ClayRecord, ProviderResult, SmartleadSyncResult
 from app.services import _build_prepared_lead, BulkDirectScrapeResult, DirectScrapeResult, launch_show, register_bulk_shows, run_bulk_direct_scrape, run_show_scrape, sync_show_from_clay, upsert_show
 
@@ -33,6 +34,47 @@ def make_show(**overrides) -> Show:
     }
     payload.update(overrides)
     return Show(**payload)
+
+
+def build_guide_workbook_file() -> bytes:
+    workbook = Workbook()
+    company_sheet = workbook.active
+    company_sheet.title = "Company Summary"
+    company_sheet.append(
+        [
+            "Company Name",
+            "Booth Number",
+            "Booth Category",
+            "Sales Team Size",
+            "Customer Service Team Size",
+            "Total Team Size",
+            "Catalog Complexity (1-5)",
+            "Sales Leader Name",
+            "Sales Leader Role",
+            "Sales Leader Email",
+            "Sales Leader LinkedIn",
+            "Source URL",
+        ]
+    )
+    company_sheet.append(
+        [
+            "Fiserv",
+            "3254",
+            "3200s",
+            932,
+            2009,
+            2941,
+            2,
+            "Robert Clarkson",
+            "Chief Revenue Officer",
+            "robert.clarkson@fiserv.com",
+            "https://linkedin.com/in/robert",
+            "https://example.com/fiserv",
+        ]
+    )
+    buffer = io.BytesIO()
+    workbook.save(buffer)
+    return buffer.getvalue()
 
 
 class AutomationTests(unittest.TestCase):
@@ -640,6 +682,37 @@ class AutomationTests(unittest.TestCase):
             response = show_guide(show_id=show.id, request=request, db=session)
 
             self.assertEqual(response.status_code, 200)
+
+    def test_upload_guide_workbook_route_imports_excel_sheet(self) -> None:
+        async def run_test() -> None:
+            from fastapi import UploadFile
+            from app.main import upload_guide_workbook_route
+
+            request = type("Req", (), {"session": {}})()
+            upload = UploadFile(filename="guide.xlsx", file=io.BytesIO(build_guide_workbook_file()))
+
+            with self.Session() as session:
+                show = make_show()
+                session.add(show)
+                session.commit()
+
+                with patch("app.web.routes.shows.require_authenticated"):
+                    response = await upload_guide_workbook_route(
+                        show_id=show.id,
+                        request=request,
+                        workbook=upload,
+                        db=session,
+                    )
+
+                self.assertEqual(response.status_code, 303)
+                self.assertEqual(response.headers["location"], f"/shows/{show.id}/guide")
+                self.assertEqual(request.session["flash_message"]["title"], "Guide workbook imported.")
+                rows = session.scalars(select(ShowGuideRow).where(ShowGuideRow.show_id == show.id)).all()
+                self.assertEqual(len(rows), 1)
+
+        import asyncio
+
+        asyncio.run(run_test())
 
 
 if __name__ == "__main__":

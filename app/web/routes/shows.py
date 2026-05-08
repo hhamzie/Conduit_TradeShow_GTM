@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, Form, HTTPException, Request
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, RedirectResponse
 from sqlalchemy.orm import Session
 from starlette import status
@@ -11,7 +11,13 @@ from starlette import status
 from app.core.auth import can_manage, require_authenticated
 from app.core.templating import template_context, templates
 from app.database import get_db
-from app.guide_services import create_guide_row, delete_guide_row, rebuild_trade_show_guides, update_guide_row
+from app.guide_services import (
+    create_guide_row,
+    delete_guide_row,
+    import_trade_show_guide_workbook,
+    rebuild_trade_show_guides,
+    update_guide_row,
+)
 from app.models import ShowGuideRow
 from app.providers import ensure_smartlead_campaign, fetch_smartlead_campaign_option, list_smartlead_campaign_options
 from app.show_guides import build_guide_sheet_views, get_guide_sheet
@@ -295,6 +301,36 @@ def build_trade_show_guide_route(show_id: int, request: Request, db: Session = D
         "detail": f"Created {company_count} company summary rows and {booth_count} booth grouping rows.",
     }
     return RedirectResponse(f"/shows/{show_id}#sheet-company_summary", status_code=status.HTTP_303_SEE_OTHER)
+
+
+@router.post("/shows/{show_id}/guide/upload")
+async def upload_guide_workbook_route(
+    show_id: int,
+    request: Request,
+    workbook: UploadFile = File(...),
+    db: Session = Depends(get_db),
+):
+    require_authenticated(request)
+    show = _get_show_or_404(db, show_id)
+    filename = (workbook.filename or "").strip()
+    if not filename.lower().endswith((".xlsx", ".xlsm")):
+        raise HTTPException(status_code=400, detail="Upload an .xlsx or .xlsm workbook.")
+
+    payload = await workbook.read()
+    try:
+        counts = import_trade_show_guide_workbook(db, show=show, workbook_bytes=payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    request.session["flash_message"] = {
+        "tone": "success",
+        "title": "Guide workbook imported.",
+        "detail": (
+            f"Imported {counts.get('company_summary', 0)} company rows and "
+            f"{counts.get('booth_category_groups', 0)} booth rows from {filename or 'the workbook'}."
+        ),
+    }
+    return RedirectResponse(f"/shows/{show_id}/guide", status_code=status.HTTP_303_SEE_OTHER)
 
 
 @router.post("/shows/{show_id}/guide/{sheet_key}/add")

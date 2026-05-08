@@ -10,9 +10,10 @@
     <div class="panel-head-actions">
       <a class="button secondary" href="/shows/dashboard">Dashboard</a>
       <a class="button secondary" href="/shows/{{ show.id }}">Profile</a>
-      {% if can_manage and show.latest_export_path and analysis.guide_company_count == 0 %}
-      <form action="/shows/{{ show.id }}/guide/build" method="post">
-        <button type="submit">Build Guide</button>
+      {% if can_manage %}
+      <form class="workbook-upload-form" action="/shows/{{ show.id }}/guide/upload" method="post" enctype="multipart/form-data" data-auto-submit-file-form>
+        <input class="visually-hidden-file" id="guide-workbook-top" type="file" name="workbook" accept=".xlsx,.xlsm" required />
+        <label class="button" for="guide-workbook-top">{% if analysis.guide_company_count > 0 %}Replace Workbook{% else %}Upload Workbook{% endif %}</label>
       </form>
       {% endif %}
     </div>
@@ -46,11 +47,12 @@
   <div class="panel-head">
     <div>
       <h2>Guide Sheets</h2>
-      <p>Editable guide rows stored in the database.</p>
+      <p>Workbook-backed sheet in the website. Edit cells here or replace the workbook.</p>
     </div>
     {% if can_manage %}
-    <form action="/shows/{{ show.id }}/guide/build" method="post">
-      <button type="submit">Build Guide</button>
+    <form class="workbook-upload-form" action="/shows/{{ show.id }}/guide/upload" method="post" enctype="multipart/form-data" data-auto-submit-file-form>
+      <input class="visually-hidden-file" id="guide-workbook-panel" type="file" name="workbook" accept=".xlsx,.xlsm" required />
+      <label class="button secondary" for="guide-workbook-panel">{% if analysis.guide_company_count > 0 %}Replace Workbook{% else %}Upload Workbook{% endif %}</label>
     </form>
     {% endif %}
   </div>
@@ -110,20 +112,6 @@
         </table>
       </div>
 
-      {% if can_manage %}
-      <details class="guide-add-row">
-        <summary>Add row to {{ sheet.definition.label }}</summary>
-        <form class="guide-row-form" action="/shows/{{ show.id }}/guide/{{ sheet.definition.key }}/add" method="post">
-          {% for field in sheet.definition.fields %}
-          <label>
-            <span>{{ field.label }}</span>
-            <input type="{{ field.input_type }}" name="{{ field.key }}" placeholder="{{ field.placeholder }}" />
-          </label>
-          {% endfor %}
-          <button type="submit">Add Row</button>
-        </form>
-      </details>
-      {% endif %}
     </section>
     {% endfor %}
   </div>

@@ -173,11 +173,6 @@
     </form>
     {% endif %}
     <a class="button secondary" href="/shows/{{ show.id }}/guide">Open Guide</a>
-    {% if export_path and analysis.guide_company_count == 0 %}
-    <form action="/shows/{{ show.id }}/guide/build" method="post">
-      <button type="submit">Build Guide</button>
-    </form>
-    {% endif %}
     {% if show.status == "approved" %}
     <form action="/shows/{{ show.id }}/launch" method="post">
       <button type="submit">Launch Campaign</button>

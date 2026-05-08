@@ -279,6 +279,15 @@ async function handleBulkDownloadFormSubmit(event) {
   }
 }
 
+function handleAutoSubmitFileFormChange(event) {
+  const input = event.currentTarget;
+  const form = input.closest("form");
+  if (!form || !input.files || input.files.length === 0) {
+    return;
+  }
+  form.requestSubmit();
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   const directForms = document.querySelectorAll("[data-direct-download-form]");
   directForms.forEach((form) => {
@@ -288,5 +297,10 @@ document.addEventListener("DOMContentLoaded", () => {
   const bulkForms = document.querySelectorAll("[data-bulk-download-form]");
   bulkForms.forEach((form) => {
     form.addEventListener("submit", handleBulkDownloadFormSubmit);
+  });
+
+  const fileForms = document.querySelectorAll("[data-auto-submit-file-form] input[type='file']");
+  fileForms.forEach((input) => {
+    input.addEventListener("change", handleAutoSubmitFileFormChange);
   });
 });

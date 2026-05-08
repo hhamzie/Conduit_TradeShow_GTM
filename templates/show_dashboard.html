@@ -84,14 +84,11 @@
               <details class="action-menu">
                 <summary class="icon-button guide-icon guide-icon-missing" data-tooltip="No guide yet. Click for options." aria-label="Guide options">&#128214;</summary>
                 <div class="action-menu-panel">
-                  <a class="action-menu-link" href="/shows/{{ analysis.show.id }}/guide">Add rows</a>
-                  {% if analysis.export_ready %}
-                  <form action="/shows/{{ analysis.show.id }}/guide/build" method="post">
-                    <button class="action-menu-link action-menu-button" type="submit">Build from export</button>
+                  <form class="workbook-upload-form" action="/shows/{{ analysis.show.id }}/guide/upload" method="post" enctype="multipart/form-data" data-auto-submit-file-form>
+                    <input class="visually-hidden-file" id="guide-upload-{{ analysis.show.id }}" type="file" name="workbook" accept=".xlsx,.xlsm" required />
+                    <label class="action-menu-link" for="guide-upload-{{ analysis.show.id }}">Upload workbook</label>
                   </form>
-                  {% else %}
-                  <a class="action-menu-link" href="/shows/{{ analysis.show.id }}/guide">Create blank guide</a>
-                  {% endif %}
+                  <a class="action-menu-link" href="/shows/{{ analysis.show.id }}/guide">Open sheet</a>
                 </div>
               </details>
               {% else %}

@@ -1,13 +1,19 @@
 from __future__ import annotations
 
 from collections import Counter
+from io import BytesIO
+import re
 
+from openpyxl import load_workbook
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models import Show, ShowGuideRow
-from app.show_guides import normalize_guide_values, serialize_guide_values
+from app.show_guides import GUIDE_SHEETS, GuideSheetDefinition, normalize_guide_values, serialize_guide_values
 from app.show_intelligence import _load_company_rows
+
+
+TOKEN_NORMALIZER = re.compile(r"[^a-z0-9]+")
 
 
 def create_guide_row(
@@ -59,6 +65,89 @@ def _booth_category(booth_number: str) -> str:
     if digits:
         return f"{digits}00s"
     return "Unassigned"
+
+
+def _normalize_token(value: object) -> str:
+    return TOKEN_NORMALIZER.sub("", str(value or "").strip().lower())
+
+
+def _stringify_cell(value: object) -> str:
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
+def _sheet_key_for_title(title: str) -> str:
+    normalized = _normalize_token(title)
+    for key, definition in GUIDE_SHEETS.items():
+        if normalized in {_normalize_token(key), _normalize_token(definition.label)}:
+            return key
+    return ""
+
+
+def _resolve_header_indexes(definition: GuideSheetDefinition, header_row: tuple[object, ...]) -> dict[str, int]:
+    normalized_headers = {_normalize_token(value): index for index, value in enumerate(header_row) if value is not None}
+    indexes: dict[str, int] = {}
+    for field in definition.fields:
+        candidates = {_normalize_token(field.key), _normalize_token(field.label)}
+        match_index = next((normalized_headers[candidate] for candidate in candidates if candidate in normalized_headers), None)
+        if match_index is None:
+            raise ValueError(f"{definition.label} is missing the '{field.label}' column.")
+        indexes[field.key] = match_index
+    return indexes
+
+
+def import_trade_show_guide_workbook(db: Session, *, show: Show, workbook_bytes: bytes) -> dict[str, int]:
+    if not workbook_bytes:
+        raise ValueError("Upload an Excel workbook first.")
+
+    try:
+        workbook = load_workbook(BytesIO(workbook_bytes), data_only=True)
+    except Exception as exc:  # noqa: BLE001
+        raise ValueError("The uploaded file is not a valid Excel workbook.") from exc
+
+    imported_rows: dict[str, list[dict[str, str]]] = {key: [] for key in GUIDE_SHEETS}
+    recognized_sheet_count = 0
+
+    for worksheet in workbook.worksheets:
+        sheet_key = _sheet_key_for_title(worksheet.title)
+        if not sheet_key:
+            continue
+        recognized_sheet_count += 1
+        definition = GUIDE_SHEETS[sheet_key]
+        rows = list(worksheet.iter_rows(values_only=True))
+        if not rows:
+            continue
+        header_indexes = _resolve_header_indexes(definition, rows[0])
+        for row in rows[1:]:
+            payload = {
+                field.key: _stringify_cell(row[header_indexes[field.key]]) if header_indexes[field.key] < len(row) else ""
+                for field in definition.fields
+            }
+            if not any(payload.values()):
+                continue
+            imported_rows[sheet_key].append(normalize_guide_values(sheet_key, payload))
+
+    if recognized_sheet_count == 0:
+        raise ValueError("Workbook must include a 'Company Summary' or 'Booth Category Groups' sheet.")
+
+    for row in list(show.guide_rows):
+        db.delete(row)
+    db.flush()
+
+    for sheet_key, rows in imported_rows.items():
+        for position, payload in enumerate(rows):
+            db.add(
+                ShowGuideRow(
+                    show=show,
+                    sheet_key=sheet_key,
+                    position=position,
+                    values_json=serialize_guide_values(payload),
+                )
+            )
+    db.commit()
+
+    return {sheet_key: len(rows) for sheet_key, rows in imported_rows.items()}
 
 
 def rebuild_trade_show_guides(db: Session, *, show: Show) -> tuple[int, int]:

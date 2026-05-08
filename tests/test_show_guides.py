@@ -1,14 +1,22 @@
 from __future__ import annotations
 
 from datetime import date, datetime
+from io import BytesIO
 import unittest
 from unittest.mock import patch
 
+from openpyxl import Workbook
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
 from app.database import Base
-from app.guide_services import create_guide_row, delete_guide_row, rebuild_trade_show_guides, update_guide_row
+from app.guide_services import (
+    create_guide_row,
+    delete_guide_row,
+    import_trade_show_guide_workbook,
+    rebuild_trade_show_guides,
+    update_guide_row,
+)
 from app.models import Show, ShowGuideRow, ShowStatus
 from app.show_guides import build_guide_sheet_views
 
@@ -29,6 +37,84 @@ def make_show(**overrides) -> Show:
     }
     payload.update(overrides)
     return Show(**payload)
+
+
+def build_workbook_bytes() -> bytes:
+    workbook = Workbook()
+    company_sheet = workbook.active
+    company_sheet.title = "Company Summary"
+    company_sheet.append(
+        [
+            "Company Name",
+            "Booth Number",
+            "Booth Category",
+            "Sales Team Size",
+            "Customer Service Team Size",
+            "Total Team Size",
+            "Catalog Complexity (1-5)",
+            "Sales Leader Name",
+            "Sales Leader Role",
+            "Sales Leader Email",
+            "Sales Leader LinkedIn",
+            "Source URL",
+        ]
+    )
+    company_sheet.append(
+        [
+            "Fiserv",
+            "3254",
+            "3200s",
+            932,
+            2009,
+            2941,
+            2,
+            "Robert Clarkson",
+            "Chief Revenue Officer",
+            "robert.clarkson@fiserv.com",
+            "https://linkedin.com/in/robert",
+            "https://example.com/fiserv",
+        ]
+    )
+
+    booth_sheet = workbook.create_sheet("Booth Category Groups")
+    booth_sheet.append(
+        [
+            "Booth Category",
+            "Category Total Team Size",
+            "Company Name",
+            "Booth Number",
+            "Sales Team Size",
+            "Customer Service Team Size",
+            "Total Team Size",
+            "Catalog Complexity (1-5)",
+            "Sales Leader Name",
+            "Sales Leader Role",
+            "Sales Leader Email",
+            "Sales Leader LinkedIn",
+            "Source URL",
+        ]
+    )
+    booth_sheet.append(
+        [
+            "100s",
+            20,
+            "Special-Lite",
+            "135",
+            7,
+            5,
+            12,
+            4,
+            "Gary Wolf",
+            "Business Development Manager",
+            "gwolf@example.com",
+            "https://linkedin.com/in/gary",
+            "https://example.com/special-lite",
+        ]
+    )
+
+    buffer = BytesIO()
+    workbook.save(buffer)
+    return buffer.getvalue()
 
 
 class ShowGuideTests(unittest.TestCase):
@@ -129,6 +215,22 @@ class ShowGuideTests(unittest.TestCase):
                 '"category_total_team_size": "1"',
                 rows_by_sheet["booth_category_groups"][0].values_json,
             )
+
+    def test_import_trade_show_guide_workbook_replaces_rows_from_excel(self) -> None:
+        with self.Session() as session:
+            show = make_show()
+            session.add(show)
+            session.commit()
+
+            create_guide_row(session, show=show, sheet_key="company_summary", payload={"company_name": "Old Row"})
+
+            counts = import_trade_show_guide_workbook(session, show=show, workbook_bytes=build_workbook_bytes())
+
+            self.assertEqual(counts["company_summary"], 1)
+            self.assertEqual(counts["booth_category_groups"], 1)
+            rows = session.scalars(select(ShowGuideRow).where(ShowGuideRow.show_id == show.id)).all()
+            self.assertEqual(len(rows), 2)
+            self.assertTrue(any("Fiserv" in row.values_json for row in rows))
 
 
 if __name__ == "__main__":

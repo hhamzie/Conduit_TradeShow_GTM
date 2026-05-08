@@ -20,6 +20,7 @@ from app.web.routes.shows import (
     show_dashboard,
     show_detail,
     sync_show_from_clay_route,
+    upload_guide_workbook_route,
     update_guide_row_route,
     update_show_route,
 )
@@ -67,6 +68,7 @@ __all__ = [
     "configure_smartlead_route",
     "pause_show_route",
     "build_trade_show_guide_route",
+    "upload_guide_workbook_route",
     "add_guide_row_route",
     "update_guide_row_route",
     "delete_guide_row_route",
