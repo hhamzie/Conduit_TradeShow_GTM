@@ -52,7 +52,7 @@
             <div class="score-cell" data-tooltip="{{ analysis.guide_score }} out of 100 · {{ score_tone }}">
               <strong class="score-value" style="--score-hue: {{ analysis.guide_score * 1.2 }};">{{ analysis.guide_score }}</strong>
               <div class="score-track" aria-hidden="true">
-                <div class="score-fill" style="width: {{ analysis.guide_score }}%; --score-hue: {{ analysis.guide_score * 1.2 }};"></div>
+                <div class="score-marker" style="left: clamp(8px, {{ analysis.guide_score }}%, calc(100% - 8px)); --score-hue: {{ analysis.guide_score * 1.2 }};"></div>
               </div>
             </div>
           </td>
@@ -60,33 +60,18 @@
             <div class="dashboard-icon-rail">
               {% if analysis.show.smartlead_campaign_id %}
               <a class="icon-button smartlead-icon" href="https://app.smartlead.ai/app/campaigns/{{ analysis.show.smartlead_campaign_id }}" target="_blank" rel="noreferrer" data-tooltip="Smartlead campaign">
-                <svg viewBox="0 0 64 64" aria-hidden="true" class="icon-mark icon-mark-smartlead">
-                  <path d="M18 17c-6.1 0-11 5.2-11 11.6S11.9 40.2 18 40.2h6.6V17H18Z" fill="currentColor"/>
-                  <path d="M28.6 15.2c0-3.1 3.3-5.1 6-3.5L56 24c2.6 1.5 2.6 5.5 0 7L34.6 43.3c-2.7 1.6-6-.4-6-3.5V15.2Z" fill="currentColor"/>
-                  <rect x="24.6" y="43.8" width="10.3" height="15.2" rx="2.8" fill="currentColor"/>
-                  <path d="M57 24.8c4 1 6 5.4 4.5 9.2c-1.2 2.9-4.5 4.6-7.6 3.8V24.8Z" fill="currentColor"/>
-                </svg>
+                <img src="/static/smartlead-logo.svg" alt="" class="smartlead-mark-image" />
               </a>
               {% elif can_manage %}
               <form action="/shows/{{ analysis.show.id }}/smartlead/setup" method="post">
                 <input type="hidden" name="campaign_mode" value="smart" />
                 <button class="icon-button smartlead-icon smartlead-icon-missing" type="submit" data-tooltip="Add Smartlead campaign">
-                  <svg viewBox="0 0 64 64" aria-hidden="true" class="icon-mark icon-mark-smartlead">
-                    <path d="M18 17c-6.1 0-11 5.2-11 11.6S11.9 40.2 18 40.2h6.6V17H18Z" fill="currentColor"/>
-                    <path d="M28.6 15.2c0-3.1 3.3-5.1 6-3.5L56 24c2.6 1.5 2.6 5.5 0 7L34.6 43.3c-2.7 1.6-6-.4-6-3.5V15.2Z" fill="currentColor"/>
-                    <rect x="24.6" y="43.8" width="10.3" height="15.2" rx="2.8" fill="currentColor"/>
-                    <path d="M57 24.8c4 1 6 5.4 4.5 9.2c-1.2 2.9-4.5 4.6-7.6 3.8V24.8Z" fill="currentColor"/>
-                  </svg>
+                  <img src="/static/smartlead-logo.svg" alt="" class="smartlead-mark-image" />
                 </button>
               </form>
               {% else %}
               <span class="icon-button smartlead-icon smartlead-icon-missing" data-tooltip="No Smartlead campaign">
-                <svg viewBox="0 0 64 64" aria-hidden="true" class="icon-mark icon-mark-smartlead">
-                  <path d="M18 17c-6.1 0-11 5.2-11 11.6S11.9 40.2 18 40.2h6.6V17H18Z" fill="currentColor"/>
-                  <path d="M28.6 15.2c0-3.1 3.3-5.1 6-3.5L56 24c2.6 1.5 2.6 5.5 0 7L34.6 43.3c-2.7 1.6-6-.4-6-3.5V15.2Z" fill="currentColor"/>
-                  <rect x="24.6" y="43.8" width="10.3" height="15.2" rx="2.8" fill="currentColor"/>
-                  <path d="M57 24.8c4 1 6 5.4 4.5 9.2c-1.2 2.9-4.5 4.6-7.6 3.8V24.8Z" fill="currentColor"/>
-                </svg>
+                <img src="/static/smartlead-logo.svg" alt="" class="smartlead-mark-image" />
               </span>
               {% endif %}
 

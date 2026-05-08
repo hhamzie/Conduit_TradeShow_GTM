@@ -46,27 +46,17 @@
 <section class="panel hero-panel">
   <div class="hero-grid">
     <div class="hero-main">
-      <p class="hero-kicker">Trade Show Workflow</p>
-      <h1>Three clear ways to run the scraper.</h1>
-      <p class="hero-copy">Every option uses the same booth-aware scraper underneath. Choose the lane based on the result you want back: one CSV, a batch ZIP, or the full Clay to Smartlead workflow.</p>
-    </div>
-    <div class="hero-aside">
-      <div class="hero-pill">At a glance</div>
-      <div class="hero-summary-grid">
-        <div class="hero-summary-card">
-          <strong>Option 1</strong>
-          <span>One show in, one CSV out.</span>
-        </div>
-        <div class="hero-summary-card">
-          <strong>Option 2</strong>
-          <span>CSV in, ZIP of scrape outputs out.</span>
-        </div>
-        <div class="hero-summary-card">
-          <strong>Option 3</strong>
-          <span>Scrape plus Clay and Smartlead automation.</span>
-        </div>
+      <div class="workflow-hero-top">
+        <p class="hero-kicker">Trade Show Workflow</p>
+        <a class="button secondary hero-dashboard-link" href="/shows/dashboard">Open Trade Show Dashboard</a>
       </div>
-      <a class="button secondary hero-dashboard-link" href="/shows/dashboard">Open Trade Show Dashboard</a>
+      <h1>Pick a lane.</h1>
+      <p class="hero-copy">Single scrape, bulk scrape, or outbound automation.</p>
+      <div class="workflow-chip-row">
+        <span class="workflow-chip" data-tooltip="One trade show link in. One CSV out.">Single</span>
+        <span class="workflow-chip" data-tooltip="Upload a CSV of shows and get a ZIP back.">Bulk</span>
+        <span class="workflow-chip" data-tooltip="Scrape, queue, and hand off to Clay plus Smartlead.">Automation</span>
+      </div>
     </div>
   </div>
 </section>
@@ -80,12 +70,11 @@
       </div>
       <h2>Scrape One Trade Show</h2>
     </div>
-    <p class="lane-copy">Paste one directory or show link, save the show into the dashboard first, then get one cleaned CSV back.</p>
-    <dl class="lane-meta">
-      <div><dt>Input</dt><dd>One trade show link</dd></div>
-      <div><dt>Output</dt><dd>One CSV download plus a saved show record</dd></div>
-      <div><dt>Best for</dt><dd>Fast scrapes that should still land in the dashboard</dd></div>
-    </dl>
+    <p class="lane-copy">Paste one show link. It saves the show first, then returns one CSV.</p>
+    <div class="lane-chip-row">
+      <span class="lane-chip" data-tooltip="Creates or updates the show in the dashboard before scraping.">Saved first</span>
+      <span class="lane-chip" data-tooltip="Best for one-off scrapes that should still become a show record.">Fastest path</span>
+    </div>
     {% if single_scrape_error %}
     <p class="error-inline">{{ single_scrape_error }}</p>
     {% endif %}
@@ -116,7 +105,6 @@
       <button type="submit">Scrape and Download CSV</button>
     </form>
     <p id="single-scrape-status" class="inline-status" hidden></p>
-    <p class="mini-note">This now creates or updates the trade show in the database before scraping, then fills that record with the export.</p>
   </article>
 
   <article class="panel lane-card lane-card-bulk">
@@ -127,12 +115,11 @@
       </div>
       <h2>Scrape Many Trade Shows</h2>
     </div>
-    <p class="lane-copy">Upload a CSV of shows and get a ZIP bundle back.</p>
-    <dl class="lane-meta">
-      <div><dt>Input</dt><dd>CSV of trade shows</dd></div>
-      <div><dt>Output</dt><dd>ZIP with one CSV per show</dd></div>
-      <div><dt>Best for</dt><dd>Quick batch scraping</dd></div>
-    </dl>
+    <p class="lane-copy">Upload a CSV of shows. It returns one ZIP and creates dashboard records per show.</p>
+    <div class="lane-chip-row">
+      <span class="lane-chip" data-tooltip="Each row becomes its own show on the dashboard before the scrape runs.">Tracks each show</span>
+      <span class="lane-chip" data-tooltip="If you delete a queued show before its turn, the job skips it.">Skips removed rows</span>
+    </div>
     {% if bulk_scrape_error %}
     <p class="error-inline">{{ bulk_scrape_error }}</p>
     {% endif %}
@@ -177,7 +164,7 @@
       </div>
     </section>
     <p id="bulk-scrape-status" class="inline-status" hidden></p>
-    <p class="mini-note">Expected columns: <strong>Show</strong>, <strong>Date</strong>, <strong>Place</strong>, <strong>Link</strong>. If you delete a queued show from the dashboard before its turn, the bulk scrape will skip it and move on.</p>
+    <p class="mini-note">CSV columns: <strong>Show</strong>, <strong>Date</strong>, <strong>Place</strong>, <strong>Link</strong>.</p>
   </article>
 
   <article class="panel lane-card lane-card-automation">
@@ -188,15 +175,10 @@
       </div>
       <h2>Automate Clay + Smartlead</h2>
     </div>
-    <p class="lane-copy">Queue one show or a full CSV and let the app run the longer outbound workflow.</p>
-    <dl class="lane-meta">
-      <div><dt>Input</dt><dd>One show or a CSV of shows</dd></div>
-      <div><dt>Output</dt><dd>Clay table plus Smartlead campaign</dd></div>
-      <div><dt>Best for</dt><dd>Ongoing outbound operations</dd></div>
-    </dl>
-    <div class="show-notice show-notice-warning compact-notice">
-      <strong>Setup still required</strong>
-      <p>Create the Clay template table, add the row status column, and set the Clay and Smartlead Render env vars before using this in production.</p>
+    <p class="lane-copy">Queue one show or a full CSV for the longer outbound workflow.</p>
+    <div class="lane-chip-row">
+      <span class="lane-chip" data-tooltip="Builds the Clay table flow and prepares Smartlead campaign setup.">Clay + Smartlead</span>
+      <span class="lane-chip" data-tooltip="Needs Render env setup plus the Clay template table before production use.">Needs setup</span>
     </div>
     {% if automation_error %}
     <p class="error-inline">{{ automation_error }}</p>

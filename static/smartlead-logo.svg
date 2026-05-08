@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" role="img" aria-label="Smartlead">
+  <rect width="200" height="200" rx="0" fill="#7054F5"/>
+  <path d="M58 52c-17.2 0-31 14.7-31 32.8S40.8 118 58 118h18V52H58Z" fill="#fff"/>
+  <path d="M90 46c0-8.7 9.1-14.2 16.5-9.9l58.7 33.8c7.1 4.1 7.1 15.1 0 19.2l-58.7 33.8c-7.4 4.3-16.5-1.2-16.5-9.9V46Z" fill="#fff"/>
+  <rect x="76" y="123" width="28" height="44" rx="5" fill="#fff"/>
+  <path d="M170 73.5c11.2 2.5 18.4 13.8 15.7 24.8c-2 8.2-9.8 13.8-18.7 13.1V73.5Z" fill="#fff"/>
+</svg>
