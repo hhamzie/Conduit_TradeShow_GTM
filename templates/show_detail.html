@@ -91,7 +91,6 @@
   <div class="panel-head">
     <div>
       <h2>Overview</h2>
-      <p class="muted">{{ analysis.recommendation }}</p>
     </div>
   </div>
 
@@ -117,8 +116,25 @@
   <div class="profile-overview-grid">
     <article class="profile-summary-card">
       <span class="stat-label">Guide</span>
-      <strong class="stat-value">{{ analysis.guide_people_total }}</strong>
-      <p class="muted">{{ analysis.guide_company_count }} companies · {{ "%.1f"|format(analysis.guide_average_people_per_company) }} reps avg</p>
+      <strong class="stat-value">{% if analysis.guide_company_count > 0 %}Ready{% else %}Missing{% endif %}</strong>
+      <p class="muted">
+        {% if analysis.guide_company_count > 0 %}
+        {{ analysis.guide_company_count }} companies loaded
+        {% else %}
+        No workbook uploaded yet
+        {% endif %}
+      </p>
+    </article>
+    <article class="profile-summary-card">
+      <span class="stat-label">Clay Table</span>
+      <strong class="stat-value">{% if show.clay_table_id %}Connected{% else %}Missing{% endif %}</strong>
+      <p class="muted">
+        {% if show.clay_table_id %}
+        {{ show.clay_table_name or "Table linked" }}
+        {% else %}
+        No Clay table linked yet
+        {% endif %}
+      </p>
     </article>
   </div>
 </section>
