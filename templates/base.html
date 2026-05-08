@@ -12,11 +12,13 @@
       <header class="topbar">
         <div class="topbar-main">
           <a class="brand" href="/shows/dashboard">{{ app_name if app_name else "Trade Show Outbound" }}</a>
-          <p class="tagline">Single-show scraping, bulk scrape bundles, and Clay-to-Smartlead automation in one cleaner workflow.</p>
           <nav class="topnav">
-            <a class="topnav-link{% if current_page == 'show_dashboard' %} is-active{% endif %}" href="/shows/dashboard">Trade Shows</a>
+            <a class="topnav-link{% if current_page in ['show_dashboard', 'show_profile', 'show_guide'] %} is-active{% endif %}" href="/shows/dashboard">Trade Shows</a>
             {% if request.session.get("authenticated") %}
             <a class="topnav-link{% if current_page == 'workflow' %} is-active{% endif %}" href="/workflow">Workflow</a>
+            {% endif %}
+            {% if context_tab_label and context_tab_href %}
+            <a class="topnav-link is-active is-context-tab" href="{{ context_tab_href }}">{{ context_tab_label }}</a>
             {% endif %}
           </nav>
         </div>
@@ -30,14 +32,17 @@
       </header>
       <main>
         {% if flash_message %}
-        <section class="show-notice show-notice-{{ flash_message.tone }}">
-          {% if flash_message.title %}
-          <strong>{{ flash_message.title }}</strong>
-          {% endif %}
-          {% if flash_message.detail %}
-          <p>{{ flash_message.detail }}</p>
-          {% endif %}
-        </section>
+        <div class="flash-modal-backdrop" data-flash-modal>
+          <section class="flash-modal show-notice show-notice-{{ flash_message.tone }}" role="dialog" aria-modal="true" aria-live="polite">
+            <button class="flash-modal-close" type="button" aria-label="Close message" data-flash-close>&times;</button>
+            {% if flash_message.title %}
+            <strong>{{ flash_message.title }}</strong>
+            {% endif %}
+            {% if flash_message.detail %}
+            <p>{{ flash_message.detail }}</p>
+            {% endif %}
+          </section>
+        </div>
         {% endif %}
         {% block content %}{% endblock %}
       </main>

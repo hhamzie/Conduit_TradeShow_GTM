@@ -51,7 +51,7 @@ a {
 
 .topbar-main {
   display: grid;
-  gap: 14px;
+  gap: 12px;
 }
 
 .brand {
@@ -60,14 +60,6 @@ a {
   font-size: 2.1rem;
   font-weight: 700;
   letter-spacing: -0.03em;
-}
-
-.tagline {
-  margin: 12px 0 0;
-  max-width: 56rem;
-  color: var(--muted);
-  font-size: 1rem;
-  line-height: 1.6;
 }
 
 .topnav {
@@ -94,6 +86,13 @@ a {
   color: var(--accent-dark);
   border-color: rgba(47, 109, 246, 0.22);
   background: rgba(47, 109, 246, 0.1);
+}
+
+.topnav-link.is-context-tab {
+  max-width: min(100%, 30rem);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .panel {
@@ -1775,6 +1774,52 @@ button.button.subtle {
   color: #98303d;
 }
 
+.flash-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(17, 27, 44, 0.24);
+  backdrop-filter: blur(8px);
+  z-index: 1000;
+}
+
+.flash-modal {
+  position: relative;
+  width: min(100%, 34rem);
+  margin: 0;
+  padding: 20px 22px 18px;
+  border-radius: 22px;
+  box-shadow: 0 26px 48px rgba(21, 35, 61, 0.16);
+}
+
+.flash-modal strong,
+.flash-modal h2 {
+  padding-right: 28px;
+}
+
+.flash-modal-close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.72);
+  color: inherit;
+  box-shadow: none;
+  font-size: 1.1rem;
+  line-height: 1;
+}
+
+.flash-modal-close:hover {
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: none;
+}
+
 .empty-state {
   padding: 28px;
   text-align: center;
@@ -1936,6 +1981,10 @@ th {
 
   .topbar {
     flex-direction: column;
+  }
+
+  .flash-modal-backdrop {
+    padding: 18px;
   }
 
   .stats-grid,

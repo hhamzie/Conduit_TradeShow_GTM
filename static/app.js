@@ -376,6 +376,26 @@ function handleTooltipLeave(event) {
   }
 }
 
+function closeFlashModal() {
+  const flashModal = document.querySelector("[data-flash-modal]");
+  if (!flashModal) {
+    return;
+  }
+  flashModal.remove();
+}
+
+function handleFlashModalClick(event) {
+  if (event.target.matches("[data-flash-close]") || event.target.matches("[data-flash-modal]")) {
+    closeFlashModal();
+  }
+}
+
+function handleFlashModalKeydown(event) {
+  if (event.key === "Escape") {
+    closeFlashModal();
+  }
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   const directForms = document.querySelectorAll("[data-direct-download-form]");
   directForms.forEach((form) => {
@@ -405,4 +425,10 @@ document.addEventListener("DOMContentLoaded", () => {
     target.addEventListener("focus", handleTooltipEnter);
     target.addEventListener("blur", handleTooltipLeave);
   });
+
+  const flashModal = document.querySelector("[data-flash-modal]");
+  if (flashModal) {
+    flashModal.addEventListener("click", handleFlashModalClick);
+    document.addEventListener("keydown", handleFlashModalKeydown);
+  }
 });
