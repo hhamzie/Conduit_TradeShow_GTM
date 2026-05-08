@@ -115,6 +115,17 @@ class BulkDirectScrapeResult:
     failed_count: int
 
 
+def _parse_bulk_csv_payload(payload: bytes) -> tuple[list[dict[str, str]], dict[str, str]]:
+    text = payload.decode("utf-8-sig")
+    reader = csv.DictReader(io.StringIO(text))
+    headers = normalize_headers(reader.fieldnames)
+    missing = [field for field in ("show", "date", "place", "link") if field not in headers]
+    if missing:
+        raise ValueError(f"Missing required columns: {', '.join(missing)}")
+    rows = list(reader)
+    return rows, headers
+
+
 def upsert_show(
     db: Session,
     *,
@@ -358,7 +369,7 @@ def run_single_show_scrape(
     )
 
 
-def run_show_scrape(db: Session, show: Show) -> DirectScrapeResult:
+def run_show_scrape(db: Session, show: Show, *, workers: int | None = None) -> DirectScrapeResult:
     campaign_run = CampaignRun(
         show=show,
         status=RunStatus.running.value,
@@ -377,6 +388,7 @@ def run_show_scrape(db: Session, show: Show) -> DirectScrapeResult:
             output_path=export_path_for_show(show),
             require_website=True,
             browser_mode="auto",
+            workers=workers,
         )
     except Exception as exc:  # noqa: BLE001
         campaign_run.status = RunStatus.failed.value
@@ -404,17 +416,20 @@ def run_show_scrape(db: Session, show: Show) -> DirectScrapeResult:
 def run_bulk_direct_scrape(
     payload: bytes,
     progress_callback: Callable[[int, int, str, str], None] | None = None,
+    *,
+    db: Session | None = None,
+    run_offset_days: int | None = None,
 ) -> BulkDirectScrapeResult:
     settings = get_settings()
-    text = payload.decode("utf-8-sig")
-    reader = csv.DictReader(io.StringIO(text))
-    headers = normalize_headers(reader.fieldnames)
-    missing = [field for field in ("show", "date", "place", "link") if field not in headers]
-    if missing:
-        raise ValueError(f"Missing required columns: {', '.join(missing)}")
-    rows = list(reader)
-
-    return _run_bulk_direct_scrape_rows(rows, headers, settings, progress_callback)
+    rows, headers = _parse_bulk_csv_payload(payload)
+    return _run_bulk_direct_scrape_rows(
+        rows,
+        headers,
+        settings,
+        progress_callback,
+        db=db,
+        run_offset_days=run_offset_days,
+    )
 
 
 def _run_bulk_direct_scrape_rows(
@@ -422,6 +437,9 @@ def _run_bulk_direct_scrape_rows(
     headers: dict[str, str],
     settings,
     progress_callback: Callable[[int, int, str, str], None] | None = None,
+    *,
+    db: Session | None = None,
+    run_offset_days: int | None = None,
 ) -> BulkDirectScrapeResult:
     total_rows = len(rows)
 
@@ -473,16 +491,33 @@ def _run_bulk_direct_scrape_rows(
                         show_name,
                         f"Scraping {show_name} ({success_count + failed_count + 1}/{total_rows})",
                     )
-                result = _run_direct_scrape(
-                    show_name=show_name,
-                    place=place,
-                    link=link,
-                    output_path=output_path,
-                    require_website=True,
-                    browser_mode="auto",
-                    workers=max(1, min(settings.bulk_scraper_workers, 2)),
-                )
-                relative_name = output_path.name
+                if db is not None:
+                    show, _ = upsert_show(
+                        db,
+                        show_name=show_name,
+                        event_date_raw=event_date_raw,
+                        place=place,
+                        link=link,
+                        run_offset_days=run_offset_days or settings.default_run_offset_days,
+                    )
+                    db.commit()
+                    result = run_show_scrape(
+                        db,
+                        show,
+                        workers=max(1, min(settings.bulk_scraper_workers, 2)),
+                    )
+                    relative_name = Path(show.latest_export_path or result.output_path).name
+                else:
+                    result = _run_direct_scrape(
+                        show_name=show_name,
+                        place=place,
+                        link=link,
+                        output_path=output_path,
+                        require_website=True,
+                        browser_mode="auto",
+                        workers=max(1, min(settings.bulk_scraper_workers, 2)),
+                    )
+                    relative_name = output_path.name
                 archive.write(result.output_path, arcname=relative_name)
                 manifest_rows.append(
                     {
@@ -559,18 +594,13 @@ def _run_bulk_direct_scrape_rows(
 
 
 def import_shows_from_csv(db: Session, payload: bytes, run_offset_days: int) -> ImportSummary:
-    text = payload.decode("utf-8-sig")
-    reader = csv.DictReader(io.StringIO(text))
-    headers = normalize_headers(reader.fieldnames)
-    missing = [field for field in ("show", "date", "place", "link") if field not in headers]
-    if missing:
-        raise ValueError(f"Missing required columns: {', '.join(missing)}")
+    rows, headers = _parse_bulk_csv_payload(payload)
 
     created = 0
     updated = 0
     skipped = 0
 
-    for row in reader:
+    for row in rows:
         show_name = (row.get(headers["show"]) or "").strip()
         event_date_raw = (row.get(headers["date"]) or "").strip()
         place = (row.get(headers["place"]) or "").strip()

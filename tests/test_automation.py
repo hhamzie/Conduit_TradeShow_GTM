@@ -294,6 +294,57 @@ class AutomationTests(unittest.TestCase):
                 self.assertIn("Luxe Pack", manifest_text)
                 self.assertIn("High Point", manifest_text)
 
+    def test_run_bulk_direct_scrape_updates_dashboard_shows_when_db_is_provided(self) -> None:
+        payload = "\n".join(
+            [
+                "Show,Date,Place,Link",
+                "Luxe Pack,2026-05-06,New York City,https://example.com/luxe",
+                "High Point,2026-10-24,High Point,https://example.com/highpoint",
+            ]
+        ).encode("utf-8")
+
+        with self.Session() as session, tempfile.TemporaryDirectory() as tmp_dir:
+            archive_path = Path(tmp_dir) / "bulk.zip"
+            created_files = [
+                Path(tmp_dir) / "luxe-pack_2026-05-06.csv",
+                Path(tmp_dir) / "high-point_2026-10-24.csv",
+            ]
+            for path in created_files:
+                path.write_text("company_name,website_url\nAcme,https://acme.com\n", encoding="utf-8")
+
+            results = [
+                DirectScrapeResult(
+                    output_path=created_files[0],
+                    company_count=10,
+                    failure_count=0,
+                    conference_name="Luxe Pack",
+                    conference_location="New York City",
+                ),
+                DirectScrapeResult(
+                    output_path=created_files[1],
+                    company_count=12,
+                    failure_count=1,
+                    conference_name="High Point",
+                    conference_location="High Point",
+                ),
+            ]
+
+            with (
+                patch("app.services.direct_bulk_archive_path", return_value=archive_path),
+                patch("app.services._run_direct_scrape", side_effect=results),
+            ):
+                result = run_bulk_direct_scrape(payload, db=session, run_offset_days=14)
+
+            self.assertEqual(result.success_count, 2)
+            shows = session.scalars(select(Show).order_by(Show.event_date.asc())).all()
+            self.assertEqual(len(shows), 2)
+            self.assertEqual(shows[0].status, ShowStatus.ready_for_review.value)
+            self.assertEqual(shows[0].company_count, 10)
+            self.assertTrue(shows[0].latest_export_path.endswith("luxe-pack_2026-05-06.csv"))
+            self.assertEqual(shows[1].status, ShowStatus.ready_for_review.value)
+            self.assertEqual(shows[1].company_count, 12)
+            self.assertTrue(shows[1].latest_export_path.endswith("high-point_2026-10-24.csv"))
+
     def test_bulk_scrape_route_starts_background_job(self) -> None:
         async def run_test() -> None:
             try:
@@ -314,12 +365,15 @@ class AutomationTests(unittest.TestCase):
                 patch("app.web.routes.workflow.require_authenticated"),
                 patch("app.web.routes.workflow.bulk_scrape_jobs.start_job", return_value="job-123") as start_job_mock,
             ):
-                response = await scrape_many_shows(request=request, file=upload)
+                with self.Session() as session:
+                    response = await scrape_many_shows(request=request, file=upload, db=session)
 
             self.assertEqual(response.status_code, 200)
-            self.assertEqual(response.body, b'{"job_id":"job-123"}')
+            self.assertIn(b'"job_id":"job-123"', response.body)
+            self.assertIn(b'"created":1', response.body)
             self.assertEqual(start_job_mock.call_count, 1)
             self.assertIn(b"Luxe Pack", start_job_mock.call_args.args[0])
+            self.assertEqual(start_job_mock.call_args.kwargs["run_offset_days"], 14)
 
         import asyncio
 

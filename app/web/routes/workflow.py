@@ -155,6 +155,7 @@ def scrape_single_show(
 async def scrape_many_shows(
     request: Request,
     file: UploadFile = File(...),
+    db: Session = Depends(get_db),
 ):
     require_authenticated(request)
     payload = await file.read()
@@ -162,8 +163,20 @@ async def scrape_many_shows(
         request.session["bulk_scrape_error"] = "The uploaded CSV was empty."
         return RedirectResponse("/workflow", status_code=status.HTTP_303_SEE_OTHER)
 
-    job_id = bulk_scrape_jobs.start_job(payload)
-    return JSONResponse({"job_id": job_id})
+    try:
+        summary = import_shows_from_csv(db, payload, settings.default_run_offset_days)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    job_id = bulk_scrape_jobs.start_job(payload, run_offset_days=settings.default_run_offset_days)
+    return JSONResponse(
+        {
+            "job_id": job_id,
+            "created": summary.created,
+            "updated": summary.updated,
+            "skipped": summary.skipped,
+        }
+    )
 
 
 @router.get("/scrape/bulk/status/{job_id}")

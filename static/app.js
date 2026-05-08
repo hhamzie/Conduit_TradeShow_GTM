@@ -179,6 +179,11 @@ async function handleBulkDownloadFormSubmit(event) {
     }
 
     const payload = await response.json();
+    const registeredSummary =
+      typeof payload.created === "number"
+        ? `Added ${payload.created} new show(s), updated ${payload.updated || 0}, skipped ${payload.skipped || 0}.`
+        : "Registered shows in the dashboard.";
+    setProgressMessage(progressTarget, `${registeredSummary} Starting bulk scrape...`, "info");
     const finalStatus = await pollBulkScrapeJob(payload.job_id, progressTarget, progressBar);
     const downloadResponseObject = await fetch(finalStatus.download_url, {
       credentials: "same-origin",
@@ -187,7 +192,7 @@ async function handleBulkDownloadFormSubmit(event) {
       throw new Error(`The ZIP download failed (${downloadResponseObject.status}).`);
     }
     await downloadResponse(downloadResponseObject);
-    setProgressMessage(progressTarget, "Bulk scrape finished. ZIP download started.", "success");
+    setProgressMessage(progressTarget, "Bulk scrape finished. ZIP download started. The shows are now on the dashboard.", "success");
   } catch (error) {
     const message =
       error instanceof Error && error.message
