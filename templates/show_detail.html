@@ -54,13 +54,13 @@
           {% endif %}
           <a class="action-menu-link" href="{{ show.source_url }}" target="_blank" rel="noreferrer">Source directory</a>
           {% if export_path %}
-          <a class="action-menu-link" href="/shows/{{ show.id }}/export">{{ export_path.name }}</a>
+          <a class="action-menu-link" href="/shows/{{ show.id }}/export">Lead CSV download</a>
           {% endif %}
           {% if enriched_export_path %}
-          <a class="action-menu-link" href="/shows/{{ show.id }}/enriched-export">{{ enriched_export_path.name }}</a>
+          <a class="action-menu-link" href="/shows/{{ show.id }}/enriched-export">Enriched CSV download</a>
           {% endif %}
           {% if smartlead_ready_path %}
-          <a class="action-menu-link" href="/shows/{{ show.id }}/smartlead-export">{{ smartlead_ready_path.name }}</a>
+          <a class="action-menu-link" href="/shows/{{ show.id }}/smartlead-export">Smartlead CSV download</a>
           {% endif %}
           {% if show.clay_table_url %}
           <a class="action-menu-link" href="{{ show.clay_table_url }}" target="_blank" rel="noreferrer">Clay table</a>
