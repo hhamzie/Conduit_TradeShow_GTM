@@ -32,11 +32,13 @@
   {% if can_manage %}
   <form id="bulk-form-dashboard" class="section-toolbar compact bulk-select-bar dashboard-bulk-bar" action="/shows/bulk/delete" method="post" data-multi-select-form>
     <input type="hidden" name="next_path" value="/shows/dashboard" />
-    <label class="selector-control selector-control-wide" aria-label="Select all trade shows">
-      <input type="checkbox" data-select-all />
-      <span></span>
-      <em>Select all</em>
-    </label>
+    <div class="bulk-select-anchor">
+      <label class="selector-control" aria-label="Select all trade shows">
+        <input type="checkbox" data-select-all />
+        <span></span>
+      </label>
+      <span class="bulk-select-label">Select all</span>
+    </div>
     <span class="bulk-select-count" data-select-count>0 selected</span>
     <button class="button secondary subtle" type="submit" formaction="/shows/bulk/smartlead" data-requires-selection>Smartlead selected</button>
     <button class="button danger subtle" type="submit" onclick="return confirm('Delete the selected shows?');" data-requires-selection>Delete selected</button>
