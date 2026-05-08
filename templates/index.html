@@ -19,25 +19,26 @@
     </div>
 
     {% if item.notice %}
-    <div class="show-notice show-notice-{{ item.notice.tone }}">
+    <div class="show-notice show-notice-{{ item.notice.tone }} dismissible-notice" data-dismissible>
+      <button class="notice-dismiss" type="button" aria-label="Dismiss notice" data-dismiss-trigger>&times;</button>
       <strong>{{ item.notice.title }}</strong>
       <p>{{ item.notice.detail }}</p>
     </div>
     {% elif item.error_summary %}
     <p class="show-error">{{ item.error_summary }}</p>
     {% endif %}
-  </div>
 
-  <div class="show-card-side">
-    <a class="button secondary" href="/shows/{{ show.id }}">Open</a>
-    {% if show.status in ["waiting", "failed", "ready_for_review", "approved", "live"] %}
-    <form action="/shows/{{ show.id }}/run-now" method="post">
-      <button type="submit">Run Immediately</button>
-    </form>
-    {% endif %}
-    <form action="/shows/{{ show.id }}/delete" method="post" onsubmit="return confirm('Delete this show from the dashboard?');">
-      <button class="button danger" type="submit">Delete</button>
-    </form>
+    <div class="show-card-side">
+      <a class="button secondary" href="/shows/{{ show.id }}">Open</a>
+      {% if show.status in ["waiting", "failed", "ready_for_review", "approved", "live"] %}
+      <form action="/shows/{{ show.id }}/run-now" method="post">
+        <button type="submit">Run now</button>
+      </form>
+      {% endif %}
+      <form action="/shows/{{ show.id }}/delete" method="post" onsubmit="return confirm('Delete this show from the dashboard?');">
+        <button class="button danger" type="submit">Delete</button>
+      </form>
+    </div>
   </div>
 </article>
 {% endmacro %}

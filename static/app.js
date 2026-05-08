@@ -644,6 +644,18 @@ function initializeLeadTables() {
   });
 }
 
+function initializeDismissibleNotices() {
+  const dismissButtons = document.querySelectorAll("[data-dismiss-trigger]");
+  dismissButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      const notice = button.closest("[data-dismissible]");
+      if (notice) {
+        notice.remove();
+      }
+    });
+  });
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   const directForms = document.querySelectorAll("[data-direct-download-form]");
   directForms.forEach((form) => {
@@ -689,4 +701,5 @@ document.addEventListener("DOMContentLoaded", () => {
 
   initializeSheetTabs();
   initializeLeadTables();
+  initializeDismissibleNotices();
 });
