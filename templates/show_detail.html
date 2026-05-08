@@ -25,34 +25,34 @@
         <div class="action-menu-panel">
           {% if can_manage and show.status == "ready_for_review" %}
           <form action="/shows/{{ show.id }}/approve" method="post">
-            <button class="action-menu-link action-menu-button" type="submit">Approve for launch</button>
+            <button class="action-menu-link action-menu-button" type="submit">Mark ready to send</button>
           </form>
           {% elif can_manage and show.status == "approved" %}
           <form action="/shows/{{ show.id }}/launch" method="post">
-            <button class="action-menu-link action-menu-button" type="submit">Launch campaign</button>
+            <button class="action-menu-link action-menu-button" type="submit">Start email campaign</button>
           </form>
           {% elif can_manage and show.status in ["waiting", "failed", "live"] %}
           <form action="/shows/{{ show.id }}/run-now" method="post">
-            <button class="action-menu-link action-menu-button" type="submit">Run scrape now</button>
+            <button class="action-menu-link action-menu-button" type="submit">Refresh exhibitor list</button>
           </form>
           {% endif %}
           {% if can_manage and show.clay_table_id %}
           <form action="/shows/{{ show.id }}/sync-clay" method="post">
-            <button class="action-menu-link action-menu-button" type="submit">Sync Clay</button>
+            <button class="action-menu-link action-menu-button" type="submit">Refresh Clay table</button>
           </form>
           {% endif %}
           {% if can_manage and not show.smartlead_campaign_id %}
           <form action="/shows/{{ show.id }}/smartlead/setup" method="post">
             <input type="hidden" name="campaign_mode" value="smart" />
-            <button class="action-menu-link action-menu-button" type="submit">Set up Smartlead</button>
+            <button class="action-menu-link action-menu-button" type="submit">Create email campaign</button>
           </form>
           {% endif %}
           {% if can_manage and show.smartlead_campaign_id and show.smartlead_status in ["active", "ready_to_launch", "paused"] %}
           <form action="/shows/{{ show.id }}/pause" method="post">
-            <button class="action-menu-link action-menu-button" type="submit">Pause Smartlead</button>
+            <button class="action-menu-link action-menu-button" type="submit">Pause email campaign</button>
           </form>
           {% endif %}
-          <a class="action-menu-link" href="{{ show.source_url }}" target="_blank" rel="noreferrer">Source directory</a>
+          <a class="action-menu-link" href="{{ show.source_url }}" target="_blank" rel="noreferrer">Open show directory</a>
           {% if export_path %}
           <a class="action-menu-link" href="/shows/{{ show.id }}/export">Lead CSV download</a>
           {% endif %}
@@ -63,10 +63,10 @@
           <a class="action-menu-link" href="/shows/{{ show.id }}/smartlead-export">Smartlead CSV download</a>
           {% endif %}
           {% if show.clay_table_url %}
-          <a class="action-menu-link" href="{{ show.clay_table_url }}" target="_blank" rel="noreferrer">Clay table</a>
+          <a class="action-menu-link" href="{{ show.clay_table_url }}" target="_blank" rel="noreferrer">Open Clay table</a>
           {% endif %}
           {% if show.smartlead_campaign_id %}
-          <a class="action-menu-link" href="{{ smartlead_campaign_url }}" target="_blank" rel="noreferrer">Smartlead campaign</a>
+          <a class="action-menu-link" href="{{ smartlead_campaign_url }}" target="_blank" rel="noreferrer">Open email campaign</a>
           {% endif %}
           {% if can_manage %}
           <form action="/shows/{{ show.id }}/delete" method="post" onsubmit="return confirm('Delete this show from the dashboard?');">
@@ -218,12 +218,12 @@
 
 {% if can_manage %}
 <details class="panel profile-card profile-details-card">
-  <summary class="profile-details-summary">Run history</summary>
+  <summary class="profile-details-summary">Scrape history</summary>
   <div class="table-wrap">
     <table>
       <thead>
         <tr>
-          <th>Run</th>
+          <th>Scrape</th>
           <th>Status</th>
           <th>Created</th>
           <th>Started</th>
@@ -245,7 +245,7 @@
         </tr>
         {% else %}
         <tr>
-          <td colspan="7" class="empty">No runs yet.</td>
+          <td colspan="7" class="empty">No scrapes yet.</td>
         </tr>
         {% endfor %}
       </tbody>

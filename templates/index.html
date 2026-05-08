@@ -180,14 +180,14 @@
   <article class="panel lane-card lane-card-automation">
     <div class="lane-head">
       <div class="lane-topline">
-        <span class="lane-state lane-state-setup">Needs Clay + Smartlead setup</span>
+        <span class="lane-state lane-state-setup">Clay + email setup</span>
       </div>
-      <h2>Automation</h2>
+      <h2>Campaign Setup</h2>
     </div>
-    <p class="lane-copy">Queue one show or a full CSV for the longer outbound workflow.</p>
+    <p class="lane-copy">Save shows that should flow into a Clay table and email campaign.</p>
     <div class="lane-chip-row">
-      <span class="lane-chip" data-tooltip="Builds the Clay table flow and prepares Smartlead campaign setup.">Clay + Smartlead</span>
-      <span class="lane-chip" data-tooltip="Needs Render env setup plus the Clay template table before production use.">Needs setup</span>
+      <span class="lane-chip" data-tooltip="Creates or links the Clay table used for this show's outreach workflow.">Clay table</span>
+      <span class="lane-chip" data-tooltip="Prepares the Smartlead campaign side of the workflow.">Email campaign</span>
     </div>
     {% if automation_error %}
     <p class="error-inline">{{ automation_error }}</p>
@@ -214,7 +214,7 @@
           <span>Run days before show</span>
           <input type="number" name="run_offset_days" value="{{ default_offset }}" min="0" max="60" required />
         </label>
-        <button type="submit">Queue One Show for Automation</button>
+        <button type="submit">Add one show</button>
       </form>
 
       <form class="lane-form lane-form-automation-bulk" action="/shows/import" method="post" enctype="multipart/form-data">
@@ -226,7 +226,7 @@
           <span>Run days before show</span>
           <input type="number" name="run_offset_days" value="{{ default_offset }}" min="0" max="60" required />
         </label>
-        <button type="submit">Queue CSV for Automation</button>
+        <button type="submit">Import show CSV</button>
       </form>
     </div>
   </article>
