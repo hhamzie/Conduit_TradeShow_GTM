@@ -869,6 +869,49 @@ def ensure_smartlead_campaign(show: Show) -> SmartleadSyncResult:
         return SmartleadSyncResult("smartlead", "failed", f"Smartlead network error: {exc}")
 
 
+def list_smartlead_campaign_options() -> list[dict[str, object]]:
+    settings = get_settings()
+    if not settings.smartlead_api_key:
+        return []
+
+    try:
+        campaigns = _list_smartlead_campaigns()
+    except httpx.HTTPError:
+        return []
+
+    normalized: list[dict[str, object]] = []
+    for campaign in campaigns:
+        campaign_id = campaign.get("id")
+        if campaign_id is None:
+            continue
+        normalized.append(
+            {
+                "id": int(campaign_id),
+                "name": str(campaign.get("name", "")).strip() or f"Campaign {campaign_id}",
+                "status": str(campaign.get("status", "")).strip(),
+            }
+        )
+    return sorted(normalized, key=lambda item: str(item["name"]).lower())
+
+
+def fetch_smartlead_campaign_option(campaign_id: int) -> dict[str, object] | None:
+    settings = get_settings()
+    if not settings.smartlead_api_key:
+        return None
+
+    try:
+        campaign = _get_smartlead_campaign(campaign_id)
+    except httpx.HTTPError:
+        return None
+    if not campaign:
+        return None
+    return {
+        "id": campaign_id,
+        "name": str(campaign.get("name", "")).strip() or f"Campaign {campaign_id}",
+        "status": str(campaign.get("status", "")).strip(),
+    }
+
+
 def import_ready_rows_to_smartlead(show: Show, lead_rows: list[dict[str, object]]) -> SmartleadSyncResult:
     campaign_result = ensure_smartlead_campaign(show)
     if campaign_result.status != "success":

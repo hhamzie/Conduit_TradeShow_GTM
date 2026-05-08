@@ -11,8 +11,9 @@ from starlette import status
 from app.core.auth import can_manage, require_authenticated
 from app.core.templating import template_context, templates
 from app.database import get_db
-from app.guide_services import create_guide_row, delete_guide_row, update_guide_row
+from app.guide_services import create_guide_row, delete_guide_row, rebuild_trade_show_guides, update_guide_row
 from app.models import ShowGuideRow
+from app.providers import ensure_smartlead_campaign, fetch_smartlead_campaign_option, list_smartlead_campaign_options
 from app.show_guides import build_guide_sheet_views, get_guide_sheet
 from app.show_intelligence import build_show_analysis, build_show_analyses
 from app.services import (
@@ -97,6 +98,7 @@ def show_detail(show_id: int, request: Request, db: Session = Depends(get_db)):
             smartlead_ready_path=smartlead_ready_path,
             notice=build_show_notice(show),
             error_summary=summarize_show_error(show.last_error),
+            smartlead_campaign_options=list_smartlead_campaign_options() if can_manage(request) else [],
         ),
     )
 
@@ -194,6 +196,53 @@ def launch_show_route(show_id: int, request: Request, db: Session = Depends(get_
     return RedirectResponse(f"/shows/{show_id}", status_code=status.HTTP_303_SEE_OTHER)
 
 
+@router.post("/shows/{show_id}/smartlead/setup")
+def configure_smartlead_route(
+    show_id: int,
+    request: Request,
+    campaign_mode: str = Form(...),
+    existing_campaign_id: str = Form(""),
+    db: Session = Depends(get_db),
+):
+    require_authenticated(request)
+    show = _get_show_or_404(db, show_id)
+    mode = campaign_mode.strip().lower()
+
+    if mode == "smart":
+        result = ensure_smartlead_campaign(show)
+        if result.status != "success":
+            raise HTTPException(status_code=400, detail=result.message)
+        show.smartlead_campaign_id = result.campaign_id
+        show.smartlead_campaign_name = result.campaign_name
+        db.commit()
+        request.session["flash_message"] = {
+            "tone": "success",
+            "title": "Smartlead campaign configured.",
+            "detail": result.message,
+        }
+        return RedirectResponse(f"/shows/{show_id}", status_code=status.HTTP_303_SEE_OTHER)
+
+    if mode != "existing":
+        raise HTTPException(status_code=400, detail="Choose a valid Smartlead setup mode.")
+    if not existing_campaign_id.strip().isdigit():
+        raise HTTPException(status_code=400, detail="Enter a valid existing Smartlead campaign ID.")
+
+    campaign_id = int(existing_campaign_id.strip())
+    campaign = fetch_smartlead_campaign_option(campaign_id)
+    if campaign is None:
+        raise HTTPException(status_code=404, detail=f"Smartlead campaign {campaign_id} was not found.")
+
+    show.smartlead_campaign_id = campaign_id
+    show.smartlead_campaign_name = str(campaign["name"])
+    db.commit()
+    request.session["flash_message"] = {
+        "tone": "success",
+        "title": "Smartlead campaign linked.",
+        "detail": f"{show.name} will use Smartlead campaign {show.smartlead_campaign_name} ({campaign_id}).",
+    }
+    return RedirectResponse(f"/shows/{show_id}", status_code=status.HTTP_303_SEE_OTHER)
+
+
 @router.post("/shows/{show_id}/pause")
 def pause_show_route(show_id: int, request: Request, db: Session = Depends(get_db)):
     require_authenticated(request)
@@ -203,6 +252,22 @@ def pause_show_route(show_id: int, request: Request, db: Session = Depends(get_d
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return RedirectResponse(f"/shows/{show_id}", status_code=status.HTTP_303_SEE_OTHER)
+
+
+@router.post("/shows/{show_id}/guide/build")
+def build_trade_show_guide_route(show_id: int, request: Request, db: Session = Depends(get_db)):
+    require_authenticated(request)
+    show = _get_show_or_404(db, show_id)
+    try:
+        company_count, booth_count = rebuild_trade_show_guides(db, show=show)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    request.session["flash_message"] = {
+        "tone": "success",
+        "title": "Trade show guide built.",
+        "detail": f"Created {company_count} company summary rows and {booth_count} booth grouping rows.",
+    }
+    return RedirectResponse(f"/shows/{show_id}#sheet-company_summary", status_code=status.HTTP_303_SEE_OTHER)
 
 
 @router.post("/shows/{show_id}/guide/{sheet_key}/add")

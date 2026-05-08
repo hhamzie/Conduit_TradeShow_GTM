@@ -6,6 +6,8 @@ from app.web.routes.health import healthz
 from app.web.routes.shows import (
     add_guide_row_route,
     approve_show_route,
+    build_trade_show_guide_route,
+    configure_smartlead_route,
     delete_show,
     delete_guide_row_route,
     download_enriched_export,
@@ -60,7 +62,9 @@ __all__ = [
     "approve_show_route",
     "sync_show_from_clay_route",
     "launch_show_route",
+    "configure_smartlead_route",
     "pause_show_route",
+    "build_trade_show_guide_route",
     "add_guide_row_route",
     "update_guide_row_route",
     "delete_guide_row_route",

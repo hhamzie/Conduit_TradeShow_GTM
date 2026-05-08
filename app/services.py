@@ -136,6 +136,46 @@ def _parse_bulk_csv_payload(payload: bytes) -> tuple[list[dict[str, str]], dict[
     return rows, headers
 
 
+def normalize_show_identity_name(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", value.strip().lower()).strip()
+
+
+def normalize_show_identity_url(value: str) -> str:
+    raw_value = value.strip()
+    if not raw_value:
+        return ""
+    candidate = raw_value if "://" in raw_value else f"https://{raw_value}"
+    parsed = urlparse(candidate)
+    host = (parsed.netloc or parsed.path).strip().lower()
+    path = parsed.path.strip().rstrip("/")
+    query = parsed.query.strip()
+    normalized = f"{host}{path}"
+    if query:
+        normalized = f"{normalized}?{query}"
+    return normalized
+
+
+def _find_matching_show(
+    db: Session,
+    *,
+    show_name: str,
+    event_date: date,
+    link: str,
+    exclude_show_id: int | None = None,
+) -> Show | None:
+    normalized_name = normalize_show_identity_name(show_name)
+    normalized_url = normalize_show_identity_url(link)
+    candidates = list(db.scalars(select(Show).where(Show.event_date == event_date)))
+    for candidate in candidates:
+        if exclude_show_id is not None and candidate.id == exclude_show_id:
+            continue
+        if normalize_show_identity_name(candidate.name) == normalized_name:
+            return candidate
+        if normalized_url and normalize_show_identity_url(candidate.source_url) == normalized_url:
+            return candidate
+    return None
+
+
 def upsert_show(
     db: Session,
     *,
@@ -154,8 +194,11 @@ def upsert_show(
     event_date = parse_show_date(event_date_raw)
     run_at = compute_run_at(event_date, run_offset_days)
 
-    existing = db.scalar(
-        select(Show).where(Show.source_url == normalized_link, Show.event_date == event_date)
+    existing = _find_matching_show(
+        db,
+        show_name=normalized_name,
+        event_date=event_date,
+        link=normalized_link,
     )
     if existing is None:
         show = Show(
@@ -173,6 +216,7 @@ def upsert_show(
 
     existing.name = normalized_name
     existing.place = normalized_place
+    existing.source_url = normalized_link
     existing.run_offset_days = run_offset_days
     existing.run_at = run_at
     db.flush()
@@ -300,15 +344,15 @@ def update_show(
         raise ValueError("Show name, date, place, and directory URL are all required.")
 
     event_date = parse_show_date(event_date_raw)
-    existing = db.scalar(
-        select(Show).where(
-            Show.id != show.id,
-            Show.source_url == normalized_link,
-            Show.event_date == event_date,
-        )
+    existing = _find_matching_show(
+        db,
+        show_name=normalized_name,
+        event_date=event_date,
+        link=normalized_link,
+        exclude_show_id=show.id,
     )
     if existing is not None:
-        raise ValueError("Another show already uses that date and source URL.")
+        raise ValueError("Another show with the same date, name, or directory link already exists.")
 
     show.name = normalized_name
     show.place = normalized_place
@@ -743,6 +787,7 @@ def register_bulk_shows(
     updated = 0
     skipped = 0
     queued_shows: list[QueuedBulkShow] = []
+    seen_upload_keys: set[tuple[str, str, str]] = set()
 
     for row in rows:
         show_name = (row.get(headers["show"]) or "").strip()
@@ -753,6 +798,17 @@ def register_bulk_shows(
         if not (show_name and event_date_raw and place and link):
             skipped += 1
             continue
+
+        event_date = parse_show_date(event_date_raw)
+        dedupe_key = (
+            event_date.isoformat(),
+            normalize_show_identity_name(show_name),
+            normalize_show_identity_url(link),
+        )
+        if dedupe_key in seen_upload_keys:
+            skipped += 1
+            continue
+        seen_upload_keys.add(dedupe_key)
 
         show, created_now = upsert_show(
             db,

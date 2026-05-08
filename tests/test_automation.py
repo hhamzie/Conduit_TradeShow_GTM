@@ -227,6 +227,36 @@ class AutomationTests(unittest.TestCase):
             self.assertEqual(len(show.runs), 1)
             self.assertEqual(show.runs[0].status, RunStatus.success.value)
 
+    def test_upsert_show_reuses_existing_record_for_same_name_and_date(self) -> None:
+        with self.Session() as session:
+            first_show, first_created = upsert_show(
+                session,
+                show_name="International Contemporary Furniture Fair",
+                event_date_raw="2026-05-17",
+                place="New York, NY",
+                link="https://example.com/icff",
+                run_offset_days=14,
+            )
+            session.commit()
+
+            second_show, second_created = upsert_show(
+                session,
+                show_name="International Contemporary Furniture Fair",
+                event_date_raw="2026-05-17",
+                place="Javits Center, New York, NY",
+                link="https://another.example.com/icff",
+                run_offset_days=21,
+            )
+            session.commit()
+
+            self.assertTrue(first_created)
+            self.assertFalse(second_created)
+            self.assertEqual(first_show.id, second_show.id)
+            self.assertEqual(second_show.place, "Javits Center, New York, NY")
+            self.assertEqual(second_show.run_offset_days, 21)
+            shows = session.scalars(select(Show)).all()
+            self.assertEqual(len(shows), 1)
+
     def test_run_show_scrape_marks_show_failed_when_scrape_raises(self) -> None:
         with self.Session() as session:
             show, _ = upsert_show(
@@ -400,6 +430,26 @@ class AutomationTests(unittest.TestCase):
             self.assertEqual(len(remaining_shows), 1)
             self.assertEqual(remaining_shows[0].name, "Luxe Pack")
 
+    def test_register_bulk_shows_skips_duplicate_rows_in_same_upload(self) -> None:
+        payload = "\n".join(
+            [
+                "Show,Date,Place,Link",
+                "ICFF,2026-05-17,New York,https://example.com/icff",
+                "ICFF,2026-05-17,New York,https://example.com/icff",
+                "ICFF,2026-05-17,New York,https://example.com/icff?sort=desc",
+            ]
+        ).encode("utf-8")
+
+        with self.Session() as session:
+            summary, queued_shows = register_bulk_shows(session, payload, 14)
+
+            self.assertEqual(summary.created, 1)
+            self.assertEqual(summary.updated, 1)
+            self.assertEqual(summary.skipped, 1)
+            self.assertEqual(len(queued_shows), 2)
+            shows = session.scalars(select(Show)).all()
+            self.assertEqual(len(shows), 1)
+
     def test_bulk_scrape_route_starts_background_job(self) -> None:
         async def run_test() -> None:
             try:
@@ -487,6 +537,95 @@ class AutomationTests(unittest.TestCase):
         import asyncio
 
         asyncio.run(run_test())
+
+    def test_configure_smartlead_route_smart_mode_links_or_creates_campaign(self) -> None:
+        from app.main import configure_smartlead_route
+
+        request = type("Req", (), {"session": {}})()
+        with self.Session() as session:
+            show = make_show()
+            session.add(show)
+            session.commit()
+
+            with (
+                patch("app.web.routes.shows.require_authenticated"),
+                patch(
+                    "app.web.routes.shows.ensure_smartlead_campaign",
+                    return_value=SmartleadSyncResult(
+                        name="smartlead",
+                        status="success",
+                        message="Attached to matching campaign.",
+                        campaign_id=654,
+                        campaign_name="ICFF Smart",
+                    ),
+                ),
+            ):
+                response = configure_smartlead_route(
+                    show_id=show.id,
+                    request=request,
+                    campaign_mode="smart",
+                    existing_campaign_id="",
+                    db=session,
+                )
+
+            self.assertEqual(response.status_code, 303)
+            self.assertEqual(response.headers["location"], f"/shows/{show.id}")
+            self.assertEqual(show.smartlead_campaign_id, 654)
+            self.assertEqual(show.smartlead_campaign_name, "ICFF Smart")
+            self.assertEqual(request.session["flash_message"]["title"], "Smartlead campaign configured.")
+
+    def test_configure_smartlead_route_existing_mode_links_selected_campaign(self) -> None:
+        from app.main import configure_smartlead_route
+
+        request = type("Req", (), {"session": {}})()
+        with self.Session() as session:
+            show = make_show()
+            session.add(show)
+            session.commit()
+
+            with (
+                patch("app.web.routes.shows.require_authenticated"),
+                patch(
+                    "app.web.routes.shows.fetch_smartlead_campaign_option",
+                    return_value={"id": 321, "name": "ICFF Buyers"},
+                ),
+            ):
+                response = configure_smartlead_route(
+                    show_id=show.id,
+                    request=request,
+                    campaign_mode="existing",
+                    existing_campaign_id="321",
+                    db=session,
+                )
+
+            self.assertEqual(response.status_code, 303)
+            self.assertEqual(show.smartlead_campaign_id, 321)
+            self.assertEqual(show.smartlead_campaign_name, "ICFF Buyers")
+            self.assertEqual(request.session["flash_message"]["title"], "Smartlead campaign linked.")
+
+    def test_build_trade_show_guide_route_populates_rows_from_export(self) -> None:
+        from app.main import build_trade_show_guide_route
+
+        request = type("Req", (), {"session": {}})()
+        with self.Session() as session:
+            show = make_show(latest_export_path="/tmp/export.csv")
+            session.add(show)
+            session.commit()
+
+            with (
+                patch("app.web.routes.shows.require_authenticated"),
+                patch("app.web.routes.shows.rebuild_trade_show_guides", return_value=(5, 5)) as rebuild_mock,
+            ):
+                response = build_trade_show_guide_route(
+                    show_id=show.id,
+                    request=request,
+                    db=session,
+                )
+
+            self.assertEqual(response.status_code, 303)
+            self.assertEqual(response.headers["location"], f"/shows/{show.id}#sheet-company_summary")
+            self.assertEqual(rebuild_mock.call_count, 1)
+            self.assertEqual(request.session["flash_message"]["title"], "Trade show guide built.")
 
 
 if __name__ == "__main__":

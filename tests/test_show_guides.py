@@ -2,12 +2,13 @@ from __future__ import annotations
 
 from datetime import date, datetime
 import unittest
+from unittest.mock import patch
 
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
 from app.database import Base
-from app.guide_services import create_guide_row, delete_guide_row, update_guide_row
+from app.guide_services import create_guide_row, delete_guide_row, rebuild_trade_show_guides, update_guide_row
 from app.models import Show, ShowGuideRow, ShowStatus
 from app.show_guides import build_guide_sheet_views
 
@@ -81,6 +82,53 @@ class ShowGuideTests(unittest.TestCase):
             self.assertEqual(views[0].definition.key, "company_summary")
             self.assertEqual(views[0].rows[0].values["company_name"], "Fiserv")
             self.assertEqual(views[1].rows[0].values["booth_category"], "100s")
+
+    def test_rebuild_trade_show_guides_populates_both_sheets_from_export(self) -> None:
+        with self.Session() as session:
+            show = make_show(
+                latest_export_path="/tmp/icff.csv",
+            )
+            session.add(show)
+            session.commit()
+
+            create_guide_row(session, show=show, sheet_key="company_summary", payload={"company_name": "Old Row"})
+
+            with patch(
+                "app.guide_services._load_company_rows",
+                return_value=[
+                    {
+                        "company_name": "Acme",
+                        "booth_number": "3254",
+                        "website_url": "https://acme.com",
+                    },
+                    {
+                        "company_name": "Beta",
+                        "booth_number": "118",
+                        "website_url": "",
+                    },
+                ],
+            ):
+                company_count, booth_count = rebuild_trade_show_guides(session, show=show)
+
+            self.assertEqual(company_count, 2)
+            self.assertEqual(booth_count, 2)
+            rows = session.scalars(
+                select(ShowGuideRow).where(ShowGuideRow.show_id == show.id).order_by(
+                    ShowGuideRow.sheet_key.asc(),
+                    ShowGuideRow.position.asc(),
+                )
+            ).all()
+            self.assertEqual(len(rows), 4)
+            rows_by_sheet = {
+                sheet_key: [row for row in rows if row.sheet_key == sheet_key]
+                for sheet_key in {"company_summary", "booth_category_groups"}
+            }
+            self.assertIn('"company_name": "Acme"', rows_by_sheet["company_summary"][0].values_json)
+            self.assertIn('"booth_category": "3200s"', rows_by_sheet["company_summary"][0].values_json)
+            self.assertIn(
+                '"category_total_team_size": "1"',
+                rows_by_sheet["booth_category_groups"][0].values_json,
+            )
 
 
 if __name__ == "__main__":

@@ -204,6 +204,12 @@
       <button type="submit">Approve Launch</button>
     </form>
     {% endif %}
+    {% if not show.smartlead_campaign_id %}
+    <form action="/shows/{{ show.id }}/smartlead/setup" method="post">
+      <input type="hidden" name="campaign_mode" value="smart" />
+      <button type="submit">Smart Setup Smartlead</button>
+    </form>
+    {% endif %}
     {% if show.status == "approved" %}
     <form action="/shows/{{ show.id }}/launch" method="post">
       <button type="submit">Launch Campaign</button>
@@ -232,6 +238,41 @@
     </details>
     {% endif %}
   </div>
+
+  {% if can_manage %}
+  <div class="detail-card detail-stack">
+    <h2>Smartlead Campaign Setup</h2>
+    <p class="muted">Choose whether this show should use the recommended Smartlead setup or attach to an existing campaign.</p>
+    <div class="smartlead-setup-grid">
+      <form class="smartlead-config-card" action="/shows/{{ show.id }}/smartlead/setup" method="post">
+        <input type="hidden" name="campaign_mode" value="smart" />
+        <h3>Smart Setup</h3>
+        <p class="muted">Recommended. Reuse the exact matching campaign for this show if it already exists, otherwise make a new one.</p>
+        <button type="submit">Reuse Match or Make One</button>
+      </form>
+      <form class="smartlead-config-card" action="/shows/{{ show.id }}/smartlead/setup" method="post">
+        <input type="hidden" name="campaign_mode" value="existing" />
+        <h3>Use Existing Campaign</h3>
+        <p class="muted">Attach this trade show to a campaign that already exists in Smartlead.</p>
+        <label>
+          <span>Existing campaign ID</span>
+          <input type="number" name="existing_campaign_id" min="1" placeholder="123456" required />
+        </label>
+        <button type="submit">Attach Existing Campaign</button>
+      </form>
+    </div>
+    {% if smartlead_campaign_options %}
+    <div class="smartlead-campaign-list">
+      <h3>Available Smartlead Campaigns</h3>
+      <ul class="simple-list">
+        {% for campaign in smartlead_campaign_options[:8] %}
+        <li>{{ campaign.name }} ({{ campaign.id }}){% if campaign.status %} · {{ campaign.status }}{% endif %}</li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% endif %}
+  </div>
+  {% endif %}
 </section>
 
 <section class="panel">
@@ -240,6 +281,11 @@
       <h2>Guide Sheets</h2>
       <p>DB-backed sheets for show-specific targets, booth groupings, and operator notes.</p>
     </div>
+    {% if can_manage %}
+    <form action="/shows/{{ show.id }}/guide/build" method="post">
+      <button type="submit">Make Trade Show Guide</button>
+    </form>
+    {% endif %}
   </div>
 
   <div class="guide-sheet-stack">

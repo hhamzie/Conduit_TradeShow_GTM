@@ -524,6 +524,22 @@ button.button.subtle {
   gap: 14px;
 }
 
+.smartlead-setup-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 16px;
+}
+
+.smartlead-config-card,
+.smartlead-campaign-list {
+  padding: 16px;
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.7);
+  display: grid;
+  gap: 12px;
+}
+
 .edit-show-form {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
