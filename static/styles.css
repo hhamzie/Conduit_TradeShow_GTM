@@ -1186,6 +1186,202 @@ button.button.subtle {
   margin-top: 14px;
 }
 
+.sheet-workspace-panel {
+  padding: 20px;
+}
+
+.sheet-workspace-head {
+  margin-bottom: 16px;
+}
+
+.sheet-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: rgba(250, 252, 255, 0.9);
+}
+
+.sheet-toolbar-stat {
+  display: grid;
+  gap: 2px;
+  min-width: 120px;
+}
+
+.sheet-toolbar-stat span {
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.sheet-toolbar-stat strong {
+  font-size: 1rem;
+}
+
+.sheet-toolbar-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-left: auto;
+}
+
+.sheet-toolbar-links a {
+  color: var(--accent-dark);
+  text-decoration: none;
+  font-weight: 700;
+}
+
+.sheet-tab-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.sheet-tab {
+  display: inline-flex;
+  align-items: center;
+  padding: 9px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: rgba(247, 250, 255, 0.9);
+  color: var(--ink-soft);
+  text-decoration: none;
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.sheet-tab.is-active,
+.sheet-tab:hover {
+  color: var(--accent-dark);
+  border-color: rgba(47, 109, 246, 0.18);
+  background: rgba(47, 109, 246, 0.08);
+}
+
+.sheet-stack {
+  display: grid;
+  gap: 18px;
+}
+
+.spreadsheet-section {
+  display: grid;
+  gap: 12px;
+}
+
+.spreadsheet-meta {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.spreadsheet-frame {
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: white;
+  overflow: hidden;
+}
+
+.spreadsheet-scroll {
+  overflow: auto;
+  max-height: min(72vh, 820px);
+}
+
+.spreadsheet-table {
+  width: max-content;
+  min-width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.spreadsheet-table th,
+.spreadsheet-table td {
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  padding: 0;
+  background: white;
+  vertical-align: top;
+}
+
+.spreadsheet-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  padding: 10px 12px;
+  background: #f7faff;
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.spreadsheet-table .sheet-index-head,
+.spreadsheet-table .sheet-row-index {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  width: 54px;
+  min-width: 54px;
+  text-align: center;
+  background: #f7faff;
+}
+
+.spreadsheet-table thead .sheet-index-head {
+  z-index: 4;
+}
+
+.spreadsheet-table .sheet-row-index {
+  padding: 10px 8px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--muted);
+  border-right: 1px solid var(--line);
+}
+
+.spreadsheet-table td:not(.sheet-row-index) {
+  min-width: 168px;
+}
+
+.spreadsheet-table td > input {
+  min-width: 168px;
+  width: 100%;
+  border: 0;
+  border-radius: 0;
+  padding: 12px 12px;
+  background: transparent;
+  box-shadow: none;
+}
+
+.spreadsheet-table td > input:focus {
+  outline: 2px solid rgba(47, 109, 246, 0.18);
+  outline-offset: -2px;
+  background: rgba(47, 109, 246, 0.03);
+}
+
+.spreadsheet-table td:not(.spreadsheet-actions-cell):not(.sheet-row-index) {
+  padding: 10px 12px;
+  font-size: 0.94rem;
+  line-height: 1.4;
+}
+
+.spreadsheet-actions-cell {
+  min-width: 150px;
+  padding: 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  position: sticky;
+  right: 0;
+  background: white;
+}
+
 @media (max-width: 960px) {
   .hero-grid,
   .lane-grid,

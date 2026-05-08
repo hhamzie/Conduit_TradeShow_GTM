@@ -1,15 +1,17 @@
 {% extends "base.html" %}
 
 {% block content %}
-<section class="panel">
-  <div class="panel-head">
+<section class="panel sheet-workspace-panel">
+  <div class="panel-head sheet-workspace-head">
     <div>
-      <h1>{{ show.name }} Guide</h1>
-      <p>{{ show.place }} · {{ show.event_date }}</p>
+      <p class="hero-kicker">Guide Workbook</p>
+      <h1>{{ show.name }}</h1>
+      <p class="muted">{{ show.event_date }} · Workbook-backed sheet view</p>
     </div>
     <div class="panel-head-actions">
       <a class="button secondary" href="/shows/dashboard">Dashboard</a>
       <a class="button secondary" href="/shows/{{ show.id }}">Profile</a>
+      <a class="button secondary" href="/shows/{{ show.id }}/guide/download">Download Workbook</a>
       {% if can_manage %}
       <form class="workbook-upload-form" action="/shows/{{ show.id }}/guide/upload" method="post" enctype="multipart/form-data" data-auto-submit-file-form>
         <input class="visually-hidden-file" id="guide-workbook-top" type="file" name="workbook" accept=".xlsx,.xlsm" required />
@@ -19,99 +21,103 @@
     </div>
   </div>
 
-  <div class="guide-summary-grid">
-    <article class="detail-card">
-      <h2>Guide Score</h2>
-      <p><span class="rating-pill rating-{{ analysis.guide_score_slug }}">{{ analysis.guide_score_label }}</span></p>
-      <p><strong>{{ analysis.guide_score }}/100</strong></p>
-    </article>
-    <article class="detail-card">
-      <h2>Team Signal</h2>
-      <p><strong>{{ analysis.guide_people_total }}</strong> sales + support reps</p>
-      <p class="muted">{{ analysis.guide_company_count }} guide companies · {{ "%.1f"|format(analysis.guide_average_people_per_company) }} avg</p>
-    </article>
-    <article class="detail-card">
-      <h2>Links</h2>
-      <p><a href="{{ show.source_url }}" target="_blank" rel="noreferrer">Source directory</a></p>
+  <div class="sheet-toolbar">
+    <div class="sheet-toolbar-stat">
+      <span>Score</span>
+      <strong>{{ analysis.guide_score }}/100</strong>
+    </div>
+    <div class="sheet-toolbar-stat">
+      <span>Guide Companies</span>
+      <strong>{{ analysis.guide_company_count }}</strong>
+    </div>
+    <div class="sheet-toolbar-stat">
+      <span>Sales + Support</span>
+      <strong>{{ analysis.guide_people_total }}</strong>
+    </div>
+    <div class="sheet-toolbar-links">
+      <a href="{{ show.source_url }}" target="_blank" rel="noreferrer">Source</a>
       {% if show.clay_table_url %}
-      <p><a href="{{ show.clay_table_url }}" target="_blank" rel="noreferrer">Clay table</a></p>
+      <a href="{{ show.clay_table_url }}" target="_blank" rel="noreferrer">Clay</a>
       {% endif %}
       {% if show.smartlead_campaign_id %}
-      <p><a href="{{ smartlead_campaign_url }}" target="_blank" rel="noreferrer">Smartlead campaign</a></p>
+      <a href="{{ smartlead_campaign_url }}" target="_blank" rel="noreferrer">Smartlead</a>
       {% endif %}
-    </article>
+    </div>
   </div>
 </section>
 
-<section class="panel">
-  <div class="panel-head">
-    <div>
-      <h2>Guide Sheets</h2>
-      <p>Workbook-backed sheet in the website. Edit cells here or replace the workbook.</p>
-    </div>
-    {% if can_manage %}
-    <form class="workbook-upload-form" action="/shows/{{ show.id }}/guide/upload" method="post" enctype="multipart/form-data" data-auto-submit-file-form>
-      <input class="visually-hidden-file" id="guide-workbook-panel" type="file" name="workbook" accept=".xlsx,.xlsm" required />
-      <label class="button secondary" for="guide-workbook-panel">{% if analysis.guide_company_count > 0 %}Replace Workbook{% else %}Upload Workbook{% endif %}</label>
-    </form>
-    {% endif %}
+<section class="panel sheet-workspace-panel">
+  <div class="sheet-tab-strip" role="tablist" aria-label="Guide sheets">
+    {% for sheet in guide_sheets %}
+    <a class="sheet-tab{% if loop.first %} is-active{% endif %}" href="#sheet-{{ sheet.definition.key }}">{{ sheet.definition.label }}</a>
+    {% endfor %}
   </div>
 
-  <div class="guide-sheet-stack">
+  <div class="sheet-stack">
     {% for sheet in guide_sheets %}
-    <section class="guide-sheet-card" id="sheet-{{ sheet.definition.key }}">
-      <div class="guide-sheet-head">
+    <section class="spreadsheet-section" id="sheet-{{ sheet.definition.key }}">
+      <div class="spreadsheet-meta">
         <div>
-          <h3>{{ sheet.definition.label }}</h3>
+          <h2>{{ sheet.definition.label }}</h2>
           <p class="muted">{{ sheet.definition.description }}</p>
         </div>
         <span class="sheet-count">{{ sheet.rows|length }} row(s)</span>
       </div>
 
-      <div class="table-wrap">
-        <table class="guide-table">
-          <thead>
-            <tr>
-              {% for field in sheet.definition.fields %}
-              <th>{{ field.label }}</th>
-              {% endfor %}
+      <div class="spreadsheet-frame">
+        <div class="spreadsheet-scroll">
+          <table class="spreadsheet-table">
+            <thead>
+              <tr>
+                <th class="sheet-index-head">#</th>
+                {% for field in sheet.definition.fields %}
+                <th>{{ field.label }}</th>
+                {% endfor %}
+                {% if can_manage %}
+                <th class="sheet-actions-head">Actions</th>
+                {% endif %}
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in sheet.rows %}
               {% if can_manage %}
-              <th>Actions</th>
+              {% set form_id = "guide-row-" ~ row.id %}
+              <form id="{{ form_id }}" action="/shows/{{ show.id }}/guide/{{ row.id }}/update" method="post"></form>
+              <tr>
+                <td class="sheet-row-index">{{ loop.index }}</td>
+                {% for field in sheet.definition.fields %}
+                <td>
+                  <input
+                    type="{{ field.input_type }}"
+                    name="{{ field.key }}"
+                    value="{{ row.values.get(field.key, '') }}"
+                    placeholder="{{ field.placeholder }}"
+                    form="{{ form_id }}"
+                  />
+                </td>
+                {% endfor %}
+                <td class="spreadsheet-actions-cell">
+                  <button class="button subtle" type="submit" form="{{ form_id }}">Save</button>
+                  <button class="button danger subtle" type="submit" form="{{ form_id }}" formaction="/shows/{{ show.id }}/guide/{{ row.id }}/delete" onclick="return confirm('Delete this guide row?');">Delete</button>
+                </td>
+              </tr>
+              {% else %}
+              <tr>
+                <td class="sheet-row-index">{{ loop.index }}</td>
+                {% for field in sheet.definition.fields %}
+                <td>{{ row.values.get(field.key, "") or "-" }}</td>
+                {% endfor %}
+              </tr>
               {% endif %}
-            </tr>
-          </thead>
-          <tbody>
-            {% for row in sheet.rows %}
-            {% if can_manage %}
-            {% set form_id = "guide-row-" ~ row.id %}
-            <form id="{{ form_id }}" action="/shows/{{ show.id }}/guide/{{ row.id }}/update" method="post"></form>
-            <tr>
-              {% for field in sheet.definition.fields %}
-              <td>
-                <input type="{{ field.input_type }}" name="{{ field.key }}" value="{{ row.values.get(field.key, '') }}" placeholder="{{ field.placeholder }}" form="{{ form_id }}" />
-              </td>
+              {% else %}
+              <tr>
+                <td colspan="{{ sheet.definition.fields|length + (2 if can_manage else 1) }}" class="empty">No rows in this sheet yet.</td>
+              </tr>
               {% endfor %}
-              <td class="guide-actions-cell">
-                <button class="button subtle" type="submit" form="{{ form_id }}">Save</button>
-                <button class="button danger subtle" type="submit" form="{{ form_id }}" formaction="/shows/{{ show.id }}/guide/{{ row.id }}/delete" onclick="return confirm('Delete this guide row?');">Delete</button>
-              </td>
-            </tr>
-            {% else %}
-            <tr>
-              {% for field in sheet.definition.fields %}
-              <td>{{ row.values.get(field.key, "") or "-" }}</td>
-              {% endfor %}
-            </tr>
-            {% endif %}
-            {% else %}
-            <tr>
-              <td colspan="{{ sheet.definition.fields|length + (1 if can_manage else 0) }}" class="empty">No rows yet.</td>
-            </tr>
-            {% endfor %}
-          </tbody>
-        </table>
+            </tbody>
+          </table>
+        </div>
       </div>
-
     </section>
     {% endfor %}
   </div>

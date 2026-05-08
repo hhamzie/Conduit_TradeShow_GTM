@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from collections import Counter
 from io import BytesIO
+import json
 import re
 
-from openpyxl import load_workbook
+from openpyxl import Workbook, load_workbook
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -150,6 +151,39 @@ def import_trade_show_guide_workbook(db: Session, *, show: Show, workbook_bytes:
     db.commit()
 
     return {sheet_key: len(rows) for sheet_key, rows in imported_rows.items()}
+
+
+def export_trade_show_guide_workbook(show: Show) -> bytes:
+    workbook = Workbook()
+    default_sheet = workbook.active
+    workbook.remove(default_sheet)
+
+    workbook_rows = [row for row in show.guide_rows if row.source == "workbook"]
+    rows_by_sheet: dict[str, list[ShowGuideRow]] = {key: [] for key in GUIDE_SHEETS}
+    for row in workbook_rows:
+        if row.sheet_key in rows_by_sheet:
+            rows_by_sheet[row.sheet_key].append(row)
+
+    for sheet_key, definition in GUIDE_SHEETS.items():
+        worksheet = workbook.create_sheet(definition.label)
+        worksheet.append([field.label for field in definition.fields])
+        for guide_row in sorted(rows_by_sheet[sheet_key], key=lambda item: (item.position, item.id)):
+            values = normalize_guide_values(sheet_key, _deserialize_values(guide_row.values_json))
+            worksheet.append([values.get(field.key, "") for field in definition.fields])
+
+    buffer = BytesIO()
+    workbook.save(buffer)
+    return buffer.getvalue()
+
+
+def _deserialize_values(raw_values: str) -> dict[str, object]:
+    try:
+        payload = json.loads(raw_values or "{}")
+    except Exception:  # noqa: BLE001
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+    return payload
 
 
 def rebuild_trade_show_guides(db: Session, *, show: Show) -> tuple[int, int]:

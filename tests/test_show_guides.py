@@ -5,7 +5,7 @@ from io import BytesIO
 import unittest
 from unittest.mock import patch
 
-from openpyxl import Workbook
+from openpyxl import Workbook, load_workbook
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
@@ -13,6 +13,7 @@ from app.database import Base
 from app.guide_services import (
     create_guide_row,
     delete_guide_row,
+    export_trade_show_guide_workbook,
     import_trade_show_guide_workbook,
     rebuild_trade_show_guides,
     update_guide_row,
@@ -231,6 +232,19 @@ class ShowGuideTests(unittest.TestCase):
             rows = session.scalars(select(ShowGuideRow).where(ShowGuideRow.show_id == show.id)).all()
             self.assertEqual(len(rows), 2)
             self.assertTrue(any("Fiserv" in row.values_json for row in rows))
+
+    def test_export_trade_show_guide_workbook_returns_xlsx_bytes(self) -> None:
+        with self.Session() as session:
+            show = make_show()
+            session.add(show)
+            session.commit()
+
+            import_trade_show_guide_workbook(session, show=show, workbook_bytes=build_workbook_bytes())
+            workbook_bytes = export_trade_show_guide_workbook(show)
+
+            self.assertTrue(workbook_bytes.startswith(b"PK"))
+            workbook = load_workbook(BytesIO(workbook_bytes))
+            self.assertEqual(workbook.sheetnames, ["Company Summary", "Booth Category Groups"])
 
 
 if __name__ == "__main__":

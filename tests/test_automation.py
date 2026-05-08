@@ -714,6 +714,26 @@ class AutomationTests(unittest.TestCase):
 
         asyncio.run(run_test())
 
+    def test_download_guide_workbook_route_returns_xlsx(self) -> None:
+        from app.main import download_guide_workbook
+        from app.guide_services import import_trade_show_guide_workbook
+        from starlette.requests import Request
+
+        request = Request({"type": "http", "method": "GET", "path": "/shows/1/guide/download", "headers": []})
+        with self.Session() as session:
+            show = make_show()
+            session.add(show)
+            session.commit()
+            import_trade_show_guide_workbook(session, show=show, workbook_bytes=build_guide_workbook_file())
+
+            response = download_guide_workbook(show_id=show.id, request=request, db=session)
+
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(
+                response.media_type,
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

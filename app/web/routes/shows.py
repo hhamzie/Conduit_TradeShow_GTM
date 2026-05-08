@@ -4,7 +4,7 @@ from datetime import datetime
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import FileResponse, RedirectResponse, Response
 from sqlalchemy.orm import Session
 from starlette import status
 
@@ -14,6 +14,7 @@ from app.database import get_db
 from app.guide_services import (
     create_guide_row,
     delete_guide_row,
+    export_trade_show_guide_workbook,
     import_trade_show_guide_workbook,
     rebuild_trade_show_guides,
     update_guide_row,
@@ -137,6 +138,21 @@ def show_guide(show_id: int, request: Request, db: Session = Depends(get_db)):
             guide_sheets=build_guide_sheet_views(show),
             smartlead_campaign_url=_smartlead_campaign_url(show.smartlead_campaign_id),
         ),
+    )
+
+
+@router.get("/shows/{show_id}/guide/download")
+def download_guide_workbook(show_id: int, request: Request, db: Session = Depends(get_db)):
+    show = _get_show_or_404(db, show_id)
+    workbook_bytes = export_trade_show_guide_workbook(show)
+    filename = f"{show.name.strip().replace('/', '-').replace(' ', '-')}_guide.xlsx"
+    headers = {
+        "Content-Disposition": f'attachment; filename="{filename}"',
+    }
+    return Response(
+        content=workbook_bytes,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers=headers,
     )
 
 
