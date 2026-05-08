@@ -116,22 +116,22 @@
         <strong>{{ analysis.exhibitor_count }}</strong>
       </div>
       <div class="metric-tile">
-        <span>Website Coverage</span>
+        <span>Websites</span>
         <strong>{{ analysis.website_coverage_percent }}%</strong>
       </div>
       <div class="metric-tile">
-        <span>Booth Coverage</span>
+        <span>Booths</span>
         <strong>{{ analysis.booth_coverage_percent }}%</strong>
       </div>
       <div class="metric-tile">
         <span>Timing</span>
-        <strong>{% if analysis.days_until_event >= 0 %}{{ analysis.days_until_event }} day(s) out{% else %}{{ analysis.days_until_event | abs }} day(s) ago{% endif %}</strong>
+        <strong>{% if analysis.days_until_event >= 0 %}{{ analysis.days_until_event }}d out{% else %}{{ analysis.days_until_event | abs }}d ago{% endif %}</strong>
       </div>
     </div>
 
     <div class="analysis-columns">
       <div class="analysis-column">
-        <h3>Why It Could Be Worth Visiting</h3>
+        <h3>Why</h3>
         <ul class="simple-list">
           {% for item in analysis.reasons %}
           <li>{{ item }}</li>
@@ -150,7 +150,7 @@
 
     <div class="playbook-grid">
       <article class="playbook-card">
-        <h3>Who To Meet</h3>
+        <h3>Meet</h3>
         <ul class="simple-list">
           {% for item in analysis.who_to_meet %}
           <li>{{ item }}</li>
@@ -158,7 +158,7 @@
         </ul>
       </article>
       <article class="playbook-card">
-        <h3>Questions To Ask</h3>
+        <h3>Ask</h3>
         <ul class="simple-list">
           {% for item in analysis.questions_to_ask %}
           <li>{{ item }}</li>
@@ -166,7 +166,7 @@
         </ul>
       </article>
       <article class="playbook-card">
-        <h3>Capture On The Floor</h3>
+        <h3>Capture</h3>
         <ul class="simple-list">
           {% for item in analysis.capture_checklist %}
           <li>{{ item }}</li>
@@ -210,6 +210,11 @@
       <button type="submit">Smart Setup Smartlead</button>
     </form>
     {% endif %}
+    {% if export_path %}
+    <form action="/shows/{{ show.id }}/guide/build" method="post">
+      <button type="submit">Build Guide</button>
+    </form>
+    {% endif %}
     {% if show.status == "approved" %}
     <form action="/shows/{{ show.id }}/launch" method="post">
       <button type="submit">Launch Campaign</button>
@@ -242,18 +247,18 @@
   {% if can_manage %}
   <div class="detail-card detail-stack">
     <h2>Smartlead Campaign Setup</h2>
-    <p class="muted">Choose whether this show should use the recommended Smartlead setup or attach to an existing campaign.</p>
+    <p class="muted">Use the smart option by default. Only attach manually if you already know the campaign.</p>
     <div class="smartlead-setup-grid">
       <form class="smartlead-config-card" action="/shows/{{ show.id }}/smartlead/setup" method="post">
         <input type="hidden" name="campaign_mode" value="smart" />
         <h3>Smart Setup</h3>
-        <p class="muted">Recommended. Reuse the exact matching campaign for this show if it already exists, otherwise make a new one.</p>
+        <p class="muted">Recommended. Reuse the match or create a new one.</p>
         <button type="submit">Reuse Match or Make One</button>
       </form>
       <form class="smartlead-config-card" action="/shows/{{ show.id }}/smartlead/setup" method="post">
         <input type="hidden" name="campaign_mode" value="existing" />
         <h3>Use Existing Campaign</h3>
-        <p class="muted">Attach this trade show to a campaign that already exists in Smartlead.</p>
+        <p class="muted">Attach this show to a known Smartlead campaign.</p>
         <label>
           <span>Existing campaign ID</span>
           <input type="number" name="existing_campaign_id" min="1" placeholder="123456" required />
@@ -279,11 +284,11 @@
   <div class="panel-head">
     <div>
       <h2>Guide Sheets</h2>
-      <p>DB-backed sheets for show-specific targets, booth groupings, and operator notes.</p>
+      <p>Editable guide rows stored in the database.</p>
     </div>
     {% if can_manage %}
     <form action="/shows/{{ show.id }}/guide/build" method="post">
-      <button type="submit">Make Trade Show Guide</button>
+      <button type="submit">Build Guide</button>
     </form>
     {% endif %}
   </div>
@@ -366,7 +371,7 @@
   <div class="panel-head">
     <div>
       <h2>Company Profiles</h2>
-      <p>{{ analysis.export_company_count }} company row(s) in the current export{% if analysis.company_profiles %} · showing {{ analysis.company_profiles|length }} prioritized profile(s){% endif %}</p>
+      <p>{{ analysis.export_company_count }} rows{% if analysis.company_profiles %} · showing top {{ analysis.company_profiles|length }}{% endif %}</p>
     </div>
   </div>
 
@@ -390,7 +395,7 @@
       <p class="company-rationale">{{ company.rationale }}</p>
       <div class="company-guide-grid">
         <div>
-          <h4>Who To Meet</h4>
+          <h4>Meet</h4>
           <ul class="simple-list">
             {% for item in company.who_to_meet %}
             <li>{{ item }}</li>
@@ -420,7 +425,7 @@
   {% else %}
   <div class="empty-state">
     <h3>No company profiles yet</h3>
-    <p>Run the show scrape first. The export CSV becomes the source for these profile guides.</p>
+    <p>Run the scrape first. Then build the guide.</p>
   </div>
   {% endif %}
 </section>

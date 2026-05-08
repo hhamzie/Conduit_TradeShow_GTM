@@ -69,7 +69,7 @@ THEME_PLAYBOOKS: dict[str, ThemePlaybook] = {
     "packaging": ThemePlaybook(
         key="packaging",
         label="Packaging",
-        summary="Prioritize supplier discovery, packaging innovation, and practical sourcing conversations.",
+        summary="Packaging: source suppliers and qualify execution fast.",
         roles=("Packaging lead", "Procurement owner", "Brand operations", "Product development"),
         questions=(
             "What is your fastest production lead time?",
@@ -81,7 +81,7 @@ THEME_PLAYBOOKS: dict[str, ThemePlaybook] = {
     "beauty": ThemePlaybook(
         key="beauty",
         label="Beauty",
-        summary="Focus on buyer demand, retail traction, and differentiated product positioning.",
+        summary="Beauty: check traction, channel fit, and hero products.",
         roles=("Retail partnerships", "Brand founder", "Sales director", "Distribution lead"),
         questions=(
             "Which retailers or channels are driving growth right now?",
@@ -93,7 +93,7 @@ THEME_PLAYBOOKS: dict[str, ThemePlaybook] = {
     "food_beverage": ThemePlaybook(
         key="food_beverage",
         label="Food & Beverage",
-        summary="Look for products with strong distribution readiness, certifications, and shelf pull.",
+        summary="Food & Beverage: validate distribution, compliance, and shelf pull.",
         roles=("Sales lead", "Distributor partnerships", "Category manager", "Operations lead"),
         questions=(
             "What distribution footprint do you already have?",
@@ -105,7 +105,7 @@ THEME_PLAYBOOKS: dict[str, ThemePlaybook] = {
     "furniture_design": ThemePlaybook(
         key="furniture_design",
         label="Furniture & Design",
-        summary="Use the floor to identify differentiated collections, showroom readiness, and trade relationships.",
+        summary="Furniture & Design: qualify collections, delivery, and trade support.",
         roles=("Sales rep", "Designer channel lead", "Showroom manager", "Founder"),
         questions=(
             "Which collections are getting the strongest response this season?",
@@ -117,7 +117,7 @@ THEME_PLAYBOOKS: dict[str, ThemePlaybook] = {
     "pet": ThemePlaybook(
         key="pet",
         label="Pet",
-        summary="Evaluate category momentum, retail fit, and private-label or distribution opportunities.",
+        summary="Pet: check sell-through, retail fit, and wholesale options.",
         roles=("Retail sales", "Founder", "Wholesale partnerships", "Operations"),
         questions=(
             "Which products are winning with retailers right now?",
@@ -129,7 +129,7 @@ THEME_PLAYBOOKS: dict[str, ThemePlaybook] = {
     "science_industrial": ThemePlaybook(
         key="science_industrial",
         label="Science & Industrial",
-        summary="Prioritize technical depth, procurement alignment, and implementation readiness.",
+        summary="Science & Industrial: confirm technical fit and rollout risk.",
         roles=("Technical sales", "Product specialist", "Procurement", "Implementation lead"),
         questions=(
             "Which use cases or industries are you built for?",
@@ -141,7 +141,7 @@ THEME_PLAYBOOKS: dict[str, ThemePlaybook] = {
     "generic": ThemePlaybook(
         key="generic",
         label="General Trade Show",
-        summary="Use the event to identify the densest account clusters and qualify follow-up quickly.",
+        summary="General: rank targets, meet owners, and leave with clear next steps.",
         roles=("Sales lead", "Partnerships", "Operations owner", "Founder"),
         questions=(
             "Who are you hoping to meet at this event?",
@@ -205,7 +205,6 @@ def build_show_analysis(
         booth_coverage_percent=booth_coverage_percent,
         days_until_event=days_until_event,
         export_ready=export_ready,
-        show_name=show.name,
     )
     risks = _build_risks(
         export_company_count=export_company_count,
@@ -221,16 +220,13 @@ def build_show_analysis(
     recommendation = _build_recommendation(
         priority_label=priority_label,
         show_name=show.name,
-        exhibitor_count=exhibitor_count,
-        website_coverage_percent=website_coverage_percent,
-        days_until_event=days_until_event,
         playbook=playbook,
         export_ready=export_ready,
     )
     next_steps = (
-        f"Shortlist the top {min(max(exhibitor_count, 6), 12)} exhibitors before travel.",
-        f"Use the floor to meet {playbook.roles[0].lower()} and {playbook.roles[1].lower()} contacts first.",
-        "Capture booth notes, contact owners, and clear next steps while the context is fresh.",
+        f"Shortlist top {min(max(exhibitor_count, 6), 12)} accounts.",
+        f"Meet {playbook.roles[0].lower()} and {playbook.roles[1].lower()} first.",
+        "Capture owner, need, next step.",
     )
 
     return ShowVisitAnalysis(
@@ -294,13 +290,13 @@ def _build_company_profile(row: dict[str, str], playbook: ThemePlaybook) -> Comp
         score += 20
 
     if row["website_url"] and row["booth_number"]:
-        rationale = "Has both a website and booth reference, so this company is easy to research and easy to find on the floor."
+        rationale = "Website and booth found. Easy to prep and find."
     elif row["website_url"]:
-        rationale = "Has a website, so there is enough context to prep before the event even without booth routing."
+        rationale = "Website found. Prep is possible."
     elif row["booth_number"]:
-        rationale = "Booth information exists, but account research will need to happen manually because a website is missing."
+        rationale = "Booth found. Research still thin."
     else:
-        rationale = "Minimal profile data is available; treat this as a walk-up prospect until more research is attached."
+        rationale = "Thin profile. Treat as walk-up."
 
     label, slug = _priority_badge(score)
     return CompanyProfile(
@@ -322,33 +318,16 @@ def _build_recommendation(
     *,
     priority_label: str,
     show_name: str,
-    exhibitor_count: int,
-    website_coverage_percent: int,
-    days_until_event: int,
     playbook: ThemePlaybook,
     export_ready: bool,
 ) -> str:
     if not export_ready:
-        return (
-            f"{show_name} is still a watchlist event. Run the export first so the visit call is based on real exhibitors, not just the show name."
-        )
-
-    timing = (
-        f"{days_until_event} day(s) away"
-        if days_until_event >= 0
-        else f"{abs(days_until_event)} day(s) in the past"
-    )
+        return f"Scrape first. {show_name} has no exhibitor list yet."
     if priority_label == "High Priority":
-        return (
-            f"{show_name} looks worth visiting. The exhibitor base is large enough to support focused meetings, and the exported data is strong enough to prep around {playbook.label.lower()} conversations."
-        )
+        return f"Visit. Strong list, usable data, good timing for {playbook.label.lower()} outreach."
     if priority_label == "Medium Priority":
-        return (
-            f"{show_name} looks potentially worth visiting, but validate the top accounts first. Right now the signal is moderate: {exhibitor_count} exhibitors, {website_coverage_percent}% website coverage, and timing {timing}."
-        )
-    return (
-        f"{show_name} should stay on the monitor list for now. The event may still matter, but the current data is too thin to justify a confident visit plan around {playbook.label.lower()} targets."
-    )
+        return f"Maybe. Check top accounts before you commit."
+    return f"Skip for now. Signal is too weak."
 
 
 def _build_reasons(
@@ -359,32 +338,31 @@ def _build_reasons(
     booth_coverage_percent: int,
     days_until_event: int,
     export_ready: bool,
-    show_name: str,
 ) -> tuple[str, ...]:
     reasons: list[str] = []
     if exhibitor_count >= 150:
-        reasons.append(f"{exhibitor_count} exhibitors makes this a dense meeting environment.")
+        reasons.append(f"{exhibitor_count} exhibitors.")
     elif exhibitor_count >= 60:
-        reasons.append(f"{exhibitor_count} exhibitors is enough scale to support a targeted floor plan.")
+        reasons.append(f"{exhibitor_count} exhibitors. Enough scale.")
     elif exhibitor_count > 0:
-        reasons.append(f"{exhibitor_count} exhibitors gives you a manageable shortlist instead of a giant sprawl.")
+        reasons.append(f"{exhibitor_count} exhibitors. Manageable list.")
 
     if export_ready:
-        reasons.append(f"{export_company_count} companies are already attached to the show profile.")
+        reasons.append(f"{export_company_count} rows loaded.")
     if website_coverage_percent >= 60:
-        reasons.append(f"{website_coverage_percent}% website coverage means prep work is practical before travel.")
+        reasons.append(f"{website_coverage_percent}% website coverage.")
     elif website_coverage_percent >= 35:
-        reasons.append(f"{website_coverage_percent}% website coverage is workable for a tighter pre-show shortlist.")
+        reasons.append(f"{website_coverage_percent}% website coverage. Usable.")
 
     if booth_coverage_percent >= 20:
-        reasons.append(f"{booth_coverage_percent}% booth coverage improves floor routing.")
+        reasons.append(f"{booth_coverage_percent}% booth coverage.")
 
     if 0 <= days_until_event <= 90:
-        reasons.append(f"{show_name} is close enough to start booking meetings now.")
+        reasons.append("In the next 90 days.")
     elif days_until_event > 90:
-        reasons.append("There is still enough time to build a meeting plan without rushing.")
+        reasons.append("Plenty of lead time.")
 
-    return tuple(reasons[:4]) or ("This show has enough basic structure to keep tracking.",)
+    return tuple(reasons[:4]) or ("Track it.",)
 
 
 def _build_risks(
@@ -397,16 +375,16 @@ def _build_risks(
 ) -> tuple[str, ...]:
     risks: list[str] = []
     if export_company_count == 0:
-        risks.append("No exhibitor export is attached yet, so the visit call is still mostly speculative.")
+        risks.append("No exhibitor export yet.")
     if export_company_count and website_coverage_percent < 35:
-        risks.append("Website coverage is thin, so account research will be slower than it should be.")
+        risks.append("Low website coverage.")
     if export_company_count and booth_coverage_percent == 0:
-        risks.append("No booth numbers were found in the export, which weakens on-floor routing.")
+        risks.append("No booth numbers.")
     if days_until_event < 0:
-        risks.append("The event date has already passed, so use this profile as a benchmark rather than a travel decision.")
+        risks.append("Event already passed.")
     if show.last_error:
-        risks.append("The last scrape recorded an error, so the exhibitor list may still be incomplete.")
-    return tuple(risks[:4]) or ("No major blockers are visible from the current export.",)
+        risks.append("Last scrape had errors.")
+    return tuple(risks[:4]) or ("No major blockers.",)
 
 
 def _compute_priority_score(

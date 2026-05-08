@@ -5,8 +5,8 @@
   <div class="panel-head intelligence-hero-head">
     <div>
       <p class="hero-kicker">Trade Show Intelligence</p>
-      <h1>One screen for every show you have loaded.</h1>
-      <p class="hero-copy">This view ranks each trade show by exhibitor depth, data quality, booth coverage, and timing so you can decide whether it is worth visiting before you spend time on travel planning.</p>
+      <h1>Every show, ranked fast.</h1>
+      <p class="hero-copy">See the verdict, core metrics, and next action for each show.</p>
     </div>
     {% if can_manage %}
     <a class="button" href="/workflow">Open Workflow</a>
@@ -30,7 +30,7 @@
       <strong class="stat-value">{{ total_exhibitors }}</strong>
     </article>
   </div>
-  <p class="mini-note">The score is heuristic. It reflects size, timing, and usable exhibitor data, not a guarantee of commercial fit.</p>
+  <p class="mini-note">Score = size, timing, and usable data.</p>
 </section>
 
 {% if analyses %}
@@ -66,13 +66,13 @@
       </div>
       <div class="metric-tile">
         <span>Timing</span>
-        <strong>{% if analysis.days_until_event >= 0 %}{{ analysis.days_until_event }} day(s){% else %}Past due{% endif %}</strong>
+        <strong>{% if analysis.days_until_event >= 0 %}{{ analysis.days_until_event }}d{% else %}Past{% endif %}</strong>
       </div>
     </div>
 
     <div class="analysis-columns">
       <div class="analysis-column">
-        <h3>Why It Stands Out</h3>
+        <h3>Why</h3>
         <ul class="simple-list">
           {% for item in analysis.reasons %}
           <li>{{ item }}</li>
@@ -91,7 +91,7 @@
 
     <div class="playbook-grid">
       <article class="playbook-card">
-        <h3>Who To Meet</h3>
+        <h3>Meet</h3>
         <ul class="simple-list">
           {% for item in analysis.who_to_meet[:3] %}
           <li>{{ item }}</li>
@@ -99,7 +99,7 @@
         </ul>
       </article>
       <article class="playbook-card">
-        <h3>Questions</h3>
+        <h3>Ask</h3>
         <ul class="simple-list">
           {% for item in analysis.questions_to_ask[:3] %}
           <li>{{ item }}</li>
@@ -107,7 +107,7 @@
         </ul>
       </article>
       <article class="playbook-card">
-        <h3>Sample Companies</h3>
+        <h3>Targets</h3>
         <ul class="simple-list">
           {% for item in analysis.sample_company_names %}
           <li>{{ item }}</li>
@@ -121,6 +121,11 @@
     <div class="card-action-row">
       <a class="button secondary" href="/shows/{{ analysis.show.id }}">Open Show Profile</a>
       {% if can_manage %}
+      {% if analysis.export_ready %}
+      <form action="/shows/{{ analysis.show.id }}/guide/build" method="post">
+        <button class="button secondary" type="submit">Build Guide</button>
+      </form>
+      {% endif %}
       <a class="button secondary" href="{{ analysis.show.source_url }}" target="_blank" rel="noreferrer">Source Directory</a>
       {% endif %}
     </div>
@@ -131,7 +136,7 @@
 <section class="panel">
   <div class="empty-state">
     <h3>No trade shows loaded</h3>
-    <p>Add one show or import a CSV from the workflow screen, then this dashboard will rank them automatically.</p>
+    <p>Add one show or import a CSV, then this dashboard will rank them.</p>
   </div>
 </section>
 {% endif %}
