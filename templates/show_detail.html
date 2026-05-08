@@ -143,21 +143,21 @@
   <div class="panel-head lead-panel-head">
     <div>
       <h2>Exhibitor List</h2>
-      <p class="muted">{{ analysis.export_company_count }} rows total · showing 5 at a time</p>
+      <p class="muted">{{ analysis.export_company_count }} rows total · scroll for more</p>
     </div>
     {% if analysis.company_profiles %}
     <div class="lead-table-toolbar">
       <label class="lead-search-field" aria-label="Search exhibitors">
         <input type="text" placeholder="Search companies, booths, websites" data-lead-search />
       </label>
-      <span class="lead-results-meta" data-lead-results>Showing 5</span>
+      <span class="lead-results-meta" data-lead-results>{{ analysis.export_company_count }} shown</span>
     </div>
     {% endif %}
   </div>
 
   {% if analysis.company_profiles %}
   <div class="table-wrap lead-table-wrap">
-    <table class="dashboard-table lead-table" data-lead-table data-lead-limit="5">
+    <table class="dashboard-table lead-table" data-lead-table>
       <thead>
         <tr>
           <th class="selection-col">

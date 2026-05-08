@@ -717,11 +717,9 @@ function updateLeadTable(table) {
   const selectAll = table.querySelector("[data-lead-select-all]");
   const selectionItems = Array.from(table.querySelectorAll("[data-lead-select-item]"));
   const rows = Array.from(table.querySelectorAll("[data-lead-row]"));
-  const limit = Number.parseInt(table.dataset.leadLimit || "10", 10) || 10;
   const query = searchInput instanceof HTMLInputElement ? searchInput.value.trim().toLowerCase() : "";
 
   let matchCount = 0;
-  let shownCount = 0;
 
   rows.forEach((row) => {
     const haystack = String(row.getAttribute("data-lead-search-text") || "").toLowerCase();
@@ -732,12 +730,7 @@ function updateLeadTable(table) {
     }
 
     matchCount += 1;
-    if (shownCount < limit) {
-      row.hidden = false;
-      shownCount += 1;
-    } else {
-      row.hidden = true;
-    }
+    row.hidden = false;
   });
 
   if (emptyRow) {
@@ -751,8 +744,8 @@ function updateLeadTable(table) {
     } else {
       resultsTarget.textContent =
         selectedCount > 0
-          ? `Showing ${shownCount} of ${matchCount} · ${selectedCount} selected`
-          : `Showing ${shownCount} of ${matchCount}`;
+          ? `${matchCount} shown · ${selectedCount} selected`
+          : `${matchCount} shown`;
     }
   }
 
