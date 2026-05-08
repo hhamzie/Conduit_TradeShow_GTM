@@ -63,10 +63,17 @@ async def import_shows(
     if not payload:
         raise HTTPException(status_code=400, detail="The uploaded CSV was empty.")
     try:
-        import_shows_from_csv(db, payload, run_offset_days)
+        summary = import_shows_from_csv(db, payload, run_offset_days)
     except ValueError as exc:
         request.session["automation_error"] = str(exc)
-    return RedirectResponse("/workflow", status_code=status.HTTP_303_SEE_OTHER)
+        return RedirectResponse("/workflow", status_code=status.HTTP_303_SEE_OTHER)
+
+    request.session["flash_message"] = {
+        "tone": "success",
+        "title": "Trade shows added to the dashboard.",
+        "detail": f"Created {summary.created}, updated {summary.updated}, skipped {summary.skipped}.",
+    }
+    return RedirectResponse("/shows/dashboard", status_code=status.HTTP_303_SEE_OTHER)
 
 
 @router.post("/shows/add")
@@ -81,7 +88,7 @@ def add_single_show(
 ):
     require_authenticated(request)
     try:
-        create_or_update_show(
+        created = create_or_update_show(
             db,
             show_name=show_name,
             event_date_raw=event_date,
@@ -93,7 +100,12 @@ def add_single_show(
         request.session["automation_error"] = str(exc)
         return RedirectResponse("/workflow", status_code=status.HTTP_303_SEE_OTHER)
     db.commit()
-    return RedirectResponse("/workflow", status_code=status.HTTP_303_SEE_OTHER)
+    request.session["flash_message"] = {
+        "tone": "success",
+        "title": "Trade show saved.",
+        "detail": "The show was added to the dashboard." if created else "The existing dashboard record was updated.",
+    }
+    return RedirectResponse("/shows/dashboard", status_code=status.HTTP_303_SEE_OTHER)
 
 
 @router.post("/scrape/single")
@@ -118,6 +130,11 @@ def scrape_single_show(
         )
         db.commit()
         result = run_show_scrape(db, show)
+        request.session["flash_message"] = {
+            "tone": "success",
+            "title": "Trade show added and scraped.",
+            "detail": f"{show.name} is now on the dashboard with {result.company_count} companies scraped.",
+        }
     except ValueError as exc:
         request.session["single_scrape_error"] = str(exc)
         return RedirectResponse("/workflow", status_code=status.HTTP_303_SEE_OTHER)

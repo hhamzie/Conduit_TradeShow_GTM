@@ -325,6 +325,59 @@ class AutomationTests(unittest.TestCase):
 
         asyncio.run(run_test())
 
+    def test_add_single_show_redirects_to_dashboard_with_flash(self) -> None:
+        from app.main import add_single_show
+
+        request = type("Req", (), {"session": {}})()
+        with self.Session() as session:
+            with patch("app.web.routes.workflow.require_authenticated"):
+                response = add_single_show(
+                    request=request,
+                    show_name="ICFF",
+                    event_date="2026-05-17",
+                    place="New York, NY",
+                    link="https://example.com/icff",
+                    run_offset_days=14,
+                    db=session,
+                )
+
+            self.assertEqual(response.status_code, 303)
+            self.assertEqual(response.headers["location"], "/shows/dashboard")
+            self.assertEqual(request.session["flash_message"]["title"], "Trade show saved.")
+
+    def test_import_shows_redirects_to_dashboard_with_flash(self) -> None:
+        async def run_test() -> None:
+            from fastapi import UploadFile
+            from app.main import import_shows
+
+            upload = UploadFile(
+                filename="shows.csv",
+                file=io.BytesIO(
+                    b"Show,Date,Place,Link\nICFF,2026-05-17,New York,https://example.com/icff\n"
+                ),
+            )
+            request = type("Req", (), {"session": {}})()
+
+            with self.Session() as session:
+                with patch("app.web.routes.workflow.require_authenticated"):
+                    response = await import_shows(
+                        request=request,
+                        file=upload,
+                        run_offset_days=14,
+                        db=session,
+                    )
+
+            self.assertEqual(response.status_code, 303)
+            self.assertEqual(response.headers["location"], "/shows/dashboard")
+            self.assertEqual(
+                request.session["flash_message"]["title"],
+                "Trade shows added to the dashboard.",
+            )
+
+        import asyncio
+
+        asyncio.run(run_test())
+
 
 if __name__ == "__main__":
     unittest.main()

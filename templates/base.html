@@ -29,6 +29,16 @@
         {% endif %}
       </header>
       <main>
+        {% if flash_message %}
+        <section class="show-notice show-notice-{{ flash_message.tone }}">
+          {% if flash_message.title %}
+          <strong>{{ flash_message.title }}</strong>
+          {% endif %}
+          {% if flash_message.detail %}
+          <p>{{ flash_message.detail }}</p>
+          {% endif %}
+        </section>
+        {% endif %}
         {% block content %}{% endblock %}
       </main>
     </div>
