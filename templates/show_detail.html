@@ -1,336 +1,355 @@
 {% extends "base.html" %}
 
 {% block content %}
-<section class="panel">
-  <div class="panel-head">
+<section class="panel profile-hero-panel">
+  <div class="profile-hero-head">
     <div>
+      <p class="hero-kicker">Show Profile</p>
       <h1>{{ show.name }}</h1>
-      <p>{{ show.place }} · {{ show.event_date }}</p>
+      <p class="muted">{{ show.event_date }} · {{ show.place }}</p>
     </div>
-    <div class="panel-head-actions">
-      <a class="button secondary" href="/shows/dashboard">Trade Shows</a>
-      {% if can_manage %}
-      <a class="button secondary" href="/workflow">Workflow</a>
-      {% endif %}
-    </div>
-  </div>
-
-  {% if can_manage %}
-  <div class="detail-card detail-stack">
-    <h2>Edit Show</h2>
-    <form class="edit-show-form" action="/shows/{{ show.id }}/update" method="post">
-      <label>
-        <span>Show name</span>
-        <input type="text" name="show_name" value="{{ show.name }}" required />
-      </label>
-      <label>
-        <span>Show date</span>
-        <input type="text" name="event_date" value="{{ show.event_date }}" required />
-      </label>
-      <label>
-        <span>Place</span>
-        <input type="text" name="place" value="{{ show.place }}" required />
-      </label>
-      <label class="lane-form-wide">
-        <span>Directory or show link</span>
-        <input type="url" name="link" value="{{ show.source_url }}" required />
-      </label>
-      <label>
-        <span>Run days before show</span>
-        <input type="number" name="run_offset_days" min="0" max="60" value="{{ show.run_offset_days }}" required />
-      </label>
-      <button type="submit">Save Show</button>
-    </form>
-  </div>
-  {% endif %}
-
-  <div class="detail-grid">
-    {% if can_manage %}
-    <div class="detail-card">
-      <h2>Status</h2>
-      <p><span class="status status-{{ show.status }}">{{ show.status }}</span></p>
-      <p class="muted">Scheduled run: {{ show.run_at }}</p>
-      <p class="muted">Approval required: {{ "yes" if show.approval_required else "no" }}</p>
-      <p class="muted">Approved at: {{ show.approved_at if show.approved_at else "-" }}</p>
-    </div>
-    <div class="detail-card">
-      <h2>Results</h2>
-      <p><strong>{{ show.company_count }}</strong> rows exported</p>
-      <p><strong>{{ show.failure_count }}</strong> profile failures</p>
-      {% if export_path %}
-      <p><a href="/shows/{{ show.id }}/export">{{ export_path.name }}</a></p>
-      <p class="muted">{{ export_path }}</p>
-      {% else %}
-      <p class="muted">No export yet</p>
-      {% endif %}
-      {% if enriched_export_path %}
-      <p><a href="/shows/{{ show.id }}/enriched-export">{{ enriched_export_path.name }}</a></p>
-      <p class="muted">Latest Clay pull</p>
-      {% endif %}
-      {% if smartlead_ready_path %}
-      <p><a href="/shows/{{ show.id }}/smartlead-export">{{ smartlead_ready_path.name }}</a></p>
-      <p class="muted">Smartlead-ready CSV</p>
-      {% endif %}
-    </div>
-    <div class="detail-card">
-      <h2>Provider Status</h2>
-      <p>Notification: {{ show.notification_status }}</p>
-      <p>Clay: {{ show.clay_status }}</p>
-      <p>Smartlead: {{ show.smartlead_status }}</p>
-      <p>Clay rows: {{ show.clay_ready_rows }} ready / {{ show.clay_failed_rows }} failed / {{ show.clay_skipped_rows }} skipped / {{ show.clay_total_rows }} total</p>
-      <p>Smartlead imported rows: {{ show.smartlead_imported_rows }}</p>
-      {% if show.clay_table_id %}
-      <p>Clay table id: {{ show.clay_table_id }}</p>
-      {% endif %}
-      {% if show.smartlead_campaign_id %}
-      <p>Smartlead campaign: {{ show.smartlead_campaign_name or show.smartlead_campaign_id }} ({{ show.smartlead_campaign_id }})</p>
-      {% endif %}
-    </div>
-    {% else %}
-    <div class="detail-card detail-card-wide">
-      <h2>Show Snapshot</h2>
-      <p><strong>{{ analysis.exhibitor_count }}</strong> exhibitors in the current profile.</p>
-      <p><strong>{{ analysis.website_coverage_percent }}%</strong> website coverage · <strong>{{ analysis.booth_coverage_percent }}%</strong> booth coverage.</p>
-      <p><a href="{{ show.source_url }}" target="_blank" rel="noreferrer">Open source directory</a></p>
-    </div>
-    {% endif %}
-  </div>
-
-  <div class="detail-card detail-stack visit-analysis-card">
-    <div class="analysis-head">
-      <div>
-        <p class="eyebrow">{{ analysis.theme_label }}</p>
-        <h2>Show Signal</h2>
-        <p class="muted">{{ analysis.theme_summary }}</p>
-      </div>
+    <div class="profile-hero-score">
+      <span class="status status-{{ show.status }}">{{ show.status|replace('_', ' ') }}</span>
       <div class="score-badge rating-{{ analysis.guide_score_slug }}">
-        <span>{{ analysis.guide_score_label }}</span>
+        <span>Guide score</span>
         <strong>{{ analysis.guide_score }}/100</strong>
       </div>
     </div>
-    <p class="analysis-summary">{{ analysis.recommendation }}</p>
-
-    <div class="metric-strip">
-      <div class="metric-tile">
-        <span>Exhibitors</span>
-        <strong>{{ analysis.exhibitor_count }}</strong>
-      </div>
-      <div class="metric-tile">
-        <span>Websites</span>
-        <strong>{{ analysis.website_coverage_percent }}%</strong>
-      </div>
-      <div class="metric-tile">
-        <span>Booths</span>
-        <strong>{{ analysis.booth_coverage_percent }}%</strong>
-      </div>
-      <div class="metric-tile">
-        <span>Timing</span>
-        <strong>{% if analysis.days_until_event >= 0 %}{{ analysis.days_until_event }}d out{% else %}{{ analysis.days_until_event | abs }}d ago{% endif %}</strong>
-      </div>
-    </div>
-
-    <div class="profile-context-grid">
-      <div class="detail-card">
-        <h3>Guide Signal</h3>
-        <p><strong>{{ analysis.guide_people_total }}</strong> sales + support reps</p>
-        <p class="muted">{{ analysis.guide_company_count }} guide companies · {{ "%.1f"|format(analysis.guide_average_people_per_company) }} avg</p>
-      </div>
-      <div class="detail-card">
-        <h3>Context</h3>
-        {% for item in analysis.guide_context %}
-        <p class="muted">{{ item }}</p>
-        {% endfor %}
-      </div>
-    </div>
   </div>
 
-  {% if notice and can_manage %}
-  <div class="detail-card detail-stack show-notice show-notice-{{ notice.tone }}">
-    <h2>{{ notice.title }}</h2>
-    <p>{{ notice.detail }}</p>
-  </div>
-  {% endif %}
-
-  {% if can_manage %}
-  <div class="actions">
-    <form action="/shows/{{ show.id }}/run-now" method="post">
-      <button type="submit">Run Now</button>
-    </form>
-    {% if show.clay_table_id %}
-    <form action="/shows/{{ show.id }}/sync-clay" method="post">
-      <button type="submit">Sync From Clay Now</button>
-    </form>
-    {% endif %}
-    {% if show.status == "ready_for_review" %}
-    <form action="/shows/{{ show.id }}/approve" method="post">
-      <button type="submit">Approve Launch</button>
-    </form>
-    {% endif %}
-    {% if not show.smartlead_campaign_id %}
-    <form action="/shows/{{ show.id }}/smartlead/setup" method="post">
-      <input type="hidden" name="campaign_mode" value="smart" />
-      <button type="submit">Smart Setup Smartlead</button>
-    </form>
-    {% endif %}
-    <a class="button secondary" href="/shows/{{ show.id }}/guide">Open Guide</a>
-    {% if show.status == "approved" %}
-    <form action="/shows/{{ show.id }}/launch" method="post">
-      <button type="submit">Launch Campaign</button>
-    </form>
-    {% endif %}
-    {% if show.smartlead_campaign_id and show.smartlead_status in ["active", "ready_to_launch", "paused"] %}
-    <form action="/shows/{{ show.id }}/pause" method="post">
-      <button type="submit">Pause Campaign</button>
-    </form>
-    {% endif %}
-    <form action="/shows/{{ show.id }}/delete" method="post" onsubmit="return confirm('Delete this show from the dashboard?');">
-      <button class="button danger" type="submit">Delete Show</button>
-    </form>
-  </div>
-  {% endif %}
-
-  <div class="detail-card detail-stack">
-    <h2>Links</h2>
-    <p><a href="{{ show.source_url }}" target="_blank" rel="noreferrer">{{ show.source_url }}</a></p>
+  <div class="profile-link-row">
+    <a class="button secondary" href="/shows/dashboard">Dashboard</a>
+    <a class="button secondary" href="/shows/{{ show.id }}/guide">Guide</a>
+    <a class="button secondary" href="{{ show.source_url }}" target="_blank" rel="noreferrer">Source</a>
     {% if show.clay_table_url %}
-    <p><a href="{{ show.clay_table_url }}" target="_blank" rel="noreferrer">Open Clay table</a></p>
+    <a class="button secondary" href="{{ show.clay_table_url }}" target="_blank" rel="noreferrer">Clay</a>
     {% endif %}
     {% if show.smartlead_campaign_id %}
-    <p><a href="{{ smartlead_campaign_url }}" target="_blank" rel="noreferrer">Open Smartlead campaign</a></p>
+    <a class="button secondary" href="{{ smartlead_campaign_url }}" target="_blank" rel="noreferrer">Smartlead</a>
     {% endif %}
-    {% if show.last_error and can_manage %}
-    <h2>Latest Error Summary</h2>
-    <p class="show-error">{{ error_summary }}</p>
-    <details class="raw-error">
-      <summary>Show raw error details</summary>
+  </div>
+</section>
+
+{% if notice and can_manage %}
+<section class="panel show-notice show-notice-{{ notice.tone }}">
+  <strong>{{ notice.title }}</strong>
+  <p>{{ notice.detail }}</p>
+</section>
+{% endif %}
+
+<section class="profile-shell">
+  <div class="profile-main">
+    <section class="panel profile-card">
+      <div class="panel-head">
+        <div>
+          <h2>Overview</h2>
+          <p class="muted">{{ analysis.recommendation }}</p>
+        </div>
+      </div>
+
+      <div class="metric-strip">
+        <div class="metric-tile">
+          <span>Exhibitors</span>
+          <strong>{{ analysis.exhibitor_count }}</strong>
+        </div>
+        <div class="metric-tile">
+          <span>Websites</span>
+          <strong>{{ analysis.website_coverage_percent }}%</strong>
+        </div>
+        <div class="metric-tile">
+          <span>Booths</span>
+          <strong>{{ analysis.booth_coverage_percent }}%</strong>
+        </div>
+        <div class="metric-tile">
+          <span>Timing</span>
+          <strong>{% if analysis.days_until_event >= 0 %}{{ analysis.days_until_event }}d out{% else %}{{ analysis.days_until_event | abs }}d ago{% endif %}</strong>
+        </div>
+      </div>
+
+      <div class="profile-overview-grid">
+        <article class="profile-summary-card">
+          <span class="stat-label">Lead list</span>
+          <strong class="stat-value">{{ analysis.export_company_count }}</strong>
+          <p class="muted">{{ show.failure_count }} failures{% if export_path %} · export ready{% else %} · no export yet{% endif %}</p>
+        </article>
+        <article class="profile-summary-card">
+          <span class="stat-label">Guide</span>
+          <strong class="stat-value">{{ analysis.guide_people_total }}</strong>
+          <p class="muted">{{ analysis.guide_company_count }} companies · {{ "%.1f"|format(analysis.guide_average_people_per_company) }} reps avg</p>
+        </article>
+        <article class="profile-summary-card">
+          <span class="stat-label">Automation</span>
+          <strong class="stat-value">{{ show.smartlead_imported_rows }}</strong>
+          <p class="muted">Clay {{ show.clay_status }} · Smartlead {{ show.smartlead_status }}</p>
+        </article>
+        <article class="profile-summary-card">
+          <span class="stat-label">Schedule</span>
+          <strong class="stat-value">{{ show.run_offset_days }}d</strong>
+          <p class="muted">Runs {{ show.run_offset_days }} day(s) before the show</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="panel profile-card lead-panel">
+      <div class="panel-head lead-panel-head">
+        <div>
+          <h2>Lead List</h2>
+          <p class="muted">{{ analysis.export_company_count }} rows total · showing 10 at a time</p>
+        </div>
+        {% if analysis.company_profiles %}
+        <div class="lead-table-toolbar">
+          <label class="lead-search-field">
+            <span class="visually-hidden">Search leads</span>
+            <input type="text" placeholder="Search companies, booths, websites" data-lead-search />
+          </label>
+          <span class="lead-results-meta" data-lead-results>Showing 10</span>
+        </div>
+        {% endif %}
+      </div>
+
+      {% if analysis.company_profiles %}
+      <div class="table-wrap lead-table-wrap">
+        <table class="dashboard-table lead-table" data-lead-table data-lead-limit="10">
+          <thead>
+            <tr>
+              <th>Company</th>
+              <th>Booth</th>
+              <th>Website</th>
+              <th>Lead signal</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for company in analysis.company_profiles %}
+            <tr data-lead-row data-lead-search-text="{{ company.name }} {{ company.booth_number or '' }} {{ company.domain or '' }} {{ company.website_url or '' }} {{ company.rationale }}">
+              <td>
+                <strong>{{ company.name }}</strong>
+              </td>
+              <td>{{ company.booth_number or "-" }}</td>
+              <td>
+                {% if company.website_url %}
+                <a href="{{ company.website_url }}" target="_blank" rel="noreferrer">{{ company.domain or company.website_url }}</a>
+                {% else %}
+                -
+                {% endif %}
+              </td>
+              <td>{{ company.rationale }}</td>
+            </tr>
+            {% endfor %}
+            <tr data-lead-empty hidden>
+              <td colspan="4" class="empty">No leads match that search.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="mini-note">Search narrows the list. Scroll the table left or right if you need the full row.</p>
+      {% else %}
+      <div class="empty-state">
+        <h3>No leads yet</h3>
+        <p>Run the scrape first, then this list will populate.</p>
+      </div>
+      {% endif %}
+    </section>
+
+    {% if can_manage and show.last_error %}
+    <details class="panel profile-card profile-details-card">
+      <summary class="profile-details-summary">Latest error</summary>
+      <p class="show-error">{{ error_summary }}</p>
       <pre class="error-box">{{ show.last_error }}</pre>
+    </details>
+    {% endif %}
+
+    {% if can_manage %}
+    <details class="panel profile-card profile-details-card">
+      <summary class="profile-details-summary">Run history</summary>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Run</th>
+              <th>Status</th>
+              <th>Created</th>
+              <th>Started</th>
+              <th>Finished</th>
+              <th>Rows</th>
+              <th>Failures</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for run in show.runs %}
+            <tr>
+              <td>#{{ run.id }}</td>
+              <td><span class="status status-{{ run.status }}">{{ run.status|replace('_', ' ') }}</span></td>
+              <td>{{ run.created_at }}</td>
+              <td>{{ run.started_at if run.started_at else "-" }}</td>
+              <td>{{ run.finished_at if run.finished_at else "-" }}</td>
+              <td>{{ run.company_count }}</td>
+              <td>{{ run.failure_count }}</td>
+            </tr>
+            {% else %}
+            <tr>
+              <td colspan="7" class="empty">No runs yet.</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
     </details>
     {% endif %}
   </div>
 
-  {% if can_manage %}
-  <div class="detail-card detail-stack">
-    <h2>Smartlead Campaign Setup</h2>
-    <p class="muted">Use the smart option by default. Only attach manually if you already know the campaign.</p>
-    <div class="smartlead-setup-grid">
-      <form class="smartlead-config-card" action="/shows/{{ show.id }}/smartlead/setup" method="post">
-        <input type="hidden" name="campaign_mode" value="smart" />
-        <h3>Smart Setup</h3>
-        <p class="muted">Recommended. Reuse the match or create a new one.</p>
-        <button type="submit">Reuse Match or Make One</button>
-      </form>
-      <form class="smartlead-config-card" action="/shows/{{ show.id }}/smartlead/setup" method="post">
-        <input type="hidden" name="campaign_mode" value="existing" />
-        <h3>Use Existing Campaign</h3>
-        <p class="muted">Attach this show to a known Smartlead campaign.</p>
+  <aside class="profile-side">
+    <section class="panel profile-side-card">
+      <div class="panel-head">
+        <div>
+          <h2>{% if can_manage %}Actions{% else %}Show links{% endif %}</h2>
+          <p class="muted">{% if can_manage %}Next step first. Fewer buttons, less noise.{% else %}Open the main show assets.{% endif %}</p>
+        </div>
+      </div>
+      <div class="profile-action-stack">
+        {% if can_manage %}
+          {% if show.status == "ready_for_review" %}
+          <form action="/shows/{{ show.id }}/approve" method="post">
+            <button type="submit">Approve for launch</button>
+          </form>
+          {% elif show.status == "approved" %}
+          <form action="/shows/{{ show.id }}/launch" method="post">
+            <button type="submit">Launch campaign</button>
+          </form>
+          {% else %}
+          <form action="/shows/{{ show.id }}/run-now" method="post">
+            <button type="submit">Run scrape now</button>
+          </form>
+          {% endif %}
+
+          {% if show.clay_table_id %}
+          <form action="/shows/{{ show.id }}/sync-clay" method="post">
+            <button class="button secondary" type="submit">Sync Clay</button>
+          </form>
+          {% endif %}
+
+          {% if not show.smartlead_campaign_id %}
+          <form action="/shows/{{ show.id }}/smartlead/setup" method="post">
+            <input type="hidden" name="campaign_mode" value="smart" />
+            <button class="button secondary" type="submit">Set up Smartlead</button>
+          </form>
+          {% endif %}
+
+          {% if show.smartlead_campaign_id and show.smartlead_status in ["active", "ready_to_launch", "paused"] %}
+          <form action="/shows/{{ show.id }}/pause" method="post">
+            <button class="button secondary" type="submit">Pause campaign</button>
+          </form>
+          {% endif %}
+        {% endif %}
+
+        <a class="button secondary" href="/shows/{{ show.id }}/guide">Open guide</a>
+
+        {% if can_manage %}
+        <form action="/shows/{{ show.id }}/delete" method="post" onsubmit="return confirm('Delete this show from the dashboard?');">
+          <button class="button danger" type="submit">Delete show</button>
+        </form>
+        {% endif %}
+      </div>
+    </section>
+
+    <section class="panel profile-side-card">
+      <div class="panel-head">
+        <div>
+          <h2>Files & Links</h2>
+          <p class="muted">Everything important in one place.</p>
+        </div>
+      </div>
+      <div class="profile-link-list">
+        <a href="{{ show.source_url }}" target="_blank" rel="noreferrer">Source directory</a>
+        {% if export_path %}
+        <a href="/shows/{{ show.id }}/export">{{ export_path.name }}</a>
+        {% endif %}
+        {% if enriched_export_path %}
+        <a href="/shows/{{ show.id }}/enriched-export">{{ enriched_export_path.name }}</a>
+        {% endif %}
+        {% if smartlead_ready_path %}
+        <a href="/shows/{{ show.id }}/smartlead-export">{{ smartlead_ready_path.name }}</a>
+        {% endif %}
+        {% if show.clay_table_url %}
+        <a href="{{ show.clay_table_url }}" target="_blank" rel="noreferrer">Clay table</a>
+        {% endif %}
+        {% if show.smartlead_campaign_id %}
+        <a href="{{ smartlead_campaign_url }}" target="_blank" rel="noreferrer">Smartlead campaign</a>
+        {% endif %}
+      </div>
+    </section>
+
+    {% if can_manage %}
+    <section class="panel profile-side-card">
+      <div class="panel-head">
+        <div>
+          <h2>Automation</h2>
+          <p class="muted">Current provider state.</p>
+        </div>
+      </div>
+      <div class="profile-kv-list">
+        <div><span>Notification</span><strong>{{ show.notification_status }}</strong></div>
+        <div><span>Clay</span><strong>{{ show.clay_status }}</strong></div>
+        <div><span>Smartlead</span><strong>{{ show.smartlead_status }}</strong></div>
+        <div><span>Clay rows</span><strong>{{ show.clay_ready_rows }} ready / {{ show.clay_failed_rows }} failed / {{ show.clay_skipped_rows }} skipped</strong></div>
+        <div><span>Imported rows</span><strong>{{ show.smartlead_imported_rows }}</strong></div>
+        {% if show.smartlead_campaign_id %}
+        <div><span>Campaign</span><strong>{{ show.smartlead_campaign_name or show.smartlead_campaign_id }}</strong></div>
+        {% endif %}
+      </div>
+
+      {% if not show.smartlead_campaign_id %}
+      <details class="profile-inline-details">
+        <summary>Attach an existing campaign</summary>
+        <form class="profile-inline-form" action="/shows/{{ show.id }}/smartlead/setup" method="post">
+          <input type="hidden" name="campaign_mode" value="existing" />
+          <label>
+            <span>Campaign ID</span>
+            <input type="number" name="existing_campaign_id" min="1" placeholder="123456" required />
+          </label>
+          <button type="submit">Attach campaign</button>
+        </form>
+      </details>
+      {% endif %}
+
+      {% if smartlead_campaign_options and not show.smartlead_campaign_id %}
+      <details class="profile-inline-details">
+        <summary>Recent Smartlead campaigns</summary>
+        <ul class="simple-list">
+          {% for campaign in smartlead_campaign_options[:8] %}
+          <li>{{ campaign.name }} ({{ campaign.id }}){% if campaign.status %} · {{ campaign.status }}{% endif %}</li>
+          {% endfor %}
+        </ul>
+      </details>
+      {% endif %}
+    </section>
+
+    <details class="panel profile-side-card profile-details-card">
+      <summary class="profile-details-summary">Edit show</summary>
+      <form class="edit-show-form" action="/shows/{{ show.id }}/update" method="post">
         <label>
-          <span>Existing campaign ID</span>
-          <input type="number" name="existing_campaign_id" min="1" placeholder="123456" required />
+          <span>Show name</span>
+          <input type="text" name="show_name" value="{{ show.name }}" required />
         </label>
-        <button type="submit">Attach Existing Campaign</button>
+        <label>
+          <span>Show date</span>
+          <input type="text" name="event_date" value="{{ show.event_date }}" required />
+        </label>
+        <label>
+          <span>Place</span>
+          <input type="text" name="place" value="{{ show.place }}" required />
+        </label>
+        <label class="lane-form-wide">
+          <span>Directory or show link</span>
+          <input type="url" name="link" value="{{ show.source_url }}" required />
+        </label>
+        <label>
+          <span>Run days before show</span>
+          <input type="number" name="run_offset_days" min="0" max="60" value="{{ show.run_offset_days }}" required />
+        </label>
+        <button type="submit">Save show</button>
       </form>
-    </div>
-    {% if smartlead_campaign_options %}
-    <div class="smartlead-campaign-list">
-      <h3>Available Smartlead Campaigns</h3>
-      <ul class="simple-list">
-        {% for campaign in smartlead_campaign_options[:8] %}
-        <li>{{ campaign.name }} ({{ campaign.id }}){% if campaign.status %} · {{ campaign.status }}{% endif %}</li>
-        {% endfor %}
-      </ul>
-    </div>
+    </details>
     {% endif %}
-  </div>
-  {% endif %}
+  </aside>
 </section>
-
-<section class="panel">
-  <div class="panel-head">
-    <div>
-      <h2>Company Profiles</h2>
-      <p>{{ analysis.export_company_count }} rows{% if analysis.company_profiles %} · showing top {{ analysis.company_profiles|length }}{% endif %}</p>
-    </div>
-  </div>
-
-  {% if analysis.company_profiles %}
-  <div class="table-wrap">
-    <table class="dashboard-table">
-      <thead>
-        <tr>
-          <th>Company</th>
-          <th>Booth</th>
-          <th>Website</th>
-          <th>Context</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for company in analysis.company_profiles %}
-        <tr>
-          <td>
-            <strong>{{ company.name }}</strong>
-          </td>
-          <td>{{ company.booth_number or "-" }}</td>
-          <td>
-            {% if company.website_url %}
-            <a href="{{ company.website_url }}" target="_blank" rel="noreferrer">{{ company.domain or company.website_url }}</a>
-            {% else %}
-            -
-            {% endif %}
-          </td>
-          <td>{{ company.rationale }}</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-  {% else %}
-  <div class="empty-state">
-    <h3>No company profiles yet</h3>
-    <p>Run the scrape first. Then build the guide.</p>
-  </div>
-  {% endif %}
-</section>
-
-{% if can_manage %}
-<section class="panel">
-  <div class="panel-head">
-    <div>
-      <h2>Run History</h2>
-      <p>{{ show.runs|length }} recorded attempt(s)</p>
-    </div>
-  </div>
-  <div class="table-wrap">
-    <table>
-      <thead>
-        <tr>
-          <th>Run</th>
-          <th>Status</th>
-          <th>Created</th>
-          <th>Started</th>
-          <th>Finished</th>
-          <th>Rows</th>
-          <th>Failures</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for run in show.runs %}
-        <tr>
-          <td>#{{ run.id }}</td>
-          <td><span class="status status-{{ run.status }}">{{ run.status }}</span></td>
-          <td>{{ run.created_at }}</td>
-          <td>{{ run.started_at if run.started_at else "-" }}</td>
-          <td>{{ run.finished_at if run.finished_at else "-" }}</td>
-          <td>{{ run.company_count }}</td>
-          <td>{{ run.failure_count }}</td>
-        </tr>
-        {% else %}
-        <tr>
-          <td colspan="7" class="empty">No runs yet.</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-</section>
-{% endif %}
 {% endblock %}

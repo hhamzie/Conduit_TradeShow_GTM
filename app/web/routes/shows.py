@@ -112,7 +112,7 @@ def show_detail(show_id: int, request: Request, db: Session = Depends(get_db)):
             context_tab_label=f"{show.name} Profile",
             context_tab_href=f"/shows/{show.id}",
             show=show,
-            analysis=build_show_analysis(show, today=datetime.now().date(), company_limit=18),
+            analysis=build_show_analysis(show, today=datetime.now().date(), company_limit=60),
             guide_sheets=build_guide_sheet_views(show),
             export_path=export_path,
             enriched_export_path=enriched_export_path,

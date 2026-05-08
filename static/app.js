@@ -585,6 +585,65 @@ function initializeSheetTabs() {
   }
 }
 
+function updateLeadTable(table) {
+  const panel = table.closest(".lead-panel");
+  if (!panel) {
+    return;
+  }
+
+  const searchInput = panel.querySelector("[data-lead-search]");
+  const resultsTarget = panel.querySelector("[data-lead-results]");
+  const emptyRow = table.querySelector("[data-lead-empty]");
+  const rows = Array.from(table.querySelectorAll("[data-lead-row]"));
+  const limit = Number.parseInt(table.dataset.leadLimit || "10", 10) || 10;
+  const query = searchInput instanceof HTMLInputElement ? searchInput.value.trim().toLowerCase() : "";
+
+  let matchCount = 0;
+  let shownCount = 0;
+
+  rows.forEach((row) => {
+    const haystack = String(row.getAttribute("data-lead-search-text") || "").toLowerCase();
+    const matches = !query || haystack.includes(query);
+    if (!matches) {
+      row.hidden = true;
+      return;
+    }
+
+    matchCount += 1;
+    if (shownCount < limit) {
+      row.hidden = false;
+      shownCount += 1;
+    } else {
+      row.hidden = true;
+    }
+  });
+
+  if (emptyRow) {
+    emptyRow.hidden = matchCount !== 0;
+  }
+
+  if (resultsTarget) {
+    if (matchCount === 0) {
+      resultsTarget.textContent = "No matches";
+    } else {
+      resultsTarget.textContent = `Showing ${shownCount} of ${matchCount}`;
+    }
+  }
+}
+
+function initializeLeadTables() {
+  const leadTables = document.querySelectorAll("[data-lead-table]");
+  leadTables.forEach((table) => {
+    updateLeadTable(table);
+
+    const panel = table.closest(".lead-panel");
+    const searchInput = panel ? panel.querySelector("[data-lead-search]") : null;
+    if (searchInput instanceof HTMLInputElement) {
+      searchInput.addEventListener("input", () => updateLeadTable(table));
+    }
+  });
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   const directForms = document.querySelectorAll("[data-direct-download-form]");
   directForms.forEach((form) => {
@@ -629,4 +688,5 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   initializeSheetTabs();
+  initializeLeadTables();
 });
