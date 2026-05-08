@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 import io
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -11,6 +12,7 @@ from unittest.mock import patch
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
+from app.config import get_settings
 from app.database import Base
 from app.models import ClaySyncRow, RunStatus, Show, ShowStatus
 from app.providers import ClayPollResult, ClayRecord, ProviderResult, SmartleadSyncResult
@@ -118,38 +120,43 @@ class AutomationTests(unittest.TestCase):
 
             raw_path = Path(tmp_dir) / "raw.csv"
             ready_path = Path(tmp_dir) / "ready.csv"
-            with (
-                patch("app.services.poll_clay_table", return_value=poll_result),
-                patch("app.services.import_ready_rows_to_smartlead", return_value=import_result) as import_mock,
-                patch("app.services.enriched_export_path_for_show", return_value=raw_path),
-                patch("app.services.smartlead_ready_export_path_for_show", return_value=ready_path),
-            ):
-                status = sync_show_from_clay(session, show)
+            with patch.dict(os.environ, {"SMARTLEAD_API_KEY": "test-smartlead-key"}):
+                get_settings.cache_clear()
+                try:
+                    with (
+                        patch("app.services.poll_clay_table", return_value=poll_result),
+                        patch("app.services.import_ready_rows_to_smartlead", return_value=import_result) as import_mock,
+                        patch("app.services.enriched_export_path_for_show", return_value=raw_path),
+                        patch("app.services.smartlead_ready_export_path_for_show", return_value=ready_path),
+                    ):
+                        status = sync_show_from_clay(session, show)
 
-            self.assertEqual(status, "success")
-            self.assertEqual(import_mock.call_count, 1)
-            imported_payload = import_mock.call_args.args[1]
-            self.assertEqual(len(imported_payload), 1)
-            self.assertEqual(show.smartlead_campaign_id, 999)
-            self.assertEqual(show.clay_status, "complete")
-            self.assertEqual(show.smartlead_status, "prepared")
-            self.assertTrue(raw_path.exists())
-            self.assertTrue(ready_path.exists())
+                    self.assertEqual(status, "success")
+                    self.assertEqual(import_mock.call_count, 1)
+                    imported_payload = import_mock.call_args.args[1]
+                    self.assertEqual(len(imported_payload), 1)
+                    self.assertEqual(show.smartlead_campaign_id, 999)
+                    self.assertEqual(show.clay_status, "complete")
+                    self.assertEqual(show.smartlead_status, "prepared")
+                    self.assertTrue(raw_path.exists())
+                    self.assertTrue(ready_path.exists())
 
-            sync_rows = session.scalars(select(ClaySyncRow).order_by(ClaySyncRow.clay_row_id.asc())).all()
-            self.assertEqual(len(sync_rows), 2)
-            self.assertTrue(sync_rows[0].imported_to_smartlead or sync_rows[1].imported_to_smartlead)
+                    sync_rows = session.scalars(select(ClaySyncRow).order_by(ClaySyncRow.clay_row_id.asc())).all()
+                    self.assertEqual(len(sync_rows), 2)
+                    self.assertTrue(sync_rows[0].imported_to_smartlead or sync_rows[1].imported_to_smartlead)
 
-            with (
-                patch("app.services.poll_clay_table", return_value=poll_result),
-                patch("app.services.import_ready_rows_to_smartlead", return_value=import_result) as import_mock,
-                patch("app.services.enriched_export_path_for_show", return_value=raw_path),
-                patch("app.services.smartlead_ready_export_path_for_show", return_value=ready_path),
-            ):
-                status = sync_show_from_clay(session, show)
+                    with (
+                        patch("app.services.poll_clay_table", return_value=poll_result),
+                        patch("app.services.import_ready_rows_to_smartlead", return_value=import_result) as import_mock,
+                        patch("app.services.enriched_export_path_for_show", return_value=raw_path),
+                        patch("app.services.smartlead_ready_export_path_for_show", return_value=ready_path),
+                    ):
+                        status = sync_show_from_clay(session, show)
 
-            self.assertEqual(status, "success")
-            self.assertEqual(import_mock.call_count, 0)
+                    self.assertEqual(status, "success")
+                    self.assertEqual(import_mock.call_count, 0)
+                finally:
+                    get_settings.cache_clear()
 
     def test_launch_show_requires_terminal_rows_then_activates(self) -> None:
         with self.Session() as session:
