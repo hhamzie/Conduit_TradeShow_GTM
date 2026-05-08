@@ -85,7 +85,11 @@ def show_dashboard(request: Request, db: Session = Depends(get_db)):
             high_priority_count=sum(1 for analysis in analyses if analysis.priority_slug == "high"),
             export_ready_count=sum(1 for analysis in analyses if analysis.export_ready),
             guide_ready_count=sum(1 for analysis in analyses if analysis.guide_company_count > 0),
-            good_rating_count=sum(1 for analysis in analyses if analysis.guide_score_label == "Good"),
+            average_guide_score=(
+                round(sum(analysis.guide_score for analysis in analyses) / len(analyses))
+                if analyses
+                else 0
+            ),
             total_exhibitors=sum(analysis.exhibitor_count for analysis in analyses),
         ),
     )

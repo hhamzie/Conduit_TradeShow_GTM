@@ -242,12 +242,12 @@ h2 {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 16px;
   margin-bottom: 22px;
+  align-items: start;
 }
 
 .lane-card {
   position: relative;
   overflow: hidden;
-  min-height: 100%;
   display: flex;
   flex-direction: column;
   gap: 14px;
@@ -519,20 +519,18 @@ button.button.subtle {
 
 .dashboard-show-cell,
 .dashboard-action-cell,
-.rating-cell {
+.rating-cell,
+.score-cell,
+.dashboard-icon-rail {
   display: grid;
   gap: 8px;
 }
 
 .dashboard-show-cell strong,
-.rating-cell strong {
+.rating-cell strong,
+.score-cell strong {
   font-size: 1rem;
   line-height: 1.35;
-}
-
-.dashboard-action-cell {
-  align-items: center;
-  justify-items: start;
 }
 
 .dashboard-table td,
@@ -560,7 +558,8 @@ button.button.subtle {
 }
 
 .dashboard-show-cell .muted,
-.rating-cell .muted {
+.rating-cell .muted,
+.score-cell .muted {
   font-size: 0.98rem;
   line-height: 1.45;
 }
@@ -579,11 +578,6 @@ button.button.subtle {
   clip: rect(0, 0, 0, 0);
   white-space: nowrap;
   border: 0;
-}
-
-.action-button {
-  min-width: 104px;
-  justify-content: center;
 }
 
 .edit-show-form,
@@ -710,24 +704,6 @@ button.button.subtle {
   letter-spacing: -0.05em;
 }
 
-.rating-good {
-  background: rgba(20, 122, 85, 0.1);
-  color: var(--success);
-  border-color: rgba(20, 122, 85, 0.14);
-}
-
-.rating-medium {
-  background: rgba(154, 106, 18, 0.12);
-  color: var(--warning);
-  border-color: rgba(154, 106, 18, 0.14);
-}
-
-.rating-bad {
-  background: rgba(186, 60, 77, 0.1);
-  color: var(--danger);
-  border-color: rgba(186, 60, 77, 0.12);
-}
-
 .rating-pill,
 .status-chip {
   display: inline-flex;
@@ -750,19 +726,24 @@ button.button.subtle {
   background: rgba(20, 122, 85, 0.08);
 }
 
+.dashboard-icon-rail {
+  justify-items: end;
+  gap: 12px;
+}
+
 .icon-button {
   position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 42px;
-  height: 42px;
-  border-radius: 12px;
+  width: 46px;
+  height: 46px;
+  border-radius: 14px;
   border: 1px solid var(--line-strong);
   background: rgba(247, 250, 255, 0.95);
   color: var(--ink);
   text-decoration: none;
-  font-size: 1.15rem;
+  font-size: 1.05rem;
 }
 
 .icon-button:hover {
@@ -779,6 +760,66 @@ button.button.subtle {
   background: rgba(186, 60, 77, 0.08);
   border-color: rgba(186, 60, 77, 0.14);
   color: var(--danger);
+}
+
+.smartlead-icon {
+  background: rgba(47, 109, 246, 0.1);
+  border-color: rgba(47, 109, 246, 0.16);
+  color: var(--accent-dark);
+}
+
+.smartlead-icon-missing {
+  background: rgba(154, 106, 18, 0.08);
+  border-color: rgba(154, 106, 18, 0.14);
+  color: var(--warning);
+}
+
+.profile-icon {
+  background: rgba(20, 32, 51, 0.06);
+  color: var(--ink);
+}
+
+.score-cell {
+  min-width: 190px;
+}
+
+.score-value {
+  font-size: 2rem;
+  line-height: 1;
+  letter-spacing: -0.05em;
+  color: hsl(var(--score-hue), 82%, 42%);
+}
+
+.score-track {
+  width: 100%;
+  height: 10px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(186, 60, 77, 0.2), rgba(154, 106, 18, 0.18), rgba(20, 122, 85, 0.16));
+  overflow: hidden;
+}
+
+.score-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: hsl(var(--score-hue), 82%, 42%);
+}
+
+.rating-good {
+  background: rgba(20, 122, 85, 0.1);
+  color: var(--success);
+  border-color: rgba(20, 122, 85, 0.14);
+}
+
+.rating-medium {
+  background: rgba(154, 106, 18, 0.12);
+  color: var(--warning);
+  border-color: rgba(154, 106, 18, 0.14);
+}
+
+.rating-bad {
+  background: rgba(186, 60, 77, 0.1);
+  color: var(--danger);
+  border-color: rgba(186, 60, 77, 0.12);
 }
 
 .action-menu {

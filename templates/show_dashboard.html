@@ -18,8 +18,8 @@
       <strong class="stat-value">{{ tracked_count }}</strong>
     </article>
     <article class="stat-card">
-      <span class="stat-label">Good</span>
-      <strong class="stat-value">{{ good_rating_count }}</strong>
+      <span class="stat-label">Avg Score</span>
+      <strong class="stat-value">{{ average_guide_score }}</strong>
     </article>
     <article class="stat-card">
       <span class="stat-label">Guides Ready</span>
@@ -39,10 +39,8 @@
       <thead>
         <tr>
           <th>Show</th>
-          <th>Rating</th>
-          <th>Smartlead</th>
-          <th>Guide</th>
-          <th>Profile</th>
+          <th>Score</th>
+          <th>Actions</th>
         </tr>
       </thead>
       <tbody>
@@ -56,28 +54,27 @@
             </div>
           </td>
           <td>
-            <div class="rating-cell">
-              <span class="rating-pill rating-{{ analysis.guide_score_slug }}">{{ analysis.guide_score_label }}</span>
-              <strong>{{ analysis.guide_score }}/100</strong>
+            <div class="score-cell">
+              <strong class="score-value" style="--score-hue: {{ analysis.guide_score * 1.2 }};">{{ analysis.guide_score }}</strong>
+              <div class="score-track" aria-hidden="true">
+                <div class="score-fill" style="width: {{ analysis.guide_score }}%; --score-hue: {{ analysis.guide_score * 1.2 }};"></div>
+              </div>
+              <span class="muted">0 to 100</span>
             </div>
           </td>
           <td>
-            <div class="dashboard-action-cell">
+            <div class="dashboard-icon-rail">
               {% if analysis.show.smartlead_campaign_id %}
-              <span class="status-chip status-chip-success">Done</span>
-              <a class="button secondary action-button" href="https://app.smartlead.ai/app/campaigns/{{ analysis.show.smartlead_campaign_id }}" target="_blank" rel="noreferrer" data-tooltip="Open Smartlead campaign">Open</a>
+              <a class="icon-button smartlead-icon" href="https://app.smartlead.ai/app/campaigns/{{ analysis.show.smartlead_campaign_id }}" target="_blank" rel="noreferrer" data-tooltip="Smartlead campaign">&#10148;</a>
               {% elif can_manage %}
               <form action="/shows/{{ analysis.show.id }}/smartlead/setup" method="post">
                 <input type="hidden" name="campaign_mode" value="smart" />
-                <button class="button secondary action-button" type="submit" data-tooltip="Create or attach Smartlead campaign">Add</button>
+                <button class="icon-button smartlead-icon smartlead-icon-missing" type="submit" data-tooltip="Add Smartlead campaign">&#10148;</button>
               </form>
               {% else %}
-              <span class="status-chip">Not added</span>
+              <span class="icon-button smartlead-icon smartlead-icon-missing" data-tooltip="No Smartlead campaign">&#10148;</span>
               {% endif %}
-            </div>
-          </td>
-          <td>
-            <div class="dashboard-action-cell">
+
               {% if analysis.guide_company_count > 0 %}
               <a class="icon-button guide-icon guide-icon-ready" href="/shows/{{ analysis.show.id }}/guide" data-tooltip="Open guide" aria-label="Open guide">&#128214;</a>
               {% elif can_manage %}
@@ -94,10 +91,9 @@
               {% else %}
               <a class="icon-button guide-icon guide-icon-missing" href="/shows/{{ analysis.show.id }}/guide" data-tooltip="Guide not built yet" aria-label="Open guide">&#128214;</a>
               {% endif %}
+
+              <a class="icon-button profile-icon" href="/shows/{{ analysis.show.id }}" data-tooltip="Show profile">&#9638;</a>
             </div>
-          </td>
-          <td>
-            <a class="button secondary action-button" href="/shows/{{ analysis.show.id }}" data-tooltip="Open show profile">Open</a>
           </td>
         </tr>
         {% endfor %}
