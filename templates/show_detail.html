@@ -9,7 +9,7 @@
       <p class="muted">{{ show.event_date }} · {{ show.place }}</p>
     </div>
     <div class="profile-hero-tools">
-      <span class="status status-{{ show.status }}">{{ show.status|replace('_', ' ') }}</span>
+      <span class="status status-{{ show.status }}">{{ show_status_label }}</span>
       <div class="score-badge rating-{{ analysis.guide_score_slug }}">
         <span>Guide score</span>
         <strong>{{ analysis.guide_score }}/100</strong>
@@ -220,7 +220,7 @@
         {% for run in show.runs %}
         <tr>
           <td>#{{ run.id }}</td>
-          <td><span class="status status-{{ run.status }}">{{ run.status|replace('_', ' ') }}</span></td>
+          <td><span class="status status-{{ run.status }}">{{ run_status_label_for(run.status) }}</span></td>
           <td>{{ run.created_at }}</td>
           <td>{{ run.started_at if run.started_at else "-" }}</td>
           <td>{{ run.finished_at if run.finished_at else "-" }}</td>

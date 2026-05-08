@@ -44,6 +44,7 @@ class WorkflowPresenterTests(unittest.TestCase):
         self.assertEqual(view.scheduled_count, 1)
         self.assertEqual(view.completed_section_count, 1)
         self.assertEqual(view.completed_lead_count, 25)
+        self.assertEqual(view.completed[0].status_label, "Populated")
 
     def test_build_show_card_hides_old_completion_notice(self) -> None:
         now = datetime(2026, 5, 8, 12, 0)

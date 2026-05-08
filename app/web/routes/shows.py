@@ -33,7 +33,12 @@ from app.services import (
     sync_show_from_clay,
     update_show,
 )
-from app.web.presenters import build_show_notice, summarize_show_error
+from app.web.presenters import (
+    build_show_notice,
+    get_run_status_label,
+    get_show_status_label,
+    summarize_show_error,
+)
 
 
 router = APIRouter()
@@ -89,6 +94,7 @@ def show_dashboard(request: Request, db: Session = Depends(get_db)):
             can_manage=can_manage(request),
             title="Show Dashboard",
             analyses=analyses,
+            show_status_label_for=get_show_status_label,
             tracked_count=len(analyses),
             upcoming_count=sum(1 for analysis in analyses if analysis.days_until_event >= 0),
             smartlead_campaign_count=sum(1 for analysis in analyses if analysis.show.smartlead_campaign_id),
@@ -119,6 +125,8 @@ def show_detail(show_id: int, request: Request, db: Session = Depends(get_db)):
             context_tab_label=f"{show.name} Profile",
             context_tab_href=f"/shows/{show.id}",
             show=show,
+            show_status_label=get_show_status_label(show.status),
+            run_status_label_for=get_run_status_label,
             analysis=build_show_analysis(show, today=datetime.now().date(), company_limit=60),
             guide_sheets=build_guide_sheet_views(show),
             export_path=export_path,

@@ -68,7 +68,7 @@
           <td>
             <div class="dashboard-show-cell">
               <strong>{{ analysis.show.name }}</strong>
-              <span class="muted">{{ analysis.show.event_date }} · {{ analysis.exhibitor_count }} exhibitors{% if analysis.show.status %} · {{ analysis.show.status }}{% endif %}</span>
+              <span class="muted">{{ analysis.show.event_date }} · {{ analysis.exhibitor_count }} exhibitors{% if analysis.show.status %} · {{ show_status_label_for(analysis.show.status) }}{% endif %}</span>
             </div>
           </td>
           <td>

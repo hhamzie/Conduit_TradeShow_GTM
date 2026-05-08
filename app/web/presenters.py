@@ -8,6 +8,21 @@ from app.models import RunStatus, Show
 
 WORKFLOW_SECTIONS = {"active", "scheduled_later", "completed"}
 RECENT_COMPLETION_WINDOW = timedelta(minutes=20)
+SHOW_STATUS_LABELS = {
+    "waiting": "Scheduled",
+    "queued": "Queued",
+    "scraping": "Scraping",
+    "ready_for_review": "Populated",
+    "approved": "Ready to launch",
+    "live": "Live",
+    "failed": "Needs attention",
+}
+RUN_STATUS_LABELS = {
+    "queued": "Queued",
+    "running": "Running",
+    "success": "Completed",
+    "failed": "Failed",
+}
 
 
 @dataclass(frozen=True)
@@ -67,6 +82,14 @@ def summarize_show_error(error_text: str) -> str:
     if len(compact) > 170:
         return compact[:167] + "..."
     return compact
+
+
+def get_show_status_label(status: str) -> str:
+    return SHOW_STATUS_LABELS.get(status, status.replace("_", " ").title())
+
+
+def get_run_status_label(status: str) -> str:
+    return RUN_STATUS_LABELS.get(status, status.replace("_", " ").title())
 
 
 def _has_recent_successful_scrape(show: Show, now: datetime) -> bool:
@@ -139,7 +162,7 @@ def build_show_notice(show: Show, now: datetime) -> ShowNotice | None:
             details.append("The Clay pull succeeded, but the latest Smartlead sync failed.")
 
         if not details:
-            details.append(f"{show.company_count} companies were exported and are ready for review.")
+            details.append(f"{show.company_count} companies were exported and the show is populated.")
 
         return ShowNotice(
             tone=tone,
@@ -272,7 +295,7 @@ def build_show_card(show: Show, now: datetime) -> ShowCard:
         section=flow["section"],
         run_timing=format_run_at_label(show, now),
         provider_summary=provider_status_summary(show),
-        status_label=show.status.replace("_", " "),
+        status_label=get_show_status_label(show.status),
     )
 
 
