@@ -40,14 +40,34 @@ function setProgressMessage(target, message, tone) {
   target.dataset.tone = tone || "info";
 }
 
-function setProgressBar(bar, completed, total) {
-  if (!bar) {
+function updateBulkProgress(ui, { completed = 0, total = 1, currentShow = "", detail = "", tone = "info", active = true }) {
+  if (!ui.panel) {
     return;
   }
+
+  const safeCompleted = Math.max(completed || 0, 0);
   const safeTotal = Math.max(total || 0, 1);
-  bar.hidden = false;
-  bar.max = safeTotal;
-  bar.value = Math.min(completed || 0, safeTotal);
+  const percent = Math.max(0, Math.min(100, Math.round((safeCompleted / safeTotal) * 100)));
+
+  ui.panel.hidden = false;
+  ui.panel.dataset.tone = tone;
+  ui.panel.dataset.active = active ? "true" : "false";
+
+  if (ui.fill) {
+    ui.fill.style.width = `${percent}%`;
+  }
+  if (ui.percent) {
+    ui.percent.textContent = `${percent}%`;
+  }
+  if (ui.count) {
+    ui.count.textContent = `${Math.min(safeCompleted, safeTotal)} of ${safeTotal} complete`;
+  }
+  if (ui.currentShow) {
+    ui.currentShow.textContent = currentShow || (active ? "Preparing bulk scrape" : "Bulk scrape complete");
+  }
+  if (ui.detail) {
+    ui.detail.textContent = detail || "";
+  }
 }
 
 async function downloadResponse(response) {
@@ -123,7 +143,25 @@ async function handleDirectDownloadFormSubmit(event) {
   }
 }
 
-async function pollBulkScrapeJob(jobId, progressTarget, progressBar) {
+function getBulkProgressUI(form) {
+  const panelId = form.dataset.progressPanelTarget || "";
+  const fillId = form.dataset.progressFillTarget || "";
+  const percentId = form.dataset.progressPercentTarget || "";
+  const countId = form.dataset.progressCountTarget || "";
+  const currentShowId = form.dataset.progressCurrentShowTarget || "";
+  const detailId = form.dataset.progressDetailTarget || "";
+
+  return {
+    panel: panelId ? document.getElementById(panelId) : null,
+    fill: fillId ? document.getElementById(fillId) : null,
+    percent: percentId ? document.getElementById(percentId) : null,
+    count: countId ? document.getElementById(countId) : null,
+    currentShow: currentShowId ? document.getElementById(currentShowId) : null,
+    detail: detailId ? document.getElementById(detailId) : null,
+  };
+}
+
+async function pollBulkScrapeJob(jobId, progressTarget, progressUI) {
   while (true) {
     const response = await fetch(`/scrape/bulk/status/${jobId}`, {
       credentials: "same-origin",
@@ -132,7 +170,14 @@ async function pollBulkScrapeJob(jobId, progressTarget, progressBar) {
       throw new Error(`Unable to fetch bulk scrape status (${response.status}).`);
     }
     const payload = await response.json();
-    setProgressBar(progressBar, payload.completed || 0, payload.total || 1);
+    updateBulkProgress(progressUI, {
+      completed: payload.completed || 0,
+      total: payload.total || 1,
+      currentShow: payload.current_show || "Preparing bulk scrape",
+      detail: payload.message || "Working...",
+      tone: payload.status === "completed" ? "success" : "info",
+      active: payload.status !== "completed",
+    });
     setProgressMessage(progressTarget, payload.message || "Working...", "info");
 
     if (payload.status === "completed") {
@@ -150,13 +195,19 @@ async function handleBulkDownloadFormSubmit(event) {
   event.preventDefault();
   const form = event.currentTarget;
   const progressTargetId = form.dataset.progressTarget || "";
-  const progressBarTargetId = form.dataset.progressBarTarget || "";
   const progressTarget = progressTargetId ? document.getElementById(progressTargetId) : null;
-  const progressBar = progressBarTargetId ? document.getElementById(progressBarTargetId) : null;
+  const progressUI = getBulkProgressUI(form);
   const loadingLabel = form.dataset.loadingLabel || "Working...";
 
   setFormBusyState(form, true, loadingLabel);
-  setProgressBar(progressBar, 0, 1);
+  updateBulkProgress(progressUI, {
+    completed: 0,
+    total: 1,
+    currentShow: "Preparing bulk scrape",
+    detail: "Queued bulk scrape job.",
+    tone: "info",
+    active: true,
+  });
   setProgressMessage(progressTarget, "Queued bulk scrape job.", "info");
 
   try {
@@ -183,8 +234,16 @@ async function handleBulkDownloadFormSubmit(event) {
       typeof payload.created === "number"
         ? `Added ${payload.created} new show(s), updated ${payload.updated || 0}, skipped ${payload.skipped || 0}.`
         : "Registered shows in the dashboard.";
+    updateBulkProgress(progressUI, {
+      completed: 0,
+      total: 1,
+      currentShow: "Queued shows",
+      detail: `${registeredSummary} Starting bulk scrape...`,
+      tone: "info",
+      active: true,
+    });
     setProgressMessage(progressTarget, `${registeredSummary} Starting bulk scrape...`, "info");
-    const finalStatus = await pollBulkScrapeJob(payload.job_id, progressTarget, progressBar);
+    const finalStatus = await pollBulkScrapeJob(payload.job_id, progressTarget, progressUI);
     const downloadResponseObject = await fetch(finalStatus.download_url, {
       credentials: "same-origin",
     });
@@ -192,12 +251,28 @@ async function handleBulkDownloadFormSubmit(event) {
       throw new Error(`The ZIP download failed (${downloadResponseObject.status}).`);
     }
     await downloadResponse(downloadResponseObject);
+    updateBulkProgress(progressUI, {
+      completed: finalStatus.completed || finalStatus.total || 1,
+      total: finalStatus.total || 1,
+      currentShow: finalStatus.current_show || "Bulk scrape complete",
+      detail: "ZIP download started. The shows are now on the dashboard.",
+      tone: "success",
+      active: false,
+    });
     setProgressMessage(progressTarget, "Bulk scrape finished. ZIP download started. The shows are now on the dashboard.", "success");
   } catch (error) {
     const message =
       error instanceof Error && error.message
         ? error.message
         : "Something went wrong while starting the bulk scrape.";
+    updateBulkProgress(progressUI, {
+      completed: 0,
+      total: 1,
+      currentShow: "Bulk scrape failed",
+      detail: message,
+      tone: "error",
+      active: false,
+    });
     setProgressMessage(progressTarget, message, "error");
   } finally {
     setFormBusyState(form, false, loadingLabel);
