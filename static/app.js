@@ -801,6 +801,16 @@ function initializeScanModal() {
     }
   }
 
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape") {
+      return;
+    }
+    const scanModal = document.querySelector("[data-scan-modal]");
+    if (scanModal instanceof HTMLElement && !scanModal.hidden) {
+      closeScanModal();
+    }
+  });
+
   const form = document.querySelector("[data-scan-form]");
   if (form instanceof HTMLFormElement) {
     form.addEventListener("submit", handleScanSubmit);

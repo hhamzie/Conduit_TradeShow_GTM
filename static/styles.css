@@ -1187,6 +1187,13 @@ button.button.subtle {
   z-index: 1300;
 }
 
+.confirm-modal-backdrop[hidden],
+.scan-progress[hidden],
+.scan-results[hidden],
+.confirm-modal-copy[hidden] {
+  display: none !important;
+}
+
 .confirm-modal {
   width: min(100%, 440px);
   padding: 24px;
