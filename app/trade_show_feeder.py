@@ -66,6 +66,21 @@ class TradeShowScanError(Exception):
 
 
 SCAN_MODEL_FALLBACKS = ("gpt-4.1-mini", "gpt-4.1")
+TRADE_SHOW_SCAN_ALLOWED_DOMAINS = (
+    "tsnn.com",
+    "eventsinamerica.com",
+    "tradefairdates.com",
+    "10times.com",
+    "tradefest.io",
+    "expodatabase.com",
+    "mapyourshow.com",
+    "expofp.com",
+    "eventscribe.net",
+    "personifycloud.com",
+    "bulletin.co",
+    "andmore.com",
+    "themart.com",
+)
 
 
 def is_b2b_physical_goods_show(show_name: str, source_url: str = "") -> bool:
@@ -122,7 +137,9 @@ def scan_upcoming_trade_shows(
         f"Find upcoming B2B physical-goods trade shows between {start_date.isoformat()} and {end_date.isoformat()}. "
         "Only include shows where exhibitors are likely manufacturers, wholesalers, suppliers, or brands selling physical goods. "
         "Exclude software, creator, media, fintech, or purely digital events. "
-        "Prefer official exhibitor directory URLs. If there is no public directory, use the best official show page. "
+        "Use trusted B2B trade show listing sources and official organizer or exhibitor-directory sources to discover the events. "
+        "The final link you return must be the official exhibitor directory URL when possible. "
+        "If there is no public directory, return the best official show page instead. "
         "Focus on North American shows. Keep summaries short and direct."
     )
     if normalized_hint:
@@ -132,6 +149,14 @@ def scan_upcoming_trade_shows(
         "tools": [
             {
                 "type": "web_search",
+                "filters": {
+                    "allowed_domains": list(TRADE_SHOW_SCAN_ALLOWED_DOMAINS),
+                },
+                "user_location": {
+                    "type": "approximate",
+                    "country": "US",
+                    "timezone": "America/New_York",
+                },
             }
         ],
         "tool_choice": "auto",
