@@ -613,6 +613,8 @@ function resetScanModalState(modal) {
   const list = modal.querySelector("[data-scan-list]");
   const payload = modal.querySelector("[data-scan-payload]");
   const message = modal.querySelector("[data-scan-message]");
+  const progress = modal.querySelector("[data-scan-progress]");
+  const elapsed = modal.querySelector("[data-scan-elapsed]");
   if (results instanceof HTMLElement) {
     results.hidden = true;
   }
@@ -628,6 +630,12 @@ function resetScanModalState(modal) {
   }
   if (message instanceof HTMLElement) {
     message.textContent = "";
+  }
+  if (progress instanceof HTMLElement) {
+    progress.hidden = true;
+  }
+  if (elapsed instanceof HTMLElement) {
+    elapsed.textContent = "0s elapsed";
   }
 }
 
@@ -661,6 +669,21 @@ async function handleScanSubmit(event) {
   const payloadField = modal ? modal.querySelector("[data-scan-payload]") : null;
   const message = modal ? modal.querySelector("[data-scan-message]") : null;
   const confirmButton = modal ? modal.querySelector("[data-scan-confirm]") : null;
+  const progress = modal ? modal.querySelector("[data-scan-progress]") : null;
+  const elapsed = modal ? modal.querySelector("[data-scan-elapsed]") : null;
+  const startedAt = Date.now();
+  let elapsedTimer = 0;
+
+  if (progress instanceof HTMLElement) {
+    progress.hidden = false;
+  }
+  if (elapsed instanceof HTMLElement) {
+    elapsed.textContent = "0s elapsed";
+    elapsedTimer = window.setInterval(() => {
+      const seconds = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
+      elapsed.textContent = `${seconds}s elapsed`;
+    }, 1000);
+  }
 
   setFormBusyState(form, true, "Scanning...");
   if (results instanceof HTMLElement) {
@@ -714,6 +737,12 @@ async function handleScanSubmit(event) {
         error instanceof Error && error.message ? error.message : "Scan failed.";
     }
   } finally {
+    if (elapsedTimer) {
+      window.clearInterval(elapsedTimer);
+    }
+    if (progress instanceof HTMLElement) {
+      progress.hidden = true;
+    }
     setFormBusyState(form, false, "Scanning...");
   }
 }

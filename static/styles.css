@@ -574,6 +574,18 @@ button.button.subtle {
   gap: 10px;
 }
 
+.scan-trigger-button {
+  width: 42px;
+  height: 42px;
+  border-radius: 999px;
+  color: var(--accent-dark);
+}
+
+.scan-icon-mark {
+  width: 20px;
+  height: 20px;
+}
+
 .mini-stat-card {
   padding: 14px 16px;
   border-radius: 16px;
@@ -1183,6 +1195,82 @@ button.button.subtle {
   gap: 12px;
 }
 
+.scan-progress {
+  display: grid;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: #ffffff;
+}
+
+.scan-progress-head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.scan-progress-title {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.scan-progress-copy {
+  margin: 0;
+  color: var(--ink-soft);
+}
+
+.scan-beacon {
+  position: relative;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+}
+
+.scan-beacon-ring,
+.scan-beacon-core {
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+}
+
+.scan-beacon-ring {
+  border: 1.5px solid rgba(47, 109, 246, 0.28);
+  animation: scan-pulse 1.8s ease-out infinite;
+}
+
+.scan-beacon-ring-two {
+  animation-delay: 0.9s;
+}
+
+.scan-beacon-core {
+  inset: 11px;
+  background: var(--accent-dark);
+}
+
+.scan-progress-track {
+  position: relative;
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(47, 109, 246, 0.08);
+  overflow: hidden;
+}
+
+.scan-progress-fill {
+  position: absolute;
+  inset: 0;
+  width: 38%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, rgba(47, 109, 246, 0) 0%, rgba(47, 109, 246, 0.82) 45%, rgba(47, 109, 246, 0) 100%);
+  animation: scan-sweep 1.4s ease-in-out infinite;
+}
+
+.scan-progress-time {
+  font-size: 0.84rem;
+  font-weight: 700;
+  color: var(--muted);
+}
+
 .scan-result-list {
   display: grid;
   gap: 10px;
@@ -1209,6 +1297,26 @@ button.button.subtle {
   font-size: 0.82rem;
   color: var(--accent-dark);
   overflow-wrap: anywhere;
+}
+
+@keyframes scan-pulse {
+  0% {
+    opacity: 0.95;
+    transform: scale(0.45);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1);
+  }
+}
+
+@keyframes scan-sweep {
+  0% {
+    transform: translateX(-130%);
+  }
+  100% {
+    transform: translateX(300%);
+  }
 }
 
 .priority-high {

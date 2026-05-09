@@ -9,8 +9,15 @@
     </div>
     <div class="hero-dashboard-actions">
       {% if can_manage %}
-      <button class="button secondary discreet-workflow-link" type="button" data-scan-open>Scan for upcoming trade shows</button>
-      <a class="button secondary discreet-workflow-link" href="/workflow">Workflow</a>
+      <button class="icon-button scan-trigger-button" type="button" data-scan-open data-tooltip="Trade show scan" aria-label="Trade show scan">
+        <svg viewBox="0 0 24 24" aria-hidden="true" class="icon-mark scan-icon-mark">
+          <circle cx="12" cy="12" r="2.2" fill="currentColor"/>
+          <path d="M12 4.5a7.5 7.5 0 0 1 7.5 7.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+          <path d="M12 1.75A10.25 10.25 0 0 1 22.25 12" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" opacity="0.72"/>
+          <path d="M12 19.5A7.5 7.5 0 0 1 4.5 12" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+          <path d="M12 22.25A10.25 10.25 0 0 1 1.75 12" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" opacity="0.72"/>
+        </svg>
+      </button>
       {% endif %}
     </div>
   </div>
@@ -219,6 +226,23 @@
         <button class="button" type="submit" data-scan-submit>Run scan</button>
       </div>
     </form>
+    <div class="scan-progress" data-scan-progress hidden>
+      <div class="scan-progress-head">
+        <div class="scan-beacon" aria-hidden="true">
+          <span class="scan-beacon-ring scan-beacon-ring-one"></span>
+          <span class="scan-beacon-ring scan-beacon-ring-two"></span>
+          <span class="scan-beacon-core"></span>
+        </div>
+        <div>
+          <strong class="scan-progress-title">Scanning trade shows</strong>
+          <p class="scan-progress-copy">Checking for upcoming B2B physical-goods events.</p>
+        </div>
+      </div>
+      <div class="scan-progress-track" aria-hidden="true">
+        <div class="scan-progress-fill"></div>
+      </div>
+      <span class="scan-progress-time" data-scan-elapsed>0s elapsed</span>
+    </div>
     <div class="scan-results" data-scan-results hidden>
       <p class="confirm-modal-copy" data-scan-message></p>
       <div class="scan-result-list" data-scan-list></div>
