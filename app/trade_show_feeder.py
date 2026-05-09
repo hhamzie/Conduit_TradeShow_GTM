@@ -59,6 +59,9 @@ class TradeShowScanCandidate:
     summary: str
 
 
+SCAN_MODEL_FALLBACKS = ("gpt-4.1-mini", "gpt-4.1")
+
+
 def is_b2b_physical_goods_show(show_name: str, source_url: str = "") -> bool:
     haystack = f"{show_name} {source_url}".strip().lower()
     if not haystack:
@@ -119,8 +122,7 @@ def scan_upcoming_trade_shows(
     if normalized_hint:
         prompt = f"{prompt} Extra focus: {normalized_hint}."
 
-    payload = {
-        "model": model,
+    request_payload = {
         "tools": [
             {
                 "type": "web_search",
@@ -162,18 +164,43 @@ def scan_upcoming_trade_shows(
         "max_output_tokens": 1800,
     }
 
-    response = httpx.post(
-        OPENAI_RESPONSES_URL,
-        json=payload,
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        },
-        timeout=90.0,
-        follow_redirects=True,
+    candidate_models: list[str] = [model]
+    candidate_models.extend(
+        fallback_model
+        for fallback_model in SCAN_MODEL_FALLBACKS
+        if fallback_model != model
     )
-    response.raise_for_status()
-    body = response.json()
+
+    body: dict[str, object] | None = None
+    last_error: httpx.HTTPStatusError | None = None
+    for candidate_model in candidate_models:
+        payload = dict(request_payload)
+        payload["model"] = candidate_model
+        response = httpx.post(
+            OPENAI_RESPONSES_URL,
+            json=payload,
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            timeout=90.0,
+            follow_redirects=True,
+        )
+        try:
+            response.raise_for_status()
+            body = response.json()
+            break
+        except httpx.HTTPStatusError as exc:
+            last_error = exc
+            if not _should_retry_scan_with_fallback(exc):
+                raise
+            continue
+
+    if body is None:
+        if last_error is not None:
+            raise last_error
+        return []
+
     text = extract_text_from_openai_response(body)
     if not text:
         return []
@@ -213,3 +240,21 @@ def scan_upcoming_trade_shows(
             break
 
     return candidates
+
+
+def _should_retry_scan_with_fallback(error: httpx.HTTPStatusError) -> bool:
+    response = error.response
+    if response.status_code != 404:
+        return False
+    try:
+        payload = response.json()
+    except ValueError:
+        return False
+    if not isinstance(payload, dict):
+        return False
+    details = payload.get("error")
+    if not isinstance(details, dict):
+        return False
+    code = str(details.get("code") or "").strip().lower()
+    message = str(details.get("message") or "").strip().lower()
+    return code == "model_not_found" or "must be verified to use the model" in message

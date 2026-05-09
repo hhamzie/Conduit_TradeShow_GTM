@@ -11,6 +11,7 @@ import zipfile
 from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
+import httpx
 from openpyxl import Workbook
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
@@ -20,7 +21,7 @@ from app.database import Base
 from app.models import ClaySyncRow, RunStatus, Show, ShowGuideRow, ShowStatus
 from app.providers import ClayPollResult, ClayRecord, ProviderResult, SmartleadSyncResult
 from app.services import _build_prepared_lead, BulkDirectScrapeResult, DirectScrapeResult, launch_show, register_bulk_shows, run_bulk_direct_scrape, run_show_scrape, run_weekly_show_sync, start_outbound_campaign, sync_show_from_clay, upsert_show
-from app.trade_show_feeder import TradeShowScanCandidate
+from app.trade_show_feeder import TradeShowScanCandidate, scan_upcoming_trade_shows
 
 
 def make_show(**overrides) -> Show:
@@ -820,6 +821,54 @@ class AutomationTests(unittest.TestCase):
         self.assertEqual(second_response.status_code, 429)
         self.assertIn(b'"status":"locked"', second_response.body)
         self.assertIn(b"Search has already been done today.", second_response.body)
+
+    def test_scan_upcoming_trade_shows_falls_back_when_gpt5_is_unavailable(self) -> None:
+        primary_response = httpx.Response(
+            404,
+            json={
+                "error": {
+                    "message": "Your organization must be verified to use the model `gpt-5`.",
+                    "code": "model_not_found",
+                }
+            },
+            request=httpx.Request("POST", "https://api.openai.com/v1/responses"),
+        )
+        fallback_response = httpx.Response(
+            200,
+            json={"output": [{"content": [{"text": json.dumps({"shows": [{"show_name": "High Point Market", "event_date": "2026-05-25", "place": "High Point NC", "link": "https://example.com/high-point", "summary": "Home furnishings suppliers."}]})}]}]},
+            request=httpx.Request("POST", "https://api.openai.com/v1/responses"),
+        )
+
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "test-openai-key", "TRADE_SHOW_SCAN_MODEL": "gpt-5"}):
+            get_settings.cache_clear()
+            try:
+                with (
+                    patch("app.trade_show_feeder.httpx.post", side_effect=[primary_response, fallback_response]) as post_mock,
+                    patch(
+                        "app.trade_show_feeder.extract_text_from_openai_response",
+                        return_value=json.dumps(
+                            {
+                                "shows": [
+                                    {
+                                        "show_name": "High Point Market",
+                                        "event_date": "2026-05-25",
+                                        "place": "High Point NC",
+                                        "link": "https://example.com/high-point",
+                                        "summary": "Home furnishings suppliers.",
+                                    }
+                                ]
+                            }
+                        ),
+                    ),
+                ):
+                    candidates = scan_upcoming_trade_shows()
+            finally:
+                get_settings.cache_clear()
+
+        self.assertEqual(len(candidates), 1)
+        self.assertEqual(candidates[0].show_name, "High Point Market")
+        self.assertEqual(post_mock.call_args_list[0].kwargs["json"]["model"], "gpt-5")
+        self.assertEqual(post_mock.call_args_list[1].kwargs["json"]["model"], "gpt-4.1-mini")
 
     def test_confirm_scanned_trade_shows_route_adds_shows(self) -> None:
         from app.main import confirm_scanned_trade_shows_route
