@@ -882,7 +882,7 @@ button.button.subtle {
 .dashboard-icon-rail {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: flex-start;
   gap: 10px;
 }
 
@@ -983,10 +983,24 @@ button.button.subtle {
   filter: saturate(0.85);
 }
 
-.profile-icon {
-  background: #ffffff;
-  border-color: rgba(47, 109, 246, 0.12);
-  color: #4a6286;
+.actions-col {
+  text-align: left;
+}
+
+.more-actions-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  min-height: 38px;
+  padding: 0 2px;
+  border: 0;
+  background: transparent;
+  color: #5f7698;
+}
+
+.more-actions-trigger:hover {
+  color: var(--accent-dark);
 }
 
 .score-cell {

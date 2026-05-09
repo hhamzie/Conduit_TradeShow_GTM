@@ -66,7 +66,7 @@
           <th>Show</th>
           <th>Relevant Companies</th>
           <th>Complexity</th>
-          <th>Actions</th>
+          <th class="actions-col">Actions</th>
         </tr>
       </thead>
       <tbody>
@@ -97,7 +97,7 @@
               <strong class="dashboard-stat-value">{{ "%.1f"|format(analysis.average_complexity_score) if analysis.average_complexity_score else "0.0" }} / 5</strong>
             </div>
           </td>
-          <td>
+          <td class="actions-col">
             <div class="dashboard-icon-rail">
               {% if analysis.has_running_campaign and analysis.show.smartlead_campaign_id %}
               <a class="icon-button smartlead-icon smartlead-icon-live" href="https://app.smartlead.ai/app/campaigns/{{ analysis.show.smartlead_campaign_id }}" target="_blank" rel="noreferrer" data-tooltip="Outbound running. Open campaign.">
@@ -164,7 +164,7 @@
 
               {% if can_manage %}
               <details class="action-menu">
-                <summary class="icon-button profile-icon" data-tooltip="More actions" aria-label="More actions">
+                <summary class="more-actions-trigger" data-tooltip="More actions" aria-label="More actions">
                   <svg viewBox="0 0 24 24" aria-hidden="true" class="icon-mark">
                     <circle cx="12" cy="5" r="1.8" fill="currentColor"/>
                     <circle cx="12" cy="12" r="1.8" fill="currentColor"/>
@@ -178,7 +178,7 @@
                 </div>
               </details>
               {% else %}
-              <span class="icon-button profile-icon" data-tooltip="Open row for profile">
+              <span class="more-actions-trigger" data-tooltip="Open row for profile">
                 <svg viewBox="0 0 24 24" aria-hidden="true" class="icon-mark">
                   <circle cx="12" cy="5" r="1.8" fill="currentColor"/>
                   <circle cx="12" cy="12" r="1.8" fill="currentColor"/>
