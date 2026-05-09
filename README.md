@@ -204,6 +204,7 @@ Relevant settings:
 - `OPENAI_API_KEY`
 - `SCRAPER_AGENT_MODE`
 - `SCRAPER_AGENT_MODEL`
+- `TRADE_SHOW_SCAN_MODEL`
 
 Modes:
 
@@ -216,6 +217,15 @@ Recommended default:
 - `SCRAPER_AGENT_MODE=fallback`
 
 That keeps normal directories fast and cheap, while giving weird layouts a second recovery pass before the scrape fails.
+
+## Trade show feeder
+
+The manual `Scan for upcoming trade shows` popup on the dashboard is already wired. To turn it on later, you only need:
+
+- `OPENAI_API_KEY`
+- optional `TRADE_SHOW_SCAN_MODEL` (defaults to `gpt-5`)
+
+If the key is missing, the popup will return a clean setup message instead of failing silently.
 
 ## Smartlead integration
 

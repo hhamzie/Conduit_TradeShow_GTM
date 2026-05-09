@@ -34,6 +34,8 @@ class Settings:
     default_sample_size: int
     default_browser_mode: str
     default_browser_timeout_ms: int
+    openai_api_key: str
+    trade_show_scan_model: str
     session_secret: str
     dashboard_username: str
     dashboard_password: str
@@ -95,6 +97,8 @@ def get_settings() -> Settings:
         default_sample_size=int(os.getenv("DEFAULT_SAMPLE_SIZE", "3")),
         default_browser_mode=os.getenv("DEFAULT_BROWSER_MODE", "auto"),
         default_browser_timeout_ms=int(os.getenv("DEFAULT_BROWSER_TIMEOUT_MS", "25000")),
+        openai_api_key=os.getenv("OPENAI_API_KEY", "").strip(),
+        trade_show_scan_model=os.getenv("TRADE_SHOW_SCAN_MODEL", "gpt-5").strip() or "gpt-5",
         session_secret=os.getenv("SESSION_SECRET", "dev-session-secret-change-me"),
         dashboard_username=os.getenv("DASHBOARD_USERNAME", "admin"),
         dashboard_password=os.getenv("DASHBOARD_PASSWORD", "change-me-now"),

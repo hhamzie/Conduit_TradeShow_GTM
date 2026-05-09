@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date, timedelta
 import json
-import os
 
 import httpx
 
@@ -76,12 +75,12 @@ def scan_upcoming_trade_shows(
     lookahead_days: int | None = None,
     limit: int = 8,
 ) -> list[TradeShowScanCandidate]:
-    api_key = os.getenv("OPENAI_API_KEY", "").strip()
+    settings = get_settings()
+    api_key = settings.openai_api_key
     if not api_key:
         raise ValueError("Set OPENAI_API_KEY before scanning for upcoming trade shows.")
 
-    settings = get_settings()
-    model = os.getenv("TRADE_SHOW_SCAN_MODEL", "gpt-5").strip() or "gpt-5"
+    model = settings.trade_show_scan_model
     start_date = today or date.today()
     days_ahead = lookahead_days or settings.weekly_show_sync_lookahead_days
     end_date = start_date + timedelta(days=days_ahead)
