@@ -518,7 +518,7 @@ button.button.subtle {
 .bulk-select-anchor {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 16px;
 }
 
 .bulk-select-control {
@@ -527,6 +527,10 @@ button.button.subtle {
   gap: 8px;
   min-height: 18px;
   line-height: 1;
+}
+
+.bulk-select-control > span {
+  transform: translateY(1px);
 }
 
 .bulk-select-anchor .selector-control {
@@ -566,7 +570,7 @@ button.button.subtle {
 
 .dashboard-bulk-bar {
   display: grid !important;
-  grid-template-columns: auto 1fr;
+  grid-template-columns: 1fr auto;
   justify-content: initial !important;
   align-items: center;
   width: 100%;
@@ -581,7 +585,7 @@ button.button.subtle {
 }
 
 .dashboard-bulk-bar .bulk-select-actions {
-  justify-self: start;
+  justify-self: end;
   flex: 0 0 auto;
 }
 

@@ -1101,7 +1101,7 @@ function initializeMultiSelectForms() {
     const selectAll = form.querySelector("[data-select-all]");
     const countTarget = form.querySelector("[data-select-count]");
     const actionButtons = form.querySelectorAll("[data-requires-selection]");
-    const selectionControls = form.querySelector("[data-selection-controls]");
+    const selectionControls = form.querySelectorAll("[data-selection-controls]");
 
     const getItems = () =>
       Array.from(document.querySelectorAll(`[form="${CSS.escape(form.id)}"][data-select-item]`)).filter(
@@ -1116,9 +1116,11 @@ function initializeMultiSelectForms() {
         countTarget.textContent = `${selectedCount} selected`;
       }
 
-      if (selectionControls instanceof HTMLElement) {
-        selectionControls.hidden = selectedCount === 0;
-      }
+      selectionControls.forEach((control) => {
+        if (control instanceof HTMLElement) {
+          control.hidden = selectedCount === 0;
+        }
+      });
 
       actionButtons.forEach((button) => {
         button.disabled = selectedCount === 0;
