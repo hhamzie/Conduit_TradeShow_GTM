@@ -61,6 +61,15 @@ class Settings:
     smartlead_base_url: str
     smartlead_client_id: str
     smartlead_template_campaign_id: str
+    outbound_sender_capacity: int
+    outbound_window_weeks: int
+    weekly_show_sync_enabled: bool
+    weekly_show_sync_source_url: str
+    weekly_show_sync_source_path: str
+    weekly_show_sync_weekday: int
+    weekly_show_sync_hour: int
+    weekly_show_sync_timezone: str
+    weekly_show_sync_lookahead_days: int
 
 
 @lru_cache(maxsize=1)
@@ -113,4 +122,13 @@ def get_settings() -> Settings:
         smartlead_base_url=os.getenv("SMARTLEAD_BASE_URL", "https://server.smartlead.ai/api/v1").rstrip("/"),
         smartlead_client_id=os.getenv("SMARTLEAD_CLIENT_ID", ""),
         smartlead_template_campaign_id=os.getenv("SMARTLEAD_TEMPLATE_CAMPAIGN_ID", ""),
+        outbound_sender_capacity=max(1, int(os.getenv("OUTBOUND_SENDER_CAPACITY", "1"))),
+        outbound_window_weeks=max(1, int(os.getenv("OUTBOUND_WINDOW_WEEKS", "3"))),
+        weekly_show_sync_enabled=os.getenv("WEEKLY_SHOW_SYNC_ENABLED", "false").lower() in {"1", "true", "yes"},
+        weekly_show_sync_source_url=os.getenv("WEEKLY_SHOW_SYNC_SOURCE_URL", "").strip(),
+        weekly_show_sync_source_path=os.getenv("WEEKLY_SHOW_SYNC_SOURCE_PATH", "").strip(),
+        weekly_show_sync_weekday=int(os.getenv("WEEKLY_SHOW_SYNC_WEEKDAY", "6")),
+        weekly_show_sync_hour=int(os.getenv("WEEKLY_SHOW_SYNC_HOUR", "10")),
+        weekly_show_sync_timezone=os.getenv("WEEKLY_SHOW_SYNC_TIMEZONE", "America/New_York").strip() or "America/New_York",
+        weekly_show_sync_lookahead_days=max(1, int(os.getenv("WEEKLY_SHOW_SYNC_LOOKAHEAD_DAYS", "30"))),
     )

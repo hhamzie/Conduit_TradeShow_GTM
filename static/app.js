@@ -516,6 +516,77 @@ function handleFlashModalKeydown(event) {
   }
 }
 
+function openOutboundModal(trigger) {
+  const modal = document.querySelector("[data-outbound-modal]");
+  const form = modal ? modal.querySelector("[data-outbound-form]") : null;
+  const copyTarget = modal ? modal.querySelector("[data-outbound-copy]") : null;
+  const capacityTarget = modal ? modal.querySelector("[data-outbound-capacity-copy]") : null;
+  const confirmButton = modal ? modal.querySelector("[data-outbound-confirm]") : null;
+  if (!(modal instanceof HTMLElement) || !(form instanceof HTMLFormElement) || !(copyTarget instanceof HTMLElement)) {
+    return;
+  }
+
+  const showId = trigger.dataset.showId || "";
+  const showName = trigger.dataset.showName || "this show";
+  const emailCount = Number.parseInt(trigger.dataset.emailCount || "0", 10) || 0;
+  const linkedinCount = Number.parseInt(trigger.dataset.linkedinCount || "0", 10) || 0;
+  const weeks = Number.parseInt(trigger.dataset.weeks || "3", 10) || 3;
+  const capacityBlocked = trigger.dataset.capacityBlocked === "true";
+  const capacityDetail = trigger.dataset.capacityDetail || "";
+
+  form.action = `/shows/${showId}/outbound/start`;
+  copyTarget.textContent =
+    `Start outbound for ${showName}? This will send ${emailCount} emails and ${linkedinCount} LinkedIn messages over the next ${weeks} weeks.`;
+
+  if (capacityTarget instanceof HTMLElement) {
+    capacityTarget.textContent = capacityDetail;
+    capacityTarget.hidden = !capacityDetail;
+  }
+
+  if (confirmButton instanceof HTMLButtonElement) {
+    confirmButton.disabled = capacityBlocked || emailCount <= 0;
+  }
+
+  modal.hidden = false;
+  document.body.dataset.modalOpen = "true";
+}
+
+function closeOutboundModal() {
+  const modal = document.querySelector("[data-outbound-modal]");
+  if (!(modal instanceof HTMLElement)) {
+    return;
+  }
+  modal.hidden = true;
+  delete document.body.dataset.modalOpen;
+}
+
+function initializeOutboundModal() {
+  const triggers = document.querySelectorAll("[data-outbound-trigger]");
+  triggers.forEach((trigger) => {
+    trigger.addEventListener("click", () => openOutboundModal(trigger));
+  });
+
+  const closeButtons = document.querySelectorAll("[data-outbound-close]");
+  closeButtons.forEach((button) => {
+    button.addEventListener("click", closeOutboundModal);
+  });
+
+  const modal = document.querySelector("[data-outbound-modal]");
+  if (modal) {
+    modal.addEventListener("click", (event) => {
+      if (event.target === modal) {
+        closeOutboundModal();
+      }
+    });
+  }
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      closeOutboundModal();
+    }
+  });
+}
+
 const guideRowAutosaveTimers = new Map();
 const guideRowAutosaveControllers = new Map();
 const guideRowAutosaveStateTimers = new Map();
@@ -904,4 +975,5 @@ document.addEventListener("DOMContentLoaded", () => {
   initializeLeadTables();
   initializeMultiSelectForms();
   initializeDismissibleNotices();
+  initializeOutboundModal();
 });

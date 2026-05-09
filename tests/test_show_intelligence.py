@@ -121,6 +121,8 @@ class ShowIntelligenceTests(unittest.TestCase):
 
         self.assertEqual(analysis.guide_people_total, 50)
         self.assertEqual(analysis.guide_company_count, 2)
+        self.assertEqual(analysis.relevant_company_count, 2)
+        self.assertEqual(analysis.average_complexity_score, 0.0)
         self.assertEqual(analysis.guide_score_label, "Good")
         self.assertGreaterEqual(analysis.guide_score, 70)
 

@@ -10,9 +10,11 @@
     </div>
     <div class="profile-hero-tools">
       <span class="status status-{{ show.status }}">{{ show_status_label }}</span>
-      <div class="score-badge rating-{{ analysis.guide_score_slug }}">
-        <span>Guide score</span>
-        <strong>{{ analysis.guide_score }}/100</strong>
+      <div class="status-chip" data-tooltip="Guide companies with more than 10 combined sales and support reps">
+        Relevant companies: {{ analysis.relevant_company_count }}
+      </div>
+      <div class="status-chip" data-tooltip="Average catalog complexity from the workbook guide">
+        Avg complexity: {{ "%.1f"|format(analysis.average_complexity_score) if analysis.average_complexity_score else "0.0" }}
       </div>
       <details class="action-menu">
         <summary class="icon-button profile-icon" data-tooltip="Actions and files" aria-label="Actions and files">

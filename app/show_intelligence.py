@@ -64,6 +64,8 @@ class ShowVisitAnalysis:
     guide_support_total: int
     guide_people_total: int
     guide_average_people_per_company: float
+    relevant_company_count: int
+    average_complexity_score: float
     guide_context: tuple[str, ...]
     exhibitor_count: int
     export_company_count: int
@@ -73,6 +75,10 @@ class ShowVisitAnalysis:
     booth_coverage_percent: int
     days_until_event: int
     export_ready: bool
+    outbound_email_count: int
+    outbound_linkedin_count: int
+    has_running_campaign: bool
+    is_past_event: bool
 
 
 THEME_PLAYBOOKS: dict[str, ThemePlaybook] = {
@@ -173,8 +179,9 @@ def build_show_analyses(
     return sorted(
         analyses,
         key=lambda analysis: (
-            -analysis.guide_score,
-            -analysis.priority_score,
+            -analysis.relevant_company_count,
+            -analysis.average_complexity_score,
+            -analysis.guide_average_people_per_company,
             analysis.days_until_event < 0,
             abs(analysis.days_until_event),
             analysis.show.name.lower(),
@@ -200,6 +207,7 @@ def build_show_analysis(
     days_until_event = (show.event_date - today).days
     export_ready = bool(company_rows)
     guide_score = _compute_guide_score(show=show, exhibitor_count=exhibitor_count)
+    outbound_email_count, outbound_linkedin_count = _estimate_outbound_counts(show)
 
     priority_score = _compute_priority_score(
         exhibitor_count=exhibitor_count,
@@ -265,6 +273,8 @@ def build_show_analysis(
         guide_support_total=guide_score["support_total"],
         guide_people_total=guide_score["people_total"],
         guide_average_people_per_company=guide_score["average_people_per_company"],
+        relevant_company_count=guide_score["relevant_company_count"],
+        average_complexity_score=guide_score["average_complexity_score"],
         guide_context=guide_score["context"],
         exhibitor_count=exhibitor_count,
         export_company_count=export_company_count,
@@ -274,6 +284,10 @@ def build_show_analysis(
         booth_coverage_percent=booth_coverage_percent,
         days_until_event=days_until_event,
         export_ready=export_ready,
+        outbound_email_count=outbound_email_count,
+        outbound_linkedin_count=outbound_linkedin_count,
+        has_running_campaign=show.smartlead_status == "active",
+        is_past_event=days_until_event < 0,
     )
 
 
@@ -472,6 +486,19 @@ def _parse_int(value: str) -> int:
         return 0
 
 
+def _parse_float(value: str) -> float:
+    normalized = value.strip()
+    if not normalized:
+        return 0.0
+    normalized = re.sub(r"[^0-9.]+", "", normalized)
+    if not normalized:
+        return 0.0
+    try:
+        return max(0.0, float(normalized))
+    except ValueError:
+        return 0.0
+
+
 def _guide_company_rows(show: Show) -> list[dict[str, str]]:
     return [
         parse_guide_row_values(row)
@@ -486,6 +513,17 @@ def _compute_guide_score(show: Show, *, exhibitor_count: int) -> dict[str, objec
     sales_total = sum(_parse_int(row.get("sales_team_size", "")) for row in guide_rows)
     support_total = sum(_parse_int(row.get("customer_service_team_size", "")) for row in guide_rows)
     people_total = sales_total + support_total
+    relevant_company_count = sum(
+        1
+        for row in guide_rows
+        if (_parse_int(row.get("sales_team_size", "")) + _parse_int(row.get("customer_service_team_size", ""))) > 10
+    )
+    complexity_values = [
+        value
+        for value in (_parse_float(row.get("catalog_complexity", "")) for row in guide_rows)
+        if value > 0
+    ]
+    average_complexity_score = round(sum(complexity_values) / len(complexity_values), 1) if complexity_values else 0.0
     base_count = max(exhibitor_count, guide_company_count, 1)
     coverage_ratio = min(1.0, guide_company_count / base_count)
     people_per_company = people_total / guide_company_count if guide_company_count else 0.0
@@ -529,8 +567,30 @@ def _compute_guide_score(show: Show, *, exhibitor_count: int) -> dict[str, objec
         "support_total": support_total,
         "people_total": people_total,
         "average_people_per_company": round(people_per_company, 1),
+        "relevant_company_count": relevant_company_count,
+        "average_complexity_score": average_complexity_score,
         "context": context,
     }
+
+
+def _estimate_outbound_counts(show: Show) -> tuple[int, int]:
+    raw_path = show.smartlead_ready_export_path or show.enriched_export_path
+    if raw_path:
+        path = Path(raw_path)
+        if path.exists():
+            with path.open("r", encoding="utf-8-sig", newline="") as handle:
+                reader = csv.DictReader(handle)
+                rows = list(reader)
+            if rows:
+                linkedin_count = 0
+                for row in rows:
+                    normalized = {_normalize_header(key): (value or "").strip() for key, value in row.items() if key}
+                    if _first_value(normalized, "linkedin_profile", "linkedin_url", "linkedin"):
+                        linkedin_count += 1
+                return len(rows), linkedin_count
+
+    fallback_email_count = max(show.smartlead_imported_rows or 0, show.clay_ready_rows or 0, 0)
+    return fallback_email_count, 0
 
 
 def _load_company_rows(raw_path: str) -> list[dict[str, str]]:

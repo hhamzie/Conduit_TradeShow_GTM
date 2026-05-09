@@ -47,6 +47,12 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
             bulk_scrape_error=request.session.pop("bulk_scrape_error", ""),
             automation_error=request.session.pop("automation_error", ""),
             title="Workflow",
+            weekly_sync_enabled=settings.weekly_show_sync_enabled,
+            weekly_sync_source=(settings.weekly_show_sync_source_url or settings.weekly_show_sync_source_path),
+            weekly_sync_weekday=settings.weekly_show_sync_weekday,
+            weekly_sync_hour=settings.weekly_show_sync_hour,
+            weekly_sync_timezone=settings.weekly_show_sync_timezone,
+            weekly_sync_lookahead_days=settings.weekly_show_sync_lookahead_days,
             **view.__dict__,
         ),
     )

@@ -843,6 +843,24 @@ button.button.subtle {
   gap: 10px;
 }
 
+.dashboard-stat-cell {
+  min-width: 120px;
+  display: grid;
+  gap: 4px;
+}
+
+.dashboard-stat-value {
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+}
+
+.dashboard-stat-copy {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
 .icon-button {
   position: relative;
   display: inline-flex;
@@ -909,6 +927,15 @@ button.button.subtle {
   background: #ffffff;
 }
 
+.smartlead-icon-live {
+  border-color: rgba(93, 65, 219, 0.28);
+  background: rgba(93, 65, 219, 0.05);
+}
+
+.smartlead-icon-blocked {
+  border-color: rgba(186, 60, 77, 0.16);
+}
+
 .smartlead-icon-missing {
   border-color: rgba(93, 65, 219, 0.12);
 }
@@ -927,6 +954,14 @@ button.button.subtle {
 .score-cell {
   min-width: 150px;
   cursor: default;
+}
+
+.dashboard-row-live td {
+  background: rgba(93, 65, 219, 0.04);
+}
+
+.dashboard-row-past td {
+  background: rgba(125, 140, 162, 0.06);
 }
 
 .score-value {
@@ -1075,6 +1110,44 @@ button.button.subtle {
 .floating-tooltip.is-visible {
   opacity: 1;
   transform: translate3d(0, 0, 0);
+}
+
+.confirm-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(14, 22, 36, 0.18);
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  z-index: 1300;
+}
+
+.confirm-modal {
+  width: min(100%, 440px);
+  padding: 24px;
+  border-radius: 18px;
+  border: 1px solid var(--line-strong);
+  background: #ffffff;
+  display: grid;
+  gap: 12px;
+  position: relative;
+}
+
+.confirm-modal h2 {
+  margin: 0;
+  font-size: 1.25rem;
+}
+
+.confirm-modal-copy {
+  margin: 0;
+  line-height: 1.55;
+}
+
+.confirm-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 6px;
 }
 
 .priority-high {

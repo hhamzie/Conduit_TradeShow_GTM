@@ -21,8 +21,8 @@
       <strong class="mini-stat-value">{{ smartlead_campaign_count }}</strong>
     </article>
     <article class="mini-stat-card">
-      <span class="mini-stat-label">Guides Ready</span>
-      <strong class="mini-stat-value">{{ guide_ready_count }}</strong>
+      <span class="mini-stat-label">Running Now</span>
+      <strong class="mini-stat-value">{{ running_campaign_count }}</strong>
     </article>
   </div>
 </section>
@@ -40,7 +40,7 @@
       <span class="bulk-select-label">Select all</span>
     </div>
     <span class="bulk-select-count" data-select-count>0 selected</span>
-    <button class="button secondary subtle" type="submit" formaction="/shows/bulk/smartlead" data-requires-selection>Smartlead selected</button>
+    <button class="button secondary subtle" type="submit" formaction="/shows/bulk/smartlead" data-requires-selection>Prep campaigns</button>
     <button class="button danger subtle" type="submit" onclick="return confirm('Delete the selected shows?');" data-requires-selection>Delete selected</button>
   </form>
   {% endif %}
@@ -52,13 +52,16 @@
           <th class="selection-col"></th>
           {% endif %}
           <th>Show</th>
-          <th>Score</th>
+          <th>Relevant Companies</th>
+          <th>Avg Complexity</th>
+          <th>Avg Team Size</th>
           <th>Actions</th>
         </tr>
       </thead>
       <tbody>
         {% for analysis in analyses %}
-        <tr class="dashboard-row-link" data-row-href="/shows/{{ analysis.show.id }}" title="Open show profile">
+        {% set outbound_plan = outbound_plans.get(analysis.show.id) %}
+        <tr class="dashboard-row-link{% if analysis.has_running_campaign %} dashboard-row-live{% elif analysis.is_past_event %} dashboard-row-past{% endif %}" data-row-href="/shows/{{ analysis.show.id }}" title="Open show profile">
           {% if can_manage %}
           <td class="selection-col">
             <label class="selector-control" aria-label="Select {{ analysis.show.name }}">
@@ -74,29 +77,49 @@
             </div>
           </td>
           <td>
-            {% set score_tone = "Meh" if analysis.guide_score_label == "Medium" else analysis.guide_score_label %}
-            <div class="score-cell" data-tooltip="{{ analysis.guide_score }} out of 100 · {{ score_tone }}">
-              <strong class="score-value" style="--score-hue: {{ analysis.guide_score * 1.2 }};">{{ analysis.guide_score }}</strong>
-              <div class="score-track" aria-hidden="true">
-                <div class="score-marker" style="left: clamp(8px, {{ analysis.guide_score }}%, calc(100% - 8px)); --score-hue: {{ analysis.guide_score * 1.2 }};"></div>
-              </div>
+            <div class="dashboard-stat-cell" data-tooltip="Guide companies with more than 10 combined sales and support reps">
+              <strong class="dashboard-stat-value">{{ analysis.relevant_company_count }}</strong>
+              <span class="dashboard-stat-copy">high-fit accounts</span>
+            </div>
+          </td>
+          <td>
+            <div class="dashboard-stat-cell" data-tooltip="Average catalog complexity from the workbook guide">
+              <strong class="dashboard-stat-value">{{ "%.1f"|format(analysis.average_complexity_score) if analysis.average_complexity_score else "0.0" }}</strong>
+              <span class="dashboard-stat-copy">avg complexity</span>
+            </div>
+          </td>
+          <td>
+            <div class="dashboard-stat-cell" data-tooltip="Average sales and support reps per guide company">
+              <strong class="dashboard-stat-value">{{ "%.1f"|format(analysis.guide_average_people_per_company) if analysis.guide_average_people_per_company else "0.0" }}</strong>
+              <span class="dashboard-stat-copy">reps per company</span>
             </div>
           </td>
           <td>
             <div class="dashboard-icon-rail">
-              {% if analysis.show.smartlead_campaign_id %}
-              <a class="icon-button smartlead-icon" href="https://app.smartlead.ai/app/campaigns/{{ analysis.show.smartlead_campaign_id }}" target="_blank" rel="noreferrer" data-tooltip="Smartlead campaign">
+              {% if analysis.has_running_campaign and analysis.show.smartlead_campaign_id %}
+              <a class="icon-button smartlead-icon smartlead-icon-live" href="https://app.smartlead.ai/app/campaigns/{{ analysis.show.smartlead_campaign_id }}" target="_blank" rel="noreferrer" data-tooltip="Outbound running. Open campaign.">
                 <img src="/static/smartlead-logo.svg" alt="" class="smartlead-mark-image" />
               </a>
               {% elif can_manage %}
-              <form action="/shows/{{ analysis.show.id }}/smartlead/setup" method="post">
-                <input type="hidden" name="campaign_mode" value="smart" />
-                <button class="icon-button smartlead-icon smartlead-icon-missing" type="submit" data-tooltip="Add Smartlead campaign">
-                  <img src="/static/smartlead-logo.svg" alt="" class="smartlead-mark-image" />
-                </button>
-              </form>
+              {% set outbound_ready = outbound_plan and outbound_plan.email_count > 0 %}
+              {% set outbound_blocked = outbound_plan and outbound_plan.at_capacity %}
+              <button
+                class="icon-button smartlead-icon{% if not outbound_ready %} smartlead-icon-missing{% elif outbound_blocked %} smartlead-icon-blocked{% endif %}"
+                type="button"
+                data-tooltip="{% if not outbound_ready %}Outbound not ready yet{% elif outbound_blocked %}Senders are full right now{% else %}Start outbound campaign{% endif %}"
+                data-outbound-trigger
+                data-show-id="{{ analysis.show.id }}"
+                data-show-name="{{ analysis.show.name }}"
+                data-email-count="{{ outbound_plan.email_count if outbound_plan else 0 }}"
+                data-linkedin-count="{{ outbound_plan.linkedin_count if outbound_plan else 0 }}"
+                data-weeks="{{ outbound_plan.weeks if outbound_plan else 3 }}"
+                data-capacity-blocked="{{ 'true' if outbound_blocked else 'false' }}"
+                data-capacity-detail="{% if outbound_blocked and outbound_plan %}Email senders are at capacity. {{ outbound_plan.active_campaign_count }} campaign(s) are already using {{ outbound_plan.sender_capacity }} sender slot(s).{% elif not outbound_ready %}This show needs outbound-ready leads before a campaign can start.{% else %}{% if analysis.show.smartlead_campaign_id %}Campaign is linked and ready to start.{% else %}A campaign will be created if one does not exist yet.{% endif %}{% endif %}"
+              >
+                <img src="/static/smartlead-logo.svg" alt="" class="smartlead-mark-image" />
+              </button>
               {% else %}
-              <span class="icon-button smartlead-icon smartlead-icon-missing" data-tooltip="No Smartlead campaign">
+              <span class="icon-button smartlead-icon smartlead-icon-missing" data-tooltip="No outbound campaign">
                 <img src="/static/smartlead-logo.svg" alt="" class="smartlead-mark-image" />
               </span>
               {% endif %}
@@ -168,6 +191,22 @@
     </table>
   </div>
 </section>
+{% if can_manage %}
+<div class="confirm-modal-backdrop" data-outbound-modal hidden>
+  <section class="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="outbound-modal-title">
+    <button class="flash-modal-close" type="button" aria-label="Close outbound confirmation" data-outbound-close>&times;</button>
+    <h2 id="outbound-modal-title">Start outbound campaign</h2>
+    <p class="confirm-modal-copy" data-outbound-copy></p>
+    <p class="confirm-modal-copy muted" data-outbound-capacity-copy></p>
+    <form action="" method="post" data-outbound-form>
+      <div class="confirm-modal-actions">
+        <button class="button secondary" type="button" data-outbound-close>Cancel</button>
+        <button class="button" type="submit" data-outbound-confirm>Start outbound</button>
+      </div>
+    </form>
+  </section>
+</div>
+{% endif %}
 {% else %}
 <section class="panel">
   <div class="empty-state">

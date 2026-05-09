@@ -232,6 +232,33 @@
   </article>
 </section>
 
+<section class="panel compact-automation-panel">
+  <div class="panel-head">
+    <div>
+      <h2>Weekly Intake</h2>
+      <p class="muted">Runs on the worker. Filters for B2B physical-goods shows in the next {{ weekly_sync_lookahead_days }} days.</p>
+    </div>
+  </div>
+  <div class="metric-strip metric-strip-automation">
+    <div class="metric-tile">
+      <span>Status</span>
+      <strong>{{ "On" if weekly_sync_enabled else "Off" }}</strong>
+    </div>
+    <div class="metric-tile">
+      <span>Schedule</span>
+      <strong>Sunday {{ "%02d:00"|format(weekly_sync_hour) }}</strong>
+    </div>
+    <div class="metric-tile">
+      <span>Timezone</span>
+      <strong>{{ weekly_sync_timezone }}</strong>
+    </div>
+    <div class="metric-tile">
+      <span>Source</span>
+      <strong>{{ "Connected" if weekly_sync_source else "Missing" }}</strong>
+    </div>
+  </div>
+</section>
+
 <section class="stats-grid stats-grid-compact">
   <article class="stat-card">
     <span class="stat-label">Active</span>

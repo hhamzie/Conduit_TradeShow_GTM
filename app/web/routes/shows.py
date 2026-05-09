@@ -25,11 +25,13 @@ from app.show_guides import build_guide_sheet_views, get_guide_sheet
 from app.show_intelligence import build_show_analysis, build_show_analyses
 from app.services import (
     approve_show,
+    build_outbound_plan,
     get_show,
     launch_show,
     list_shows,
     pause_show,
     queue_show_now,
+    start_outbound_campaign,
     sync_show_from_clay,
     update_show,
 )
@@ -86,6 +88,7 @@ def _get_guide_row_or_404(db: Session, show_id: int, row_id: int) -> ShowGuideRo
 def show_dashboard(request: Request, db: Session = Depends(get_db)):
     shows = list_shows(db)
     analyses = build_show_analyses(shows, today=datetime.now().date(), company_limit=8)
+    outbound_plans = {analysis.show.id: build_outbound_plan(db, analysis.show) for analysis in analyses}
     return templates.TemplateResponse(
         "show_dashboard.html",
         template_context(
@@ -94,16 +97,13 @@ def show_dashboard(request: Request, db: Session = Depends(get_db)):
             can_manage=can_manage(request),
             title="Show Dashboard",
             analyses=analyses,
+            outbound_plans=outbound_plans,
             show_status_label_for=get_show_status_label,
             tracked_count=len(analyses),
             upcoming_count=sum(1 for analysis in analyses if analysis.days_until_event >= 0),
             smartlead_campaign_count=sum(1 for analysis in analyses if analysis.show.smartlead_campaign_id),
+            running_campaign_count=sum(1 for analysis in analyses if analysis.has_running_campaign),
             guide_ready_count=sum(1 for analysis in analyses if analysis.guide_company_count > 0),
-            average_guide_score=(
-                round(sum(analysis.guide_score for analysis in analyses) / len(analyses))
-                if analyses
-                else 0
-            ),
             total_exhibitors=sum(analysis.exhibitor_count for analysis in analyses),
         ),
     )
@@ -136,6 +136,7 @@ def show_detail(show_id: int, request: Request, db: Session = Depends(get_db)):
             error_summary=summarize_show_error(show.last_error),
             smartlead_campaign_options=list_smartlead_campaign_options() if can_manage(request) else [],
             smartlead_campaign_url=_smartlead_campaign_url(show.smartlead_campaign_id),
+            outbound_plan=build_outbound_plan(db, show),
         ),
     )
 
@@ -348,6 +349,31 @@ def launch_show_route(show_id: int, request: Request, db: Session = Depends(get_
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return RedirectResponse(f"/shows/{show_id}", status_code=status.HTTP_303_SEE_OTHER)
+
+
+@router.post("/shows/{show_id}/outbound/start")
+def start_outbound_campaign_route(show_id: int, request: Request, db: Session = Depends(get_db)):
+    require_authenticated(request)
+    show = _get_show_or_404(db, show_id)
+    try:
+        plan = start_outbound_campaign(db, show)
+    except ValueError as exc:
+        request.session["flash_message"] = {
+            "tone": "warning",
+            "title": "Outbound could not start.",
+            "detail": str(exc),
+        }
+        return RedirectResponse("/shows/dashboard", status_code=status.HTTP_303_SEE_OTHER)
+
+    request.session["flash_message"] = {
+        "tone": "success",
+        "title": "Outbound campaign started.",
+        "detail": (
+            f"{show.name} will send {plan.email_count} emails and {plan.linkedin_count} LinkedIn messages "
+            f"over the next {plan.weeks} weeks."
+        ),
+    }
+    return RedirectResponse("/shows/dashboard", status_code=status.HTTP_303_SEE_OTHER)
 
 
 @router.post("/shows/{show_id}/smartlead/setup")

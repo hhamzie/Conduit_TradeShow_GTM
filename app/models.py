@@ -143,3 +143,14 @@ class ShowGuideRow(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(), server_default=func.now(), onupdate=func.now())
 
     show: Mapped[Show] = relationship(back_populates="guide_rows")
+
+
+class AutomationCheckpoint(Base):
+    __tablename__ = "automation_checkpoints"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    key: Mapped[str] = mapped_column(String(128), unique=True)
+    last_run_at: Mapped[datetime | None] = mapped_column(DateTime(), nullable=True)
+    meta_json: Mapped[str] = mapped_column(Text(), default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime(), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(), server_default=func.now(), onupdate=func.now())

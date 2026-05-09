@@ -12,12 +12,14 @@ import re
 import zipfile
 from urllib.parse import urlparse
 from collections.abc import Callable
+from zoneinfo import ZoneInfo
 
-from sqlalchemy import select
+import httpx
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.config import get_settings
-from app.models import CampaignRun, ClaySyncRow, ProviderStatus, RunStatus, Show, ShowStatus
+from app.models import AutomationCheckpoint, CampaignRun, ClaySyncRow, ProviderStatus, RunStatus, Show, ShowStatus
 from app.providers import (
     ClayPollResult,
     SmartleadSyncResult,
@@ -123,6 +125,25 @@ class QueuedBulkShow:
     event_date_raw: str
     place: str
     link: str
+
+
+@dataclass(frozen=True)
+class OutboundPlan:
+    email_count: int
+    linkedin_count: int
+    weeks: int
+    sender_capacity: int
+    active_campaign_count: int
+    available_slots: int
+    at_capacity: bool
+
+
+@dataclass(frozen=True)
+class WeeklyShowSyncResult:
+    created: int
+    updated: int
+    skipped: int
+    filtered_out: int
 
 
 def _parse_bulk_csv_payload(payload: bytes) -> tuple[list[dict[str, str]], dict[str, str]]:
@@ -839,6 +860,257 @@ def register_bulk_shows(
 def import_shows_from_csv(db: Session, payload: bytes, run_offset_days: int) -> ImportSummary:
     summary, _ = register_bulk_shows(db, payload, run_offset_days)
     return summary
+
+
+def _estimate_outbound_counts(show: Show) -> tuple[int, int]:
+    raw_path = show.smartlead_ready_export_path or show.enriched_export_path
+    if raw_path:
+        path = Path(raw_path).expanduser()
+        if path.exists():
+            with path.open("r", encoding="utf-8-sig", newline="") as handle:
+                reader = csv.DictReader(handle)
+                rows = list(reader)
+            if rows:
+                linkedin_count = 0
+                for row in rows:
+                    normalized = {_normalize_enriched_key(key): (value or "").strip() for key, value in row.items() if key}
+                    if _pick_enriched_value(normalized, "linkedin_profile"):
+                        linkedin_count += 1
+                return len(rows), linkedin_count
+
+    fallback_email_count = max(show.smartlead_imported_rows, show.clay_ready_rows, 0)
+    return fallback_email_count, 0
+
+
+def build_outbound_plan(db: Session, show: Show) -> OutboundPlan:
+    settings = get_settings()
+    email_count, linkedin_count = _estimate_outbound_counts(show)
+    active_campaign_count = int(
+        db.scalar(
+            select(func.count())
+            .select_from(Show)
+            .where(
+                Show.smartlead_status == SMARTLEAD_STATUS_ACTIVE,
+                Show.id != show.id,
+            )
+        )
+        or 0
+    )
+    sender_capacity = max(1, settings.outbound_sender_capacity)
+    available_slots = max(sender_capacity - active_campaign_count, 0)
+    at_capacity = show.smartlead_status != SMARTLEAD_STATUS_ACTIVE and available_slots == 0
+    return OutboundPlan(
+        email_count=email_count,
+        linkedin_count=linkedin_count,
+        weeks=settings.outbound_window_weeks,
+        sender_capacity=sender_capacity,
+        active_campaign_count=active_campaign_count,
+        available_slots=available_slots,
+        at_capacity=at_capacity,
+    )
+
+
+def start_outbound_campaign(db: Session, show: Show) -> OutboundPlan:
+    plan = build_outbound_plan(db, show)
+    if plan.email_count <= 0:
+        raise ValueError("Outbound is not ready yet. No email-ready leads are loaded for this show.")
+    if plan.at_capacity:
+        raise ValueError(
+            f"Email senders are at capacity. {plan.active_campaign_count} campaign(s) are already running across "
+            f"{plan.sender_capacity} sender slot(s)."
+        )
+
+    if not show.smartlead_campaign_id:
+        campaign_result = ensure_smartlead_campaign(show)
+        if campaign_result.status != ProviderStatus.success.value:
+            raise ValueError(campaign_result.message)
+        show.smartlead_campaign_id = campaign_result.campaign_id
+        show.smartlead_campaign_name = campaign_result.campaign_name
+
+    if show.status != ShowStatus.approved.value and show.status != ShowStatus.live.value:
+        if show.clay_total_rows == 0:
+            raise ValueError("Outbound is not ready yet. Clay has not prepared lead rows for this show.")
+        terminal_rows = show.clay_ready_rows + show.clay_failed_rows + show.clay_skipped_rows
+        if terminal_rows < show.clay_total_rows:
+            raise ValueError("Outbound is not ready yet. Clay is still enriching this show.")
+        show.status = ShowStatus.approved.value
+        show.approved_at = datetime.now()
+        db.commit()
+
+    if show.smartlead_status == SMARTLEAD_STATUS_ACTIVE and show.status == ShowStatus.live.value:
+        return plan
+
+    launch_show(db, show)
+    return plan
+
+
+PHYSICAL_GOODS_INCLUDE_TERMS = (
+    "furniture",
+    "home",
+    "gift",
+    "decor",
+    "design",
+    "market",
+    "packaging",
+    "housewares",
+    "kitchen",
+    "hardware",
+    "industrial",
+    "manufacturing",
+    "supplier",
+    "sourcing",
+    "apparel",
+    "textile",
+    "materials",
+    "pet",
+    "foodservice",
+    "restaurant",
+    "building",
+    "construction",
+    "fabric",
+)
+PHYSICAL_GOODS_EXCLUDE_TERMS = (
+    "saas",
+    "software",
+    "crypto",
+    "web3",
+    "gaming",
+    "media",
+    "influencer",
+    "creator",
+)
+
+
+def is_b2b_physical_goods_show(show_name: str, source_url: str = "") -> bool:
+    haystack = f"{show_name} {source_url}".strip().lower()
+    if not haystack:
+        return False
+    if any(term in haystack for term in PHYSICAL_GOODS_EXCLUDE_TERMS):
+        return False
+    return any(term in haystack for term in PHYSICAL_GOODS_INCLUDE_TERMS)
+
+
+def _load_weekly_show_sync_payload(settings) -> bytes:
+    if settings.weekly_show_sync_source_url:
+        response = httpx.get(settings.weekly_show_sync_source_url, timeout=45.0, follow_redirects=True)
+        response.raise_for_status()
+        return response.content
+    if settings.weekly_show_sync_source_path:
+        return Path(settings.weekly_show_sync_source_path).expanduser().read_bytes()
+    raise ValueError("Weekly trade show sync is enabled, but no source URL or source path is configured.")
+
+
+def _get_automation_checkpoint(db: Session, key: str) -> AutomationCheckpoint:
+    checkpoint = db.scalar(select(AutomationCheckpoint).where(AutomationCheckpoint.key == key))
+    if checkpoint is None:
+        checkpoint = AutomationCheckpoint(key=key)
+        db.add(checkpoint)
+        db.flush()
+    return checkpoint
+
+
+def _current_weekly_sync_window(now: datetime, settings) -> datetime:
+    timezone = ZoneInfo(settings.weekly_show_sync_timezone)
+    local_now = now.astimezone(timezone) if now.tzinfo else now.replace(tzinfo=timezone)
+    days_since_target = (local_now.weekday() - settings.weekly_show_sync_weekday) % 7
+    scheduled_date = local_now.date() - timedelta(days=days_since_target)
+    scheduled_at = datetime.combine(
+        scheduled_date,
+        time(hour=settings.weekly_show_sync_hour, minute=0),
+        tzinfo=timezone,
+    )
+    if local_now < scheduled_at:
+        scheduled_at -= timedelta(days=7)
+    return scheduled_at
+
+
+def run_weekly_show_sync(db: Session, now: datetime | None = None) -> WeeklyShowSyncResult | None:
+    settings = get_settings()
+    if not settings.weekly_show_sync_enabled:
+        return None
+
+    now = now or datetime.now(ZoneInfo(settings.weekly_show_sync_timezone))
+    scheduled_window = _current_weekly_sync_window(now, settings)
+    if now.tzinfo is None:
+        timezone = ZoneInfo(settings.weekly_show_sync_timezone)
+        current_local = now.replace(tzinfo=timezone)
+    else:
+        current_local = now.astimezone(ZoneInfo(settings.weekly_show_sync_timezone))
+    if current_local < scheduled_window:
+        return None
+
+    checkpoint = _get_automation_checkpoint(db, "weekly_trade_show_sync")
+    if checkpoint.last_run_at is not None:
+        previous_run = checkpoint.last_run_at
+        previous_local = (
+            previous_run.astimezone(ZoneInfo(settings.weekly_show_sync_timezone))
+            if previous_run.tzinfo
+            else previous_run.replace(tzinfo=ZoneInfo(settings.weekly_show_sync_timezone))
+        )
+        if previous_local >= scheduled_window:
+            return None
+
+    payload = _load_weekly_show_sync_payload(settings)
+    rows, headers = _parse_bulk_csv_payload(payload)
+    created = 0
+    updated = 0
+    skipped = 0
+    filtered_out = 0
+    seen_upload_keys: set[tuple[str, str, str]] = set()
+    start_date = current_local.date()
+    end_date = start_date + timedelta(days=settings.weekly_show_sync_lookahead_days)
+
+    for row in rows:
+        show_name = (row.get(headers["show"]) or "").strip()
+        event_date_raw = (row.get(headers["date"]) or "").strip()
+        place = (row.get(headers["place"]) or "").strip()
+        link = (row.get(headers["link"]) or "").strip()
+        if not (show_name and event_date_raw and place and link):
+            skipped += 1
+            continue
+
+        event_date = parse_show_date(event_date_raw, today=start_date)
+        if event_date < start_date or event_date > end_date:
+            filtered_out += 1
+            continue
+        if not is_b2b_physical_goods_show(show_name, link):
+            filtered_out += 1
+            continue
+
+        dedupe_key = (
+            event_date.isoformat(),
+            normalize_show_identity_name(show_name),
+            normalize_show_identity_url(link),
+        )
+        if dedupe_key in seen_upload_keys:
+            skipped += 1
+            continue
+        seen_upload_keys.add(dedupe_key)
+
+        show, created_now = upsert_show(
+            db,
+            show_name=show_name,
+            event_date_raw=event_date.isoformat(),
+            place=place,
+            link=link,
+            run_offset_days=settings.default_run_offset_days,
+        )
+        if created_now:
+            created += 1
+        else:
+            updated += 1
+
+    checkpoint.last_run_at = current_local.replace(tzinfo=None)
+    checkpoint.meta_json = json.dumps(
+        {
+            "lookahead_days": settings.weekly_show_sync_lookahead_days,
+            "source": settings.weekly_show_sync_source_url or settings.weekly_show_sync_source_path,
+            "scheduled_window": scheduled_window.isoformat(),
+        },
+        sort_keys=True,
+    )
+    db.commit()
+    return WeeklyShowSyncResult(created=created, updated=updated, skipped=skipped, filtered_out=filtered_out)
 
 
 def list_shows(db: Session) -> list[Show]:

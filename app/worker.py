@@ -5,7 +5,7 @@ import time
 
 from app.config import get_settings
 from app.database import SessionLocal, init_db
-from app.services import queue_due_shows, run_next_campaign, sync_approved_shows
+from app.services import queue_due_shows, run_next_campaign, run_weekly_show_sync, sync_approved_shows
 
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -19,6 +19,16 @@ def run_worker_loop() -> None:
 
     while True:
         with SessionLocal() as db:
+            weekly_sync = run_weekly_show_sync(db)
+            if weekly_sync is not None:
+                logger.info(
+                    "Weekly trade show sync finished. created=%s updated=%s skipped=%s filtered_out=%s",
+                    weekly_sync.created,
+                    weekly_sync.updated,
+                    weekly_sync.skipped,
+                    weekly_sync.filtered_out,
+                )
+
             queued = queue_due_shows(db)
             if queued:
                 logger.info("Queued %s due show(s).", queued)

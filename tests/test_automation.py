@@ -8,6 +8,7 @@ import tempfile
 import unittest
 import zipfile
 from unittest.mock import patch
+from zoneinfo import ZoneInfo
 
 from openpyxl import Workbook
 from sqlalchemy import create_engine, select
@@ -17,7 +18,7 @@ from app.config import get_settings
 from app.database import Base
 from app.models import ClaySyncRow, RunStatus, Show, ShowGuideRow, ShowStatus
 from app.providers import ClayPollResult, ClayRecord, ProviderResult, SmartleadSyncResult
-from app.services import _build_prepared_lead, BulkDirectScrapeResult, DirectScrapeResult, launch_show, register_bulk_shows, run_bulk_direct_scrape, run_show_scrape, sync_show_from_clay, upsert_show
+from app.services import _build_prepared_lead, BulkDirectScrapeResult, DirectScrapeResult, launch_show, register_bulk_shows, run_bulk_direct_scrape, run_show_scrape, run_weekly_show_sync, start_outbound_campaign, sync_show_from_clay, upsert_show
 
 
 def make_show(**overrides) -> Show:
@@ -471,6 +472,81 @@ class AutomationTests(unittest.TestCase):
             remaining_shows = session.scalars(select(Show).order_by(Show.event_date.asc())).all()
             self.assertEqual(len(remaining_shows), 1)
             self.assertEqual(remaining_shows[0].name, "Luxe Pack")
+
+    def test_start_outbound_campaign_blocks_when_sender_capacity_is_full(self) -> None:
+        with self.Session() as session:
+            active_show = make_show(
+                name="Running Show",
+                status=ShowStatus.live.value,
+                smartlead_status="active",
+                smartlead_campaign_id=111,
+                source_url="https://example.com/running-show",
+            )
+            target_show = make_show(
+                name="Target Show",
+                status=ShowStatus.approved.value,
+                smartlead_status="ready_to_launch",
+                smartlead_campaign_id=222,
+                smartlead_imported_rows=45,
+                clay_total_rows=45,
+                clay_ready_rows=45,
+                source_url="https://example.com/target-show",
+            )
+            session.add_all([active_show, target_show])
+            session.commit()
+
+            with patch.dict(os.environ, {"OUTBOUND_SENDER_CAPACITY": "1"}):
+                get_settings.cache_clear()
+                try:
+                    with self.assertRaisesRegex(ValueError, "at capacity"):
+                        start_outbound_campaign(session, target_show)
+                finally:
+                    get_settings.cache_clear()
+
+    def test_run_weekly_show_sync_filters_for_physical_goods_and_window(self) -> None:
+        csv_payload = "\n".join(
+            [
+                "Show,Date,Place,Link",
+                "High Point Market,2026-05-25,High Point NC,https://example.com/high-point",
+                "Cloud Software Expo,2026-05-22,Las Vegas NV,https://example.com/cloud",
+                "Packaging Summit,2026-07-20,Chicago IL,https://example.com/packaging",
+            ]
+        )
+
+        with self.Session() as session, tempfile.TemporaryDirectory() as tmp_dir:
+            source_path = Path(tmp_dir) / "weekly.csv"
+            source_path.write_text(csv_payload, encoding="utf-8")
+
+            with patch.dict(
+                os.environ,
+                {
+                    "WEEKLY_SHOW_SYNC_ENABLED": "true",
+                    "WEEKLY_SHOW_SYNC_SOURCE_PATH": str(source_path),
+                    "WEEKLY_SHOW_SYNC_WEEKDAY": "6",
+                    "WEEKLY_SHOW_SYNC_HOUR": "10",
+                    "WEEKLY_SHOW_SYNC_LOOKAHEAD_DAYS": "30",
+                    "WEEKLY_SHOW_SYNC_TIMEZONE": "America/New_York",
+                },
+            ):
+                get_settings.cache_clear()
+                try:
+                    result = run_weekly_show_sync(
+                        session,
+                        now=datetime(2026, 5, 24, 10, 5, tzinfo=ZoneInfo("America/New_York")),
+                    )
+                    self.assertIsNotNone(result)
+                    assert result is not None
+                    self.assertEqual(result.created, 1)
+                    self.assertEqual(result.updated, 0)
+                    self.assertEqual(result.filtered_out, 2)
+                    self.assertIsNone(
+                        run_weekly_show_sync(
+                            session,
+                            now=datetime(2026, 5, 24, 10, 10, tzinfo=ZoneInfo("America/New_York")),
+                        )
+                    )
+                finally:
+                    get_settings.cache_clear()
 
     def test_register_bulk_shows_skips_duplicate_rows_in_same_upload(self) -> None:
         payload = "\n".join(
