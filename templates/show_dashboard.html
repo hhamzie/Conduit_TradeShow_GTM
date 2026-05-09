@@ -65,7 +65,7 @@
           {% endif %}
           <th>Show</th>
           <th>Relevant Companies</th>
-          <th>Avg Complexity</th>
+          <th>Complexity</th>
           <th>Actions</th>
         </tr>
       </thead>
@@ -88,15 +88,13 @@
             </div>
           </td>
           <td>
-            <div class="dashboard-stat-cell" data-tooltip="Guide companies with more than 10 combined sales and support reps">
+            <div class="dashboard-stat-cell" data-tooltip="Guide companies with 10+ combined sales and support reps">
               <strong class="dashboard-stat-value">{{ analysis.relevant_company_count }}</strong>
-              <span class="dashboard-stat-copy">high-fit accounts</span>
             </div>
           </td>
           <td>
-            <div class="dashboard-stat-cell" data-tooltip="Average catalog complexity from the workbook guide">
-              <strong class="dashboard-stat-value">{{ "%.1f"|format(analysis.average_complexity_score) if analysis.average_complexity_score else "0.0" }}</strong>
-              <span class="dashboard-stat-copy">avg complexity</span>
+            <div class="dashboard-stat-cell" data-tooltip="Guide complexity. 5 is the most complex.">
+              <strong class="dashboard-stat-value">{{ "%.1f"|format(analysis.average_complexity_score) if analysis.average_complexity_score else "0.0" }} / 5</strong>
             </div>
           </td>
           <td>

@@ -549,7 +549,20 @@ button.button.subtle {
 }
 
 .dashboard-bulk-bar {
+  justify-content: flex-start !important;
+  align-items: center;
+  width: 100%;
   margin-bottom: 14px;
+  padding: 0 0 10px 18px;
+}
+
+.dashboard-bulk-bar .bulk-select-anchor {
+  flex: 0 0 auto;
+  margin-right: 18px;
+}
+
+.dashboard-bulk-bar .bulk-select-actions {
+  flex: 0 0 auto;
 }
 
 .stats-grid {
@@ -872,7 +885,7 @@ button.button.subtle {
 .dashboard-stat-cell {
   min-width: 120px;
   display: grid;
-  gap: 4px;
+  gap: 0;
 }
 
 .dashboard-stat-value {
@@ -880,11 +893,6 @@ button.button.subtle {
   font-weight: 700;
   letter-spacing: -0.02em;
   color: var(--ink);
-}
-
-.dashboard-stat-copy {
-  color: var(--muted);
-  font-size: 0.8rem;
 }
 
 .icon-button {
