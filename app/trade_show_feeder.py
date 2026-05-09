@@ -92,6 +92,22 @@ def is_b2b_physical_goods_show(show_name: str, source_url: str = "") -> bool:
     return any(term in haystack for term in PHYSICAL_GOODS_INCLUDE_TERMS)
 
 
+def _build_scan_web_search_tool(model: str) -> dict[str, object]:
+    tool: dict[str, object] = {
+        "type": "web_search",
+        "user_location": {
+            "type": "approximate",
+            "country": "US",
+            "timezone": "America/New_York",
+        },
+    }
+    if model.startswith("gpt-5"):
+        tool["filters"] = {
+            "allowed_domains": list(TRADE_SHOW_SCAN_ALLOWED_DOMAINS),
+        }
+    return tool
+
+
 def scan_upcoming_trade_shows(
     *,
     query_hint: str = "",
@@ -146,19 +162,6 @@ def scan_upcoming_trade_shows(
         prompt = f"{prompt} Extra focus: {normalized_hint}."
 
     request_payload = {
-        "tools": [
-            {
-                "type": "web_search",
-                "filters": {
-                    "allowed_domains": list(TRADE_SHOW_SCAN_ALLOWED_DOMAINS),
-                },
-                "user_location": {
-                    "type": "approximate",
-                    "country": "US",
-                    "timezone": "America/New_York",
-                },
-            }
-        ],
         "tool_choice": "auto",
         "input": [
             {
@@ -207,6 +210,7 @@ def scan_upcoming_trade_shows(
     for candidate_model in candidate_models:
         payload = dict(request_payload)
         payload["model"] = candidate_model
+        payload["tools"] = [_build_scan_web_search_tool(candidate_model)]
         response = httpx.post(
             OPENAI_RESPONSES_URL,
             json=payload,

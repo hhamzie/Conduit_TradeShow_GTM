@@ -891,8 +891,11 @@ class AutomationTests(unittest.TestCase):
         self.assertEqual(post_mock.call_args_list[0].kwargs["json"]["model"], "gpt-5")
         self.assertEqual(post_mock.call_args_list[1].kwargs["json"]["model"], "gpt-4.1-mini")
         first_tool = post_mock.call_args_list[0].kwargs["json"]["tools"][0]
+        second_tool = post_mock.call_args_list[1].kwargs["json"]["tools"][0]
         self.assertIn("tsnn.com", first_tool["filters"]["allowed_domains"])
         self.assertEqual(first_tool["user_location"]["country"], "US")
+        self.assertNotIn("filters", second_tool)
+        self.assertEqual(second_tool["user_location"]["country"], "US")
 
     def test_confirm_scanned_trade_shows_route_adds_shows(self) -> None:
         from app.main import confirm_scanned_trade_shows_route
