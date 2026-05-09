@@ -40,7 +40,7 @@ from app.services import (
     update_show,
     upsert_show,
 )
-from app.trade_show_feeder import scan_upcoming_trade_shows
+from app.trade_show_feeder import TradeShowScanError, scan_upcoming_trade_shows
 from app.web.presenters import (
     build_show_notice,
     get_run_status_label,
@@ -337,6 +337,15 @@ def scan_upcoming_trade_shows_route(
                 "candidates": [],
             },
             status_code=status.HTTP_400_BAD_REQUEST,
+        )
+    except TradeShowScanError as exc:
+        return JSONResponse(
+            {
+                "status": "error",
+                "message": str(exc),
+                "candidates": [],
+            },
+            status_code=exc.status_code,
         )
     except Exception as exc:  # noqa: BLE001
         return JSONResponse(

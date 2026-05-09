@@ -59,6 +59,12 @@ class TradeShowScanCandidate:
     summary: str
 
 
+class TradeShowScanError(Exception):
+    def __init__(self, message: str, *, status_code: int = 400) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+
+
 SCAN_MODEL_FALLBACKS = ("gpt-4.1-mini", "gpt-4.1")
 
 
@@ -193,12 +199,12 @@ def scan_upcoming_trade_shows(
         except httpx.HTTPStatusError as exc:
             last_error = exc
             if not _should_retry_scan_with_fallback(exc):
-                raise
+                raise _build_trade_show_scan_error(exc) from exc
             continue
 
     if body is None:
         if last_error is not None:
-            raise last_error
+            raise _build_trade_show_scan_error(last_error) from last_error
         return []
 
     text = extract_text_from_openai_response(body)
@@ -258,3 +264,42 @@ def _should_retry_scan_with_fallback(error: httpx.HTTPStatusError) -> bool:
     code = str(details.get("code") or "").strip().lower()
     message = str(details.get("message") or "").strip().lower()
     return code == "model_not_found" or "must be verified to use the model" in message
+
+
+def _build_trade_show_scan_error(error: httpx.HTTPStatusError) -> TradeShowScanError:
+    response = error.response
+    status_code = response.status_code
+    payload_message = _extract_openai_error_message(response)
+
+    if status_code == 429:
+        message = "Trade show scan is rate limited right now. Try again later."
+        if payload_message:
+            message = f"{message} {payload_message}"
+        return TradeShowScanError(message, status_code=429)
+
+    if status_code == 401:
+        return TradeShowScanError("Trade show scan key is invalid. Update OPENAI_API_KEY.", status_code=401)
+
+    if status_code == 403:
+        return TradeShowScanError("Trade show scan is blocked for this project right now.", status_code=403)
+
+    if status_code == 404 and payload_message:
+        return TradeShowScanError(payload_message, status_code=400)
+
+    if payload_message:
+        return TradeShowScanError(f"Trade show scan failed. {payload_message}", status_code=502)
+
+    return TradeShowScanError("Trade show scan failed right now. Try again later.", status_code=502)
+
+
+def _extract_openai_error_message(response: httpx.Response) -> str:
+    try:
+        payload = response.json()
+    except ValueError:
+        return ""
+    if not isinstance(payload, dict):
+        return ""
+    details = payload.get("error")
+    if not isinstance(details, dict):
+        return ""
+    return str(details.get("message") or "").strip()

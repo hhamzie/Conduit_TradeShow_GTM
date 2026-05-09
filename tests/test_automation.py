@@ -21,7 +21,7 @@ from app.database import Base
 from app.models import ClaySyncRow, RunStatus, Show, ShowGuideRow, ShowStatus
 from app.providers import ClayPollResult, ClayRecord, ProviderResult, SmartleadSyncResult
 from app.services import _build_prepared_lead, BulkDirectScrapeResult, DirectScrapeResult, launch_show, register_bulk_shows, run_bulk_direct_scrape, run_show_scrape, run_weekly_show_sync, start_outbound_campaign, sync_show_from_clay, upsert_show
-from app.trade_show_feeder import TradeShowScanCandidate, scan_upcoming_trade_shows
+from app.trade_show_feeder import TradeShowScanCandidate, TradeShowScanError, scan_upcoming_trade_shows
 
 
 def make_show(**overrides) -> Show:
@@ -821,6 +821,27 @@ class AutomationTests(unittest.TestCase):
         self.assertEqual(second_response.status_code, 429)
         self.assertIn(b'"status":"locked"', second_response.body)
         self.assertIn(b"Search has already been done today.", second_response.body)
+
+    def test_scan_upcoming_trade_shows_route_surfaces_provider_rate_limit_cleanly(self) -> None:
+        from app.main import scan_upcoming_trade_shows_route
+
+        request = type("Req", (), {"session": {}})()
+        with self.Session() as session:
+            with (
+                patch("app.web.routes.shows.require_authenticated"),
+                patch(
+                    "app.web.routes.shows.scan_upcoming_trade_shows",
+                    side_effect=TradeShowScanError(
+                        "Trade show scan is rate limited right now. Try again later.",
+                        status_code=429,
+                    ),
+                ),
+            ):
+                response = scan_upcoming_trade_shows_route(request=request, db=session)
+
+        self.assertEqual(response.status_code, 429)
+        self.assertIn(b'"status":"error"', response.body)
+        self.assertIn(b"Trade show scan is rate limited right now. Try again later.", response.body)
 
     def test_scan_upcoming_trade_shows_falls_back_when_gpt5_is_unavailable(self) -> None:
         primary_response = httpx.Response(
