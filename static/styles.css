@@ -522,6 +522,7 @@ button.button.subtle {
 }
 
 .bulk-select-control {
+  display: inline-flex;
   align-items: center;
   gap: 8px;
 }
@@ -539,13 +540,20 @@ button.button.subtle {
   gap: 12px;
 }
 
+.bulk-select-actions[hidden] {
+  display: none !important;
+}
+
 .bulk-select-label {
+  display: inline-flex;
+  align-items: center;
+  min-height: 18px;
   font-size: 0.88rem;
   font-weight: 700;
   color: var(--ink-soft);
   white-space: nowrap;
   font-style: normal;
-  line-height: 1;
+  line-height: 18px;
 }
 
 .bulk-select-count {
@@ -698,6 +706,11 @@ button.button.subtle {
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--muted);
+}
+
+.dashboard-table th.actions-col,
+.dashboard-table td.actions-col {
+  text-align: left;
 }
 
 .dashboard-table td {
