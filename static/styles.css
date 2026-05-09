@@ -521,10 +521,15 @@ button.button.subtle {
   gap: 8px;
 }
 
+.bulk-select-control {
+  align-items: center;
+  gap: 8px;
+}
+
 .bulk-select-anchor .selector-control {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
   margin: 0;
 }
 
@@ -539,6 +544,8 @@ button.button.subtle {
   font-weight: 700;
   color: var(--ink-soft);
   white-space: nowrap;
+  font-style: normal;
+  line-height: 1;
 }
 
 .bulk-select-count {
@@ -884,6 +891,12 @@ button.button.subtle {
   align-items: center;
   justify-content: flex-start;
   gap: 10px;
+  width: 100%;
+}
+
+.dashboard-icon-rail .action-menu:last-child,
+.dashboard-icon-rail > .more-actions-trigger:last-child {
+  margin-left: auto;
 }
 
 .dashboard-stat-cell {
@@ -993,7 +1006,7 @@ button.button.subtle {
   justify-content: center;
   min-width: 18px;
   min-height: 38px;
-  padding: 0 2px;
+  padding: 0;
   border: 0;
   background: transparent;
   color: #5f7698;

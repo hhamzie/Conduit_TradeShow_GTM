@@ -792,6 +792,13 @@ function initializeScanModal() {
         closeScanModal();
       }
     });
+
+    const shouldAutoOpen = modal.dataset.scanAutoOpen === "true";
+    const autoOpenDay = (modal.dataset.scanAutoDay || "sunday").toLowerCase();
+    const currentDay = new Intl.DateTimeFormat("en-US", { weekday: "long" }).format(new Date()).toLowerCase();
+    if (shouldAutoOpen && currentDay === autoOpenDay) {
+      openScanModal();
+    }
   }
 
   const form = document.querySelector("[data-scan-form]");

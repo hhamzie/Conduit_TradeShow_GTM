@@ -43,10 +43,10 @@
   <form id="bulk-form-dashboard" class="section-toolbar compact bulk-select-bar dashboard-bulk-bar" action="/shows/bulk/delete" method="post" data-multi-select-form>
     <input type="hidden" name="next_path" value="/shows/dashboard" />
     <div class="bulk-select-anchor">
-      <span class="bulk-select-label">Select all</span>
-      <label class="selector-control" aria-label="Select all trade shows">
+      <label class="selector-control bulk-select-control" aria-label="Select all trade shows">
         <input type="checkbox" data-select-all />
         <span></span>
+        <em class="bulk-select-label">Select all</em>
       </label>
     </div>
     <div class="bulk-select-actions" data-selection-controls hidden>
@@ -210,7 +210,7 @@
   </section>
 </div>
 
-<div class="confirm-modal-backdrop" data-scan-modal hidden>
+<div class="confirm-modal-backdrop" data-scan-modal data-scan-auto-open="false" hidden>
   <section class="confirm-modal scan-modal" role="dialog" aria-modal="true" aria-labelledby="scan-modal-title">
     <button class="flash-modal-close" type="button" aria-label="Close scan modal" data-scan-close>&times;</button>
     <h2 id="scan-modal-title">Scan for upcoming trade shows</h2>
