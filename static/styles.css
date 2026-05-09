@@ -516,14 +516,16 @@ button.button.subtle {
 }
 
 .bulk-select-anchor {
-  display: grid;
-  grid-template-columns: auto auto;
+  display: inline-flex;
   align-items: center;
   gap: 8px;
 }
 
 .bulk-select-anchor .selector-control {
-  justify-content: flex-start;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
 }
 
 .bulk-select-actions {
