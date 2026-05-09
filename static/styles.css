@@ -549,7 +549,9 @@ button.button.subtle {
 }
 
 .dashboard-bulk-bar {
-  justify-content: flex-start !important;
+  display: grid !important;
+  grid-template-columns: auto 1fr;
+  justify-content: initial !important;
   align-items: center;
   width: 100%;
   margin-bottom: 14px;
@@ -557,11 +559,13 @@ button.button.subtle {
 }
 
 .dashboard-bulk-bar .bulk-select-anchor {
-  flex: 0 0 auto;
+  justify-self: start;
+  align-self: center;
   margin-right: 18px;
 }
 
 .dashboard-bulk-bar .bulk-select-actions {
+  justify-self: start;
   flex: 0 0 auto;
 }
 
