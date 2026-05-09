@@ -560,6 +560,12 @@ button.button.subtle {
   margin-top: 8px;
 }
 
+.hero-dashboard-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
 .mini-stat-card {
   padding: 14px 16px;
   border-radius: 16px;
@@ -1148,6 +1154,53 @@ button.button.subtle {
   justify-content: flex-end;
   gap: 10px;
   margin-top: 6px;
+}
+
+.scan-modal {
+  width: min(100%, 760px);
+}
+
+.scan-form {
+  display: grid;
+  gap: 12px;
+}
+
+.scan-form label {
+  display: grid;
+  gap: 8px;
+}
+
+.scan-results {
+  display: grid;
+  gap: 12px;
+}
+
+.scan-result-list {
+  display: grid;
+  gap: 10px;
+  max-height: 360px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.scan-result-card {
+  display: grid;
+  gap: 4px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #ffffff;
+}
+
+.scan-result-card p {
+  margin: 0;
+  color: var(--ink-soft);
+}
+
+.scan-result-card a {
+  font-size: 0.82rem;
+  color: var(--accent-dark);
+  overflow-wrap: anywhere;
 }
 
 .priority-high {

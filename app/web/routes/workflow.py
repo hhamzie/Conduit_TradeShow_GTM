@@ -49,6 +49,11 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
             title="Workflow",
             weekly_sync_enabled=settings.weekly_show_sync_enabled,
             weekly_sync_source=(settings.weekly_show_sync_source_url or settings.weekly_show_sync_source_path),
+            weekly_sync_mode=(
+                "CSV feed"
+                if (settings.weekly_show_sync_source_url or settings.weekly_show_sync_source_path)
+                else "AI scan"
+            ),
             weekly_sync_weekday=settings.weekly_show_sync_weekday,
             weekly_sync_hour=settings.weekly_show_sync_hour,
             weekly_sync_timezone=settings.weekly_show_sync_timezone,

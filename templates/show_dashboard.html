@@ -7,9 +7,12 @@
       <p class="hero-kicker">Trade Show Dashboard</p>
       <h1>Trade Shows</h1>
     </div>
-    {% if can_manage %}
-    <a class="button secondary discreet-workflow-link" href="/workflow">Workflow</a>
-    {% endif %}
+    <div class="hero-dashboard-actions">
+      {% if can_manage %}
+      <button class="button secondary discreet-workflow-link" type="button" data-scan-open>Scan for upcoming trade shows</button>
+      <a class="button secondary discreet-workflow-link" href="/workflow">Workflow</a>
+      {% endif %}
+    </div>
   </div>
   <div class="dashboard-mini-stats">
     <article class="mini-stat-card">
@@ -204,6 +207,35 @@
         <button class="button" type="submit" data-outbound-confirm>Start outbound</button>
       </div>
     </form>
+  </section>
+</div>
+
+<div class="confirm-modal-backdrop" data-scan-modal hidden>
+  <section class="confirm-modal scan-modal" role="dialog" aria-modal="true" aria-labelledby="scan-modal-title">
+    <button class="flash-modal-close" type="button" aria-label="Close scan modal" data-scan-close>&times;</button>
+    <h2 id="scan-modal-title">Scan for upcoming trade shows</h2>
+    <form class="scan-form" action="/shows/scan-upcoming" method="post" data-scan-form>
+      <label>
+        <span>Optional focus</span>
+        <input type="text" name="query_hint" placeholder="home furnishings, packaging, restaurant supply" />
+      </label>
+      <div class="confirm-modal-actions">
+        <button class="button secondary" type="button" data-scan-close>Cancel</button>
+        <button class="button" type="submit" data-scan-submit>Run scan</button>
+      </div>
+    </form>
+    <div class="scan-results" data-scan-results hidden>
+      <p class="confirm-modal-copy" data-scan-message></p>
+      <div class="scan-result-list" data-scan-list></div>
+      <form action="/shows/scan-upcoming/confirm" method="post" data-scan-confirm-form>
+        <input type="hidden" name="candidates_json" value="" data-scan-payload />
+        <div class="confirm-modal-actions">
+          <button class="button secondary" type="button" data-scan-close>Close</button>
+          <button class="button" type="submit" data-scan-confirm>Add found shows</button>
+        </div>
+      </form>
+    </div>
+    <p class="confirm-modal-copy" data-scan-empty hidden></p>
   </section>
 </div>
 {% endif %}

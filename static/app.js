@@ -587,6 +587,195 @@ function initializeOutboundModal() {
   });
 }
 
+function renderScanResults(candidates) {
+  return candidates
+    .map((candidate) => {
+      const name = candidate.show_name || "Untitled show";
+      const date = candidate.event_date_raw || candidate.event_date || "";
+      const place = candidate.place || "";
+      const link = candidate.link || "";
+      const summary = candidate.summary || "";
+      return `
+        <article class="scan-result-card">
+          <strong>${name}</strong>
+          <span class="muted">${date}${place ? ` · ${place}` : ""}</span>
+          ${summary ? `<p>${summary}</p>` : ""}
+          ${link ? `<a href="${link}" target="_blank" rel="noreferrer">${link}</a>` : ""}
+        </article>
+      `;
+    })
+    .join("");
+}
+
+function resetScanModalState(modal) {
+  const results = modal.querySelector("[data-scan-results]");
+  const empty = modal.querySelector("[data-scan-empty]");
+  const list = modal.querySelector("[data-scan-list]");
+  const payload = modal.querySelector("[data-scan-payload]");
+  const message = modal.querySelector("[data-scan-message]");
+  if (results instanceof HTMLElement) {
+    results.hidden = true;
+  }
+  if (empty instanceof HTMLElement) {
+    empty.hidden = true;
+    empty.textContent = "";
+  }
+  if (list instanceof HTMLElement) {
+    list.innerHTML = "";
+  }
+  if (payload instanceof HTMLInputElement) {
+    payload.value = "";
+  }
+  if (message instanceof HTMLElement) {
+    message.textContent = "";
+  }
+}
+
+function openScanModal() {
+  const modal = document.querySelector("[data-scan-modal]");
+  if (!(modal instanceof HTMLElement)) {
+    return;
+  }
+  resetScanModalState(modal);
+  modal.hidden = false;
+  document.body.dataset.modalOpen = "true";
+}
+
+function closeScanModal() {
+  const modal = document.querySelector("[data-scan-modal]");
+  if (!(modal instanceof HTMLElement)) {
+    return;
+  }
+  modal.hidden = true;
+  resetScanModalState(modal);
+  delete document.body.dataset.modalOpen;
+}
+
+async function handleScanSubmit(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const modal = form.closest("[data-scan-modal]");
+  const results = modal ? modal.querySelector("[data-scan-results]") : null;
+  const empty = modal ? modal.querySelector("[data-scan-empty]") : null;
+  const list = modal ? modal.querySelector("[data-scan-list]") : null;
+  const payloadField = modal ? modal.querySelector("[data-scan-payload]") : null;
+  const message = modal ? modal.querySelector("[data-scan-message]") : null;
+  const confirmButton = modal ? modal.querySelector("[data-scan-confirm]") : null;
+
+  setFormBusyState(form, true, "Scanning...");
+  if (results instanceof HTMLElement) {
+    results.hidden = true;
+  }
+  if (empty instanceof HTMLElement) {
+    empty.hidden = true;
+    empty.textContent = "";
+  }
+
+  try {
+    const response = await fetch(form.action, {
+      method: "POST",
+      body: new FormData(form),
+      credentials: "same-origin",
+    });
+    const payload = await response.json();
+    if (!response.ok || payload.status === "error") {
+      throw new Error(payload.message || `Scan failed (${response.status}).`);
+    }
+
+    if (payload.status === "empty") {
+      if (empty instanceof HTMLElement) {
+        empty.hidden = false;
+        empty.textContent = payload.message || "No trade shows were found.";
+      }
+      return;
+    }
+
+    const candidates = Array.isArray(payload.candidates) ? payload.candidates : [];
+    if (message instanceof HTMLElement) {
+      message.textContent = payload.message || `Found ${candidates.length} shows.`;
+    }
+    if (list instanceof HTMLElement) {
+      list.innerHTML = renderScanResults(candidates);
+    }
+    if (payloadField instanceof HTMLInputElement) {
+      payloadField.value = JSON.stringify(candidates);
+    }
+    if (confirmButton instanceof HTMLButtonElement) {
+      confirmButton.textContent = `Add ${candidates.length} show${candidates.length === 1 ? "" : "s"}`;
+      confirmButton.disabled = candidates.length === 0;
+    }
+    if (results instanceof HTMLElement) {
+      results.hidden = false;
+    }
+  } catch (error) {
+    if (empty instanceof HTMLElement) {
+      empty.hidden = false;
+      empty.textContent =
+        error instanceof Error && error.message ? error.message : "Scan failed.";
+    }
+  } finally {
+    setFormBusyState(form, false, "Scanning...");
+  }
+}
+
+async function handleScanConfirm(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  setFormBusyState(form, true, "Adding...");
+  try {
+    const response = await fetch(form.action, {
+      method: "POST",
+      body: new FormData(form),
+      credentials: "same-origin",
+    });
+    const payload = await response.json();
+    if (!response.ok || !payload.ok) {
+      throw new Error(payload.detail || payload.message || `Add failed (${response.status}).`);
+    }
+    window.location.href = payload.redirect || "/shows/dashboard";
+  } catch (error) {
+    const modal = form.closest("[data-scan-modal]");
+    const empty = modal ? modal.querySelector("[data-scan-empty]") : null;
+    if (empty instanceof HTMLElement) {
+      empty.hidden = false;
+      empty.textContent = error instanceof Error && error.message ? error.message : "Could not add scanned shows.";
+    }
+  } finally {
+    setFormBusyState(form, false, "Adding...");
+  }
+}
+
+function initializeScanModal() {
+  const openButton = document.querySelector("[data-scan-open]");
+  if (openButton) {
+    openButton.addEventListener("click", openScanModal);
+  }
+
+  const closeButtons = document.querySelectorAll("[data-scan-close]");
+  closeButtons.forEach((button) => {
+    button.addEventListener("click", closeScanModal);
+  });
+
+  const modal = document.querySelector("[data-scan-modal]");
+  if (modal) {
+    modal.addEventListener("click", (event) => {
+      if (event.target === modal) {
+        closeScanModal();
+      }
+    });
+  }
+
+  const form = document.querySelector("[data-scan-form]");
+  if (form instanceof HTMLFormElement) {
+    form.addEventListener("submit", handleScanSubmit);
+  }
+
+  const confirmForm = document.querySelector("[data-scan-confirm-form]");
+  if (confirmForm instanceof HTMLFormElement) {
+    confirmForm.addEventListener("submit", handleScanConfirm);
+  }
+}
+
 const guideRowAutosaveTimers = new Map();
 const guideRowAutosaveControllers = new Map();
 const guideRowAutosaveStateTimers = new Map();
@@ -976,4 +1165,5 @@ document.addEventListener("DOMContentLoaded", () => {
   initializeMultiSelectForms();
   initializeDismissibleNotices();
   initializeOutboundModal();
+  initializeScanModal();
 });

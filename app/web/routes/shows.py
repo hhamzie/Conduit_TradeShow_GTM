@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 from datetime import datetime
+import json
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, RedirectResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from sqlalchemy.orm import Session
 from starlette import status
 
+from app.config import get_settings
 from app.core.auth import can_manage, require_authenticated
 from app.core.templating import template_context, templates
 from app.database import get_db
@@ -34,7 +36,9 @@ from app.services import (
     start_outbound_campaign,
     sync_show_from_clay,
     update_show,
+    upsert_show,
 )
+from app.trade_show_feeder import scan_upcoming_trade_shows
 from app.web.presenters import (
     build_show_notice,
     get_run_status_label,
@@ -82,6 +86,16 @@ def _get_guide_row_or_404(db: Session, show_id: int, row_id: int) -> ShowGuideRo
     if row is None or row.show_id != show_id:
         raise HTTPException(status_code=404, detail="Guide row not found.")
     return row
+
+
+def _serialize_scan_candidate(candidate) -> dict[str, str]:
+    return {
+        "show_name": candidate.show_name,
+        "event_date_raw": candidate.event_date_raw,
+        "place": candidate.place,
+        "link": candidate.link,
+        "summary": candidate.summary,
+    }
 
 
 @router.get("/shows/dashboard")
@@ -293,6 +307,107 @@ def configure_selected_smartlead(
         "detail": f"Linked {linked}, skipped {skipped}, failed {failed}.",
     }
     return RedirectResponse(target_path, status_code=status.HTTP_303_SEE_OTHER)
+
+
+@router.post("/shows/scan-upcoming")
+def scan_upcoming_trade_shows_route(
+    request: Request,
+    query_hint: str = Form(""),
+):
+    require_authenticated(request)
+    try:
+        candidates = scan_upcoming_trade_shows(query_hint=query_hint)
+    except ValueError as exc:
+        return JSONResponse(
+            {
+                "status": "error",
+                "message": str(exc),
+                "candidates": [],
+            },
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return JSONResponse(
+            {
+                "status": "error",
+                "message": f"Scan failed: {exc}",
+                "candidates": [],
+            },
+            status_code=status.HTTP_502_BAD_GATEWAY,
+        )
+
+    if not candidates:
+        return JSONResponse(
+            {
+                "status": "empty",
+                "message": "No upcoming B2B physical-goods trade shows were found right now.",
+                "candidates": [],
+            }
+        )
+
+    serialized = [_serialize_scan_candidate(candidate) for candidate in candidates]
+    return JSONResponse(
+        {
+            "status": "ready",
+            "message": f"Found {len(serialized)} upcoming trade show(s).",
+            "count": len(serialized),
+            "candidates": serialized,
+        }
+    )
+
+
+@router.post("/shows/scan-upcoming/confirm")
+def confirm_scanned_trade_shows_route(
+    request: Request,
+    candidates_json: str = Form(...),
+    db: Session = Depends(get_db),
+):
+    require_authenticated(request)
+    try:
+        payload = json.loads(candidates_json)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail="Invalid scan payload.") from exc
+    if not isinstance(payload, list):
+        raise HTTPException(status_code=400, detail="Invalid scan payload.")
+
+    created = 0
+    updated = 0
+    skipped = 0
+    for item in payload:
+        if not isinstance(item, dict):
+            skipped += 1
+            continue
+        show_name = str(item.get("show_name") or "").strip()
+        event_date_raw = str(item.get("event_date_raw") or item.get("event_date") or "").strip()
+        place = str(item.get("place") or "").strip()
+        link = str(item.get("link") or "").strip()
+        if not (show_name and event_date_raw and place and link):
+            skipped += 1
+            continue
+        try:
+            _show, created_now = upsert_show(
+                db,
+                show_name=show_name,
+                event_date_raw=event_date_raw,
+                place=place,
+                link=link,
+                run_offset_days=get_settings().default_run_offset_days,
+            )
+        except ValueError:
+            skipped += 1
+            continue
+        if created_now:
+            created += 1
+        else:
+            updated += 1
+
+    db.commit()
+    request.session["flash_message"] = {
+        "tone": "success",
+        "title": "Trade show scan applied.",
+        "detail": f"Added {created}, updated {updated}, skipped {skipped}.",
+    }
+    return JSONResponse({"ok": True, "redirect": "/shows/dashboard"})
 
 
 @router.post("/shows/{show_id}/run-now")

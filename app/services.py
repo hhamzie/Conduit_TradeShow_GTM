@@ -32,6 +32,7 @@ from app.providers import (
     push_to_clay,
     push_to_heyreach,
 )
+from app.trade_show_feeder import is_b2b_physical_goods_show, scan_upcoming_trade_shows
 from scraper import ScrapeOptions, run_scrape
 
 
@@ -944,52 +945,6 @@ def start_outbound_campaign(db: Session, show: Show) -> OutboundPlan:
     return plan
 
 
-PHYSICAL_GOODS_INCLUDE_TERMS = (
-    "furniture",
-    "home",
-    "gift",
-    "decor",
-    "design",
-    "market",
-    "packaging",
-    "housewares",
-    "kitchen",
-    "hardware",
-    "industrial",
-    "manufacturing",
-    "supplier",
-    "sourcing",
-    "apparel",
-    "textile",
-    "materials",
-    "pet",
-    "foodservice",
-    "restaurant",
-    "building",
-    "construction",
-    "fabric",
-)
-PHYSICAL_GOODS_EXCLUDE_TERMS = (
-    "saas",
-    "software",
-    "crypto",
-    "web3",
-    "gaming",
-    "media",
-    "influencer",
-    "creator",
-)
-
-
-def is_b2b_physical_goods_show(show_name: str, source_url: str = "") -> bool:
-    haystack = f"{show_name} {source_url}".strip().lower()
-    if not haystack:
-        return False
-    if any(term in haystack for term in PHYSICAL_GOODS_EXCLUDE_TERMS):
-        return False
-    return any(term in haystack for term in PHYSICAL_GOODS_INCLUDE_TERMS)
-
-
 def _load_weekly_show_sync_payload(settings) -> bytes:
     if settings.weekly_show_sync_source_url:
         response = httpx.get(settings.weekly_show_sync_source_url, timeout=45.0, follow_redirects=True)
@@ -1050,8 +1005,6 @@ def run_weekly_show_sync(db: Session, now: datetime | None = None) -> WeeklyShow
         if previous_local >= scheduled_window:
             return None
 
-    payload = _load_weekly_show_sync_payload(settings)
-    rows, headers = _parse_bulk_csv_payload(payload)
     created = 0
     updated = 0
     skipped = 0
@@ -1060,11 +1013,37 @@ def run_weekly_show_sync(db: Session, now: datetime | None = None) -> WeeklyShow
     start_date = current_local.date()
     end_date = start_date + timedelta(days=settings.weekly_show_sync_lookahead_days)
 
-    for row in rows:
-        show_name = (row.get(headers["show"]) or "").strip()
-        event_date_raw = (row.get(headers["date"]) or "").strip()
-        place = (row.get(headers["place"]) or "").strip()
-        link = (row.get(headers["link"]) or "").strip()
+    if settings.weekly_show_sync_source_url or settings.weekly_show_sync_source_path:
+        payload = _load_weekly_show_sync_payload(settings)
+        rows, headers = _parse_bulk_csv_payload(payload)
+        candidate_rows = [
+            {
+                "show_name": (row.get(headers["show"]) or "").strip(),
+                "event_date_raw": (row.get(headers["date"]) or "").strip(),
+                "place": (row.get(headers["place"]) or "").strip(),
+                "link": (row.get(headers["link"]) or "").strip(),
+            }
+            for row in rows
+        ]
+    else:
+        candidate_rows = [
+            {
+                "show_name": candidate.show_name,
+                "event_date_raw": candidate.event_date_raw,
+                "place": candidate.place,
+                "link": candidate.link,
+            }
+            for candidate in scan_upcoming_trade_shows(
+                today=start_date,
+                lookahead_days=settings.weekly_show_sync_lookahead_days,
+            )
+        ]
+
+    for row in candidate_rows:
+        show_name = row["show_name"]
+        event_date_raw = row["event_date_raw"]
+        place = row["place"]
+        link = row["link"]
         if not (show_name and event_date_raw and place and link):
             skipped += 1
             continue

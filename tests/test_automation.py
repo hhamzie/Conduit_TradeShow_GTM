@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 import io
+import json
 import os
 from pathlib import Path
 import tempfile
@@ -19,6 +20,7 @@ from app.database import Base
 from app.models import ClaySyncRow, RunStatus, Show, ShowGuideRow, ShowStatus
 from app.providers import ClayPollResult, ClayRecord, ProviderResult, SmartleadSyncResult
 from app.services import _build_prepared_lead, BulkDirectScrapeResult, DirectScrapeResult, launch_show, register_bulk_shows, run_bulk_direct_scrape, run_show_scrape, run_weekly_show_sync, start_outbound_campaign, sync_show_from_clay, upsert_show
+from app.trade_show_feeder import TradeShowScanCandidate
 
 
 def make_show(**overrides) -> Show:
@@ -548,6 +550,45 @@ class AutomationTests(unittest.TestCase):
                 finally:
                     get_settings.cache_clear()
 
+    def test_run_weekly_show_sync_uses_ai_scan_when_no_source_is_configured(self) -> None:
+        with self.Session() as session:
+            with patch.dict(
+                os.environ,
+                {
+                    "WEEKLY_SHOW_SYNC_ENABLED": "true",
+                    "WEEKLY_SHOW_SYNC_WEEKDAY": "6",
+                    "WEEKLY_SHOW_SYNC_HOUR": "10",
+                    "WEEKLY_SHOW_SYNC_LOOKAHEAD_DAYS": "30",
+                    "WEEKLY_SHOW_SYNC_TIMEZONE": "America/New_York",
+                    "WEEKLY_SHOW_SYNC_SOURCE_PATH": "",
+                    "WEEKLY_SHOW_SYNC_SOURCE_URL": "",
+                },
+            ):
+                get_settings.cache_clear()
+                try:
+                    with patch(
+                        "app.services.scan_upcoming_trade_shows",
+                        return_value=[
+                            TradeShowScanCandidate(
+                                show_name="High Point Market",
+                                event_date_raw="2026-05-25",
+                                place="High Point NC",
+                                link="https://example.com/high-point",
+                                summary="Home furnishings suppliers.",
+                            )
+                        ],
+                    ):
+                        result = run_weekly_show_sync(
+                            session,
+                            now=datetime(2026, 5, 24, 10, 5, tzinfo=ZoneInfo("America/New_York")),
+                        )
+
+                    self.assertIsNotNone(result)
+                    assert result is not None
+                    self.assertEqual(result.created, 1)
+                finally:
+                    get_settings.cache_clear()
+
     def test_register_bulk_shows_skips_duplicate_rows_in_same_upload(self) -> None:
         payload = "\n".join(
             [
@@ -720,6 +761,62 @@ class AutomationTests(unittest.TestCase):
             self.assertEqual(show.smartlead_campaign_id, 321)
             self.assertEqual(show.smartlead_campaign_name, "ICFF Buyers")
             self.assertEqual(request.session["flash_message"]["title"], "Smartlead campaign linked.")
+
+    def test_scan_upcoming_trade_shows_route_returns_candidates(self) -> None:
+        from app.main import scan_upcoming_trade_shows_route
+
+        request = type("Req", (), {"session": {}})()
+        with (
+            patch("app.web.routes.shows.require_authenticated"),
+            patch(
+                "app.web.routes.shows.scan_upcoming_trade_shows",
+                return_value=[
+                    TradeShowScanCandidate(
+                        show_name="High Point Market",
+                        event_date_raw="2026-05-25",
+                        place="High Point NC",
+                        link="https://example.com/high-point",
+                        summary="Home furnishings suppliers.",
+                    )
+                ],
+            ),
+        ):
+            response = scan_upcoming_trade_shows_route(request=request, query_hint="home furnishings")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b'"status":"ready"', response.body)
+        self.assertIn(b'"count":1', response.body)
+        self.assertIn(b"High Point Market", response.body)
+
+    def test_confirm_scanned_trade_shows_route_adds_shows(self) -> None:
+        from app.main import confirm_scanned_trade_shows_route
+
+        request = type("Req", (), {"session": {}})()
+        payload = json.dumps(
+            [
+                {
+                    "show_name": "High Point Market",
+                    "event_date_raw": "2026-05-25",
+                    "place": "High Point NC",
+                    "link": "https://example.com/high-point",
+                    "summary": "Home furnishings suppliers.",
+                }
+            ]
+        )
+        with self.Session() as session:
+            with patch("app.web.routes.shows.require_authenticated"):
+                response = confirm_scanned_trade_shows_route(
+                    request=request,
+                    candidates_json=payload,
+                    db=session,
+                )
+
+            self.assertEqual(response.status_code, 200)
+            self.assertIn(b'"ok":true', response.body)
+            shows = session.scalars(select(Show)).all()
+            self.assertEqual(len(shows), 1)
+            self.assertEqual(shows[0].name, "High Point Market")
+            self.assertEqual(request.session["flash_message"]["title"], "Trade show scan applied.")
 
     def test_build_trade_show_guide_route_populates_rows_from_export(self) -> None:
         from app.main import build_trade_show_guide_route

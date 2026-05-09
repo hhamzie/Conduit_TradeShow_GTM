@@ -254,7 +254,7 @@
     </div>
     <div class="metric-tile">
       <span>Source</span>
-      <strong>{{ "Connected" if weekly_sync_source else "Missing" }}</strong>
+      <strong>{{ weekly_sync_mode if weekly_sync_enabled else "Missing" }}</strong>
     </div>
   </div>
 </section>
