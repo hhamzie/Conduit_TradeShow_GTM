@@ -31,8 +31,10 @@ from app.services import (
     get_show,
     launch_show,
     list_shows,
+    manual_trade_show_scan_already_ran_today,
     pause_show,
     queue_show_now,
+    record_manual_trade_show_scan,
     start_outbound_campaign,
     sync_show_from_clay,
     update_show,
@@ -313,8 +315,18 @@ def configure_selected_smartlead(
 def scan_upcoming_trade_shows_route(
     request: Request,
     query_hint: str = Form(""),
+    db: Session = Depends(get_db),
 ):
     require_authenticated(request)
+    if manual_trade_show_scan_already_ran_today(db):
+        return JSONResponse(
+            {
+                "status": "locked",
+                "message": "Search has already been done today.",
+                "candidates": [],
+            },
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+        )
     try:
         candidates = scan_upcoming_trade_shows(query_hint=query_hint)
     except ValueError as exc:
@@ -335,6 +347,9 @@ def scan_upcoming_trade_shows_route(
             },
             status_code=status.HTTP_502_BAD_GATEWAY,
         )
+
+    record_manual_trade_show_scan(db)
+    db.commit()
 
     if not candidates:
         return JSONResponse(

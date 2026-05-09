@@ -766,27 +766,60 @@ class AutomationTests(unittest.TestCase):
         from app.main import scan_upcoming_trade_shows_route
 
         request = type("Req", (), {"session": {}})()
-        with (
-            patch("app.web.routes.shows.require_authenticated"),
-            patch(
-                "app.web.routes.shows.scan_upcoming_trade_shows",
-                return_value=[
-                    TradeShowScanCandidate(
-                        show_name="High Point Market",
-                        event_date_raw="2026-05-25",
-                        place="High Point NC",
-                        link="https://example.com/high-point",
-                        summary="Home furnishings suppliers.",
-                    )
-                ],
-            ),
-        ):
-            response = scan_upcoming_trade_shows_route(request=request, query_hint="home furnishings")
+        with self.Session() as session:
+            with (
+                patch("app.web.routes.shows.require_authenticated"),
+                patch(
+                    "app.web.routes.shows.scan_upcoming_trade_shows",
+                    return_value=[
+                        TradeShowScanCandidate(
+                            show_name="High Point Market",
+                            event_date_raw="2026-05-25",
+                            place="High Point NC",
+                            link="https://example.com/high-point",
+                            summary="Home furnishings suppliers.",
+                        )
+                    ],
+                ),
+            ):
+                response = scan_upcoming_trade_shows_route(
+                    request=request,
+                    query_hint="home furnishings",
+                    db=session,
+                )
 
         self.assertEqual(response.status_code, 200)
         self.assertIn(b'"status":"ready"', response.body)
         self.assertIn(b'"count":1', response.body)
         self.assertIn(b"High Point Market", response.body)
+
+    def test_scan_upcoming_trade_shows_route_blocks_second_scan_same_day(self) -> None:
+        from app.main import scan_upcoming_trade_shows_route
+
+        request = type("Req", (), {"session": {}})()
+        with self.Session() as session:
+            with (
+                patch("app.web.routes.shows.require_authenticated"),
+                patch(
+                    "app.web.routes.shows.scan_upcoming_trade_shows",
+                    return_value=[
+                        TradeShowScanCandidate(
+                            show_name="High Point Market",
+                            event_date_raw="2026-05-25",
+                            place="High Point NC",
+                            link="https://example.com/high-point",
+                            summary="Home furnishings suppliers.",
+                        )
+                    ],
+                ),
+            ):
+                first_response = scan_upcoming_trade_shows_route(request=request, db=session)
+                second_response = scan_upcoming_trade_shows_route(request=request, db=session)
+
+        self.assertEqual(first_response.status_code, 200)
+        self.assertEqual(second_response.status_code, 429)
+        self.assertIn(b'"status":"locked"', second_response.body)
+        self.assertIn(b"Search has already been done today.", second_response.body)
 
     def test_confirm_scanned_trade_shows_route_adds_shows(self) -> None:
         from app.main import confirm_scanned_trade_shows_route

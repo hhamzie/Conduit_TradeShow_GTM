@@ -36,6 +36,9 @@ from app.trade_show_feeder import is_b2b_physical_goods_show, scan_upcoming_trad
 from scraper import ScrapeOptions, run_scrape
 
 
+MANUAL_TRADE_SHOW_SCAN_CHECKPOINT_KEY = "manual_trade_show_scan"
+
+
 HEADER_ALIASES = {
     "show": "show",
     "event": "show",
@@ -962,6 +965,38 @@ def _get_automation_checkpoint(db: Session, key: str) -> AutomationCheckpoint:
         db.add(checkpoint)
         db.flush()
     return checkpoint
+
+
+def _localize_automation_timestamp(moment: datetime, timezone_name: str) -> datetime:
+    timezone = ZoneInfo(timezone_name)
+    if moment.tzinfo is None:
+        return moment.replace(tzinfo=timezone)
+    return moment.astimezone(timezone)
+
+
+def manual_trade_show_scan_already_ran_today(db: Session, now: datetime | None = None) -> bool:
+    settings = get_settings()
+    current_local = _localize_automation_timestamp(now or datetime.now(), settings.weekly_show_sync_timezone)
+    checkpoint = _get_automation_checkpoint(db, MANUAL_TRADE_SHOW_SCAN_CHECKPOINT_KEY)
+    if checkpoint.last_run_at is None:
+        return False
+    previous_local = _localize_automation_timestamp(checkpoint.last_run_at, settings.weekly_show_sync_timezone)
+    return previous_local.date() >= current_local.date()
+
+
+def record_manual_trade_show_scan(db: Session, now: datetime | None = None) -> None:
+    settings = get_settings()
+    current_local = _localize_automation_timestamp(now or datetime.now(), settings.weekly_show_sync_timezone)
+    checkpoint = _get_automation_checkpoint(db, MANUAL_TRADE_SHOW_SCAN_CHECKPOINT_KEY)
+    checkpoint.last_run_at = current_local.replace(tzinfo=None)
+    checkpoint.meta_json = json.dumps(
+        {
+            "lookahead_days": settings.weekly_show_sync_lookahead_days,
+            "recorded_on": current_local.date().isoformat(),
+            "source": "manual_scan",
+        },
+        sort_keys=True,
+    )
 
 
 def _current_weekly_sync_window(now: datetime, settings) -> datetime:
