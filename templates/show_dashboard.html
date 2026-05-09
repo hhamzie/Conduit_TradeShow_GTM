@@ -42,9 +42,11 @@
       </label>
       <span class="bulk-select-label">Select all</span>
     </div>
-    <span class="bulk-select-count" data-select-count>0 selected</span>
-    <button class="button secondary subtle" type="submit" formaction="/shows/bulk/smartlead" data-requires-selection>Prep campaigns</button>
-    <button class="button danger subtle" type="submit" onclick="return confirm('Delete the selected shows?');" data-requires-selection>Delete selected</button>
+    <div class="bulk-select-actions" data-selection-controls hidden>
+      <span class="bulk-select-count" data-select-count>0 selected</span>
+      <button class="button secondary subtle" type="submit" formaction="/shows/bulk/smartlead" data-requires-selection>Prep campaigns</button>
+      <button class="button danger subtle" type="submit" onclick="return confirm('Delete the selected shows?');" data-requires-selection>Delete selected</button>
+    </div>
   </form>
   {% endif %}
   <div class="table-wrap">
@@ -57,7 +59,6 @@
           <th>Show</th>
           <th>Relevant Companies</th>
           <th>Avg Complexity</th>
-          <th>Avg Team Size</th>
           <th>Actions</th>
         </tr>
       </thead>
@@ -89,12 +90,6 @@
             <div class="dashboard-stat-cell" data-tooltip="Average catalog complexity from the workbook guide">
               <strong class="dashboard-stat-value">{{ "%.1f"|format(analysis.average_complexity_score) if analysis.average_complexity_score else "0.0" }}</strong>
               <span class="dashboard-stat-copy">avg complexity</span>
-            </div>
-          </td>
-          <td>
-            <div class="dashboard-stat-cell" data-tooltip="Average sales and support reps per guide company">
-              <strong class="dashboard-stat-value">{{ "%.1f"|format(analysis.guide_average_people_per_company) if analysis.guide_average_people_per_company else "0.0" }}</strong>
-              <span class="dashboard-stat-copy">reps per company</span>
             </div>
           </td>
           <td>
