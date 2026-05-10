@@ -80,6 +80,20 @@ TRADE_SHOW_SCAN_ALLOWED_DOMAINS = (
     "bulletin.co",
     "andmore.com",
     "themart.com",
+    "atlantamarket.com",
+    "americasmart.com",
+    "vegasmarket.com",
+    "lasvegasmarket.com",
+    "dallasmarketcenter.com",
+    "lightovation.com",
+    "infocommshow.org",
+    "avixa.org",
+    "icff.com",
+    "nynow.com",
+    "nationalrestaurantshow.com",
+    "restaurant.org",
+    "sweetsandsnacks.com",
+    "specialtyfood.com",
 )
 
 
@@ -156,6 +170,7 @@ def scan_upcoming_trade_shows(
         "Use trusted B2B trade show listing sources and official organizer or exhibitor-directory sources to discover the events. "
         "The final link you return must be the official exhibitor directory URL when possible. "
         "If there is no public directory, return the best official show page instead. "
+        "Prioritize official market and organizer sources such as Atlanta Market, Vegas Market, Dallas Market Center/Lightovation, InfoComm, ICFF, National Restaurant Show, and Sweets & Snacks when relevant. "
         "Focus on North American shows. Keep summaries short and direct."
     )
     if normalized_hint:

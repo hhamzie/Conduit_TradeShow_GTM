@@ -893,9 +893,20 @@ class AutomationTests(unittest.TestCase):
         first_tool = post_mock.call_args_list[0].kwargs["json"]["tools"][0]
         second_tool = post_mock.call_args_list[1].kwargs["json"]["tools"][0]
         self.assertIn("tsnn.com", first_tool["filters"]["allowed_domains"])
+        self.assertIn("atlantamarket.com", first_tool["filters"]["allowed_domains"])
         self.assertEqual(first_tool["user_location"]["country"], "US")
         self.assertNotIn("filters", second_tool)
         self.assertEqual(second_tool["user_location"]["country"], "US")
+
+    def test_settings_default_trade_show_scan_lookahead_is_100_days(self) -> None:
+        with patch.dict(os.environ, {}, clear=True):
+            get_settings.cache_clear()
+            try:
+                settings = get_settings()
+            finally:
+                get_settings.cache_clear()
+
+        self.assertEqual(settings.weekly_show_sync_lookahead_days, 100)
 
     def test_confirm_scanned_trade_shows_route_adds_shows(self) -> None:
         from app.main import confirm_scanned_trade_shows_route

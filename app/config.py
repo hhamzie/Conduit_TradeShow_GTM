@@ -134,5 +134,5 @@ def get_settings() -> Settings:
         weekly_show_sync_weekday=int(os.getenv("WEEKLY_SHOW_SYNC_WEEKDAY", "6")),
         weekly_show_sync_hour=int(os.getenv("WEEKLY_SHOW_SYNC_HOUR", "10")),
         weekly_show_sync_timezone=os.getenv("WEEKLY_SHOW_SYNC_TIMEZONE", "America/New_York").strip() or "America/New_York",
-        weekly_show_sync_lookahead_days=max(1, int(os.getenv("WEEKLY_SHOW_SYNC_LOOKAHEAD_DAYS", "30"))),
+        weekly_show_sync_lookahead_days=max(1, int(os.getenv("WEEKLY_SHOW_SYNC_LOOKAHEAD_DAYS", "100"))),
     )
