@@ -21,7 +21,7 @@ from app.database import Base
 from app.models import ClaySyncRow, RunStatus, Show, ShowGuideRow, ShowStatus
 from app.providers import ClayPollResult, ClayRecord, ProviderResult, SmartleadSyncResult
 from app.services import _build_prepared_lead, BulkDirectScrapeResult, DirectScrapeResult, launch_show, register_bulk_shows, run_bulk_direct_scrape, run_show_scrape, run_weekly_show_sync, start_outbound_campaign, sync_show_from_clay, upsert_show
-from app.trade_show_feeder import TradeShowScanCandidate, TradeShowScanError, scan_upcoming_trade_shows
+from app.trade_show_feeder import TradeShowScanCandidate, TradeShowScanError, is_b2b_physical_goods_show, scan_upcoming_trade_shows
 
 
 def make_show(**overrides) -> Show:
@@ -907,6 +907,14 @@ class AutomationTests(unittest.TestCase):
                 get_settings.cache_clear()
 
         self.assertEqual(settings.weekly_show_sync_lookahead_days, 100)
+
+    def test_icff_style_design_shows_are_excluded_from_trade_show_scan(self) -> None:
+        self.assertFalse(
+            is_b2b_physical_goods_show(
+                "International Contemporary Furniture Fair",
+                "https://icff.com",
+            )
+        )
 
     def test_confirm_scanned_trade_shows_route_adds_shows(self) -> None:
         from app.main import confirm_scanned_trade_shows_route

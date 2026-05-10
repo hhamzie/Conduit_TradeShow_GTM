@@ -15,7 +15,6 @@ PHYSICAL_GOODS_INCLUDE_TERMS = (
     "home",
     "gift",
     "decor",
-    "design",
     "market",
     "packaging",
     "housewares",
@@ -47,6 +46,14 @@ PHYSICAL_GOODS_EXCLUDE_TERMS = (
     "creator",
     "adtech",
     "fintech",
+    "icff",
+    "interior design",
+    "interiors",
+    "architecture",
+    "architectural",
+    "real estate",
+    "property",
+    "hospitality design",
 )
 
 
@@ -88,7 +95,6 @@ TRADE_SHOW_SCAN_ALLOWED_DOMAINS = (
     "lightovation.com",
     "infocommshow.org",
     "avixa.org",
-    "icff.com",
     "nynow.com",
     "nationalrestaurantshow.com",
     "restaurant.org",
