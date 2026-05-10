@@ -1041,6 +1041,57 @@ class AutomationTests(unittest.TestCase):
         self.assertEqual(sequence_payload["sequences"][0]["subject"], "meet us at car wash show")
         self.assertEqual(sequence_payload["sequences"][0]["email_body"], "We are heading to Car Wash Show.")
 
+    def test_ensure_smartlead_campaign_rewrites_literal_template_show_name_in_sequences(self) -> None:
+        show = make_show(name="Atlanta Market", event_date=date(2026, 6, 9))
+        request_calls: list[tuple[str, str, object | None]] = []
+
+        def fake_smartlead_request(method: str, path: str, *, payload=None, **_: object):
+            request_calls.append((method, path, payload))
+            if path == "/campaigns/create":
+                return 200, {"id": "654"}
+            return 200, {}
+
+        with patch.dict(
+            os.environ,
+            {
+                "SMARTLEAD_API_KEY": "test-key",
+                "SMARTLEAD_TEMPLATE_CAMPAIGN_ID": "999",
+            },
+        ):
+            get_settings.cache_clear()
+            try:
+                with (
+                    patch("app.providers._list_smartlead_campaigns", return_value=[]),
+                    patch(
+                        "app.providers._get_smartlead_campaign",
+                        return_value={
+                            "name": "Car Wash Show - May 11th 2026",
+                            "track_settings": {"reply_webhook": "slack"},
+                        },
+                    ),
+                    patch(
+                        "app.providers._get_smartlead_sequences",
+                        return_value=[
+                            {
+                                "seq_number": 1,
+                                "subject": "meet us at car wash show",
+                                "email_body": "We are heading to Car Wash Show next month.",
+                                "seq_delay_details": {"delay_in_days": 3},
+                            }
+                        ],
+                    ),
+                    patch("app.providers._get_smartlead_email_accounts", return_value=[{"id": 77}]),
+                    patch("app.providers._smartlead_request", side_effect=fake_smartlead_request),
+                ):
+                    result = ensure_smartlead_campaign(show)
+            finally:
+                get_settings.cache_clear()
+
+        self.assertEqual(result.status, "success")
+        sequence_payload = next(payload for _method, path, payload in request_calls if path == "/campaigns/654/sequences")
+        self.assertEqual(sequence_payload["sequences"][0]["subject"], "meet us at atlanta market")
+        self.assertEqual(sequence_payload["sequences"][0]["email_body"], "We are heading to Atlanta Market next month.")
+
     def test_ensure_smartlead_campaign_force_rebuild_skips_existing_linked_campaign(self) -> None:
         show = make_show(smartlead_campaign_id=111, smartlead_campaign_name="Old", name="Car Wash Show", event_date=date(2026, 5, 11))
         request_calls: list[tuple[str, str, object | None]] = []

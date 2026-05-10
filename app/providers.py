@@ -735,6 +735,26 @@ def _apply_show_placeholders(value: str, show: Show) -> str:
     )
 
 
+def _template_show_name(template: dict[str, object]) -> str:
+    for key in ("name", "campaign_name"):
+        raw_value = template.get(key)
+        if isinstance(raw_value, str) and raw_value.strip():
+            candidate = raw_value.strip()
+            if " - " in candidate:
+                candidate = candidate.split(" - ", 1)[0].strip()
+            return candidate
+    return ""
+
+
+def _apply_show_sequence_copy(value: str, show: Show, template_show_name: str) -> str:
+    updated_value = _apply_show_placeholders(value, show)
+    if not template_show_name:
+        return updated_value
+    updated_value = updated_value.replace(template_show_name, show.name)
+    updated_value = updated_value.replace(template_show_name.lower(), show.name.lower())
+    return updated_value
+
+
 def _clone_template_settings(target_campaign_id: int, template_campaign_id: int, show: Show) -> None:
     template = _get_smartlead_campaign(template_campaign_id)
     if not template:
@@ -761,6 +781,8 @@ def _clone_template_settings(target_campaign_id: int, template_campaign_id: int,
         if template.get(key) not in (None, "", []):
             settings_payload[key] = template.get(key)
 
+    template_show_name = _template_show_name(template)
+
     client_id = _smartlead_client_id()
     if client_id is not None:
         settings_payload["client_id"] = client_id
@@ -774,8 +796,8 @@ def _clone_template_settings(target_campaign_id: int, template_campaign_id: int,
                 {
                     "id": None,
                     "seq_number": sequence.get("seq_number") or (index + 1),
-                    "subject": _apply_show_placeholders(str(sequence.get("subject", "")), show),
-                    "email_body": _apply_show_placeholders(str(sequence.get("email_body", "")), show),
+                    "subject": _apply_show_sequence_copy(str(sequence.get("subject", "")), show, template_show_name),
+                    "email_body": _apply_show_sequence_copy(str(sequence.get("email_body", "")), show, template_show_name),
                     "seq_delay_details": {"delay_in_days": _extract_delay_in_days(sequence)},
                 }
                 for index, sequence in enumerate(template_sequences)
