@@ -73,34 +73,71 @@ class TradeShowScanError(Exception):
 
 
 SCAN_MODEL_FALLBACKS = ("gpt-4.1-mini", "gpt-4.1")
-TRADE_SHOW_SCAN_ALLOWED_DOMAINS = (
+TRADE_SHOW_SCAN_DISCOVERY_DOMAINS = (
     "tsnn.com",
     "eventsinamerica.com",
     "tradefairdates.com",
     "10times.com",
     "tradefest.io",
     "expodatabase.com",
+)
+TRADE_SHOW_SCAN_DIRECTORY_DOMAINS = (
     "mapyourshow.com",
     "expofp.com",
     "eventscribe.net",
     "personifycloud.com",
     "bulletin.co",
+)
+TRADE_SHOW_SCAN_OFFICIAL_DOMAINS = (
+    "highpointmarket.org",
+    "hpmkt.highpointmarket.org",
     "andmore.com",
-    "themart.com",
     "atlantamarket.com",
     "americasmart.com",
-    "vegasmarket.com",
     "lasvegasmarket.com",
     "dallasmarketcenter.com",
-    "lightovation.com",
     "infocommshow.org",
     "avixa.org",
-    "nynow.com",
     "nationalrestaurantshow.com",
     "restaurant.org",
     "sweetsandsnacks.com",
     "specialtyfood.com",
+    "thecarwashshow.com",
+    "luxepack.com",
+    "packexpo.com",
+    "globalpetexpo.org",
+    "asdonline.com",
+    "asdmarketweek.com",
+    "nacsshow.com",
 )
+TRADE_SHOW_SCAN_ALLOWED_DOMAINS = (
+    *TRADE_SHOW_SCAN_DISCOVERY_DOMAINS,
+    *TRADE_SHOW_SCAN_DIRECTORY_DOMAINS,
+    *TRADE_SHOW_SCAN_OFFICIAL_DOMAINS,
+)
+
+
+def _normalize_source_domain(url: str) -> str:
+    normalized = url.strip().lower()
+    if not normalized:
+        return ""
+    normalized = normalized.split("://", 1)[-1]
+    normalized = normalized.split("/", 1)[0]
+    return normalized.removeprefix("www.")
+
+
+def _domain_matches_allowed_host(domain: str, allowed_hosts: tuple[str, ...]) -> bool:
+    return any(domain == host or domain.endswith(f".{host}") for host in allowed_hosts)
+
+
+def is_trade_show_scan_final_source_url(url: str) -> bool:
+    domain = _normalize_source_domain(url)
+    if not domain:
+        return False
+    return _domain_matches_allowed_host(domain, TRADE_SHOW_SCAN_OFFICIAL_DOMAINS) or _domain_matches_allowed_host(
+        domain,
+        TRADE_SHOW_SCAN_DIRECTORY_DOMAINS,
+    )
 
 
 def is_b2b_physical_goods_show(show_name: str, source_url: str = "") -> bool:
@@ -174,9 +211,11 @@ def scan_upcoming_trade_shows(
         "Only include shows where exhibitors are likely manufacturers, wholesalers, suppliers, or brands selling physical goods. "
         "Exclude software, creator, media, fintech, and digital-only events. "
         "Exclude interior-design, architecture, hospitality-design, property, and real-estate-adjacent events such as ICFF. "
-        "Use trusted B2B trade show listing sources and official organizer or exhibitor-directory sources to discover the events. "
-        "The final link you return must be the official exhibitor directory URL when possible. "
-        "If there is no public directory, return the best official show page instead. "
+        "Use discovery sites only to find candidates, then verify them against official organizer pages or official exhibitor directories. "
+        "The final link you return must be an official show page or official exhibitor directory URL, never a listing site. "
+        "Prioritize this source stack: High Point Market, Atlanta Market, Las Vegas Market, Dallas Market Center / Lightovation, "
+        "National Restaurant Association Show, Sweets & Snacks Expo, The Car Wash Show, InfoComm, LUXE PACK, PACK EXPO, "
+        "Global Pet Expo, ASD Market Week, and NACS Show. "
         "Focus on North American shows. Keep summaries short and direct."
     )
     if normalized_hint:
@@ -185,13 +224,14 @@ def scan_upcoming_trade_shows(
     prompts = (
         base_prompt,
         (
-            f"{base_prompt} Prioritize official market and organizer sources for wholesale supplier markets such as "
-            "High Point Market, Atlanta Market, Vegas Market, Dallas Market Center, and Lightovation. "
+            f"{base_prompt} Prioritize official wholesale market sources first: High Point Market, Atlanta Market, "
+            "Las Vegas Market, Dallas Market Center, and Lightovation. Use their exhibitor directories when available. "
             "Look for upcoming shows in the next 100 days that are not already listed."
         ),
         (
-            f"{base_prompt} Prioritize foodservice, packaging, restaurant supply, snacks, housewares, gifting, "
-            "pet, manufacturing, sourcing, and hardware supplier shows. Search trusted listing sources plus official organizer pages."
+            f"{base_prompt} Prioritize foodservice, packaging, restaurant supply, snacks, housewares, gifting, pet, "
+            "manufacturing, sourcing, and hardware supplier shows such as National Restaurant Association Show, Sweets & Snacks Expo, "
+            "PACK EXPO, Global Pet Expo, ASD Market Week, NACS Show, and The Car Wash Show. Search discovery sites, then verify on official pages."
         ),
     )
 
@@ -235,6 +275,8 @@ def scan_upcoming_trade_shows(
             if not (show_name and event_date_raw and place and link):
                 continue
             if not is_b2b_physical_goods_show(show_name, link):
+                continue
+            if not is_trade_show_scan_final_source_url(link):
                 continue
             dedupe_key = (show_name.lower(), event_date_raw, link.lower())
             if dedupe_key in seen_keys:

@@ -21,7 +21,13 @@ from app.database import Base
 from app.models import AutomationCheckpoint, ClaySyncRow, RunStatus, Show, ShowGuideRow, ShowStatus
 from app.providers import ClayPollResult, ClayRecord, ProviderResult, SmartleadSyncResult
 from app.services import _build_prepared_lead, BulkDirectScrapeResult, DirectScrapeResult, launch_show, register_bulk_shows, run_bulk_direct_scrape, run_show_scrape, run_weekly_show_sync, start_outbound_campaign, sync_show_from_clay, upsert_show
-from app.trade_show_feeder import TradeShowScanCandidate, TradeShowScanError, is_b2b_physical_goods_show, scan_upcoming_trade_shows
+from app.trade_show_feeder import (
+    TradeShowScanCandidate,
+    TradeShowScanError,
+    is_b2b_physical_goods_show,
+    is_trade_show_scan_final_source_url,
+    scan_upcoming_trade_shows,
+)
 
 
 def make_show(**overrides) -> Show:
@@ -953,7 +959,7 @@ class AutomationTests(unittest.TestCase):
                                         "show_name": "High Point Market",
                                         "event_date": "2026-05-25",
                                         "place": "High Point NC",
-                                        "link": "https://example.com/high-point",
+                                        "link": "https://www.highpointmarket.org/ExhibitorDirectory?alpha=U",
                                         "summary": "Home furnishings suppliers.",
                                     }
                                 ]
@@ -972,7 +978,8 @@ class AutomationTests(unittest.TestCase):
         first_tool = post_mock.call_args_list[0].kwargs["json"]["tools"][0]
         second_tool = post_mock.call_args_list[1].kwargs["json"]["tools"][0]
         self.assertIn("tsnn.com", first_tool["filters"]["allowed_domains"])
-        self.assertIn("atlantamarket.com", first_tool["filters"]["allowed_domains"])
+        self.assertIn("highpointmarket.org", first_tool["filters"]["allowed_domains"])
+        self.assertIn("thecarwashshow.com", first_tool["filters"]["allowed_domains"])
         self.assertEqual(first_tool["user_location"]["country"], "US")
         self.assertNotIn("filters", second_tool)
         self.assertEqual(second_tool["user_location"]["country"], "US")
@@ -1005,7 +1012,7 @@ class AutomationTests(unittest.TestCase):
                                             "show_name": "High Point Market",
                                             "event_date": "2026-05-25",
                                             "place": "High Point NC",
-                                            "link": "https://example.com/high-point",
+                                            "link": "https://www.highpointmarket.org/ExhibitorDirectory?alpha=U",
                                             "summary": "Home furnishings suppliers.",
                                         }
                                     ]
@@ -1040,6 +1047,11 @@ class AutomationTests(unittest.TestCase):
                 "https://icff.com",
             )
         )
+
+    def test_trade_show_scan_final_source_url_requires_official_or_directory_domain(self) -> None:
+        self.assertTrue(is_trade_show_scan_final_source_url("https://www.highpointmarket.org/ExhibitorDirectory?alpha=U"))
+        self.assertTrue(is_trade_show_scan_final_source_url("https://sse26.mapyourshow.com/"))
+        self.assertFalse(is_trade_show_scan_final_source_url("https://www.tsnn.com/tradeshows/high-point-market"))
 
     def test_confirm_scanned_trade_shows_route_adds_shows(self) -> None:
         from app.main import confirm_scanned_trade_shows_route
