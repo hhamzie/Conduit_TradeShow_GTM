@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, timedelta
+from html import unescape as html_unescape
 import json
+import re
 
 import httpx
 
@@ -105,6 +107,9 @@ class TradeShowScanRunResult:
 
 @dataclass(frozen=True)
 class CuratedTradeShowSource:
+    show_name: str
+    place: str
+    summary: str
     aliases: tuple[str, ...]
     official_url: str
     directory_url: str = ""
@@ -162,62 +167,111 @@ TRADE_SHOW_SCAN_ALLOWED_DOMAINS = (
 )
 CURATED_TRADE_SHOW_SOURCES = (
     CuratedTradeShowSource(
+        show_name="High Point Market",
+        place="High Point, NC",
+        summary="Wholesale home furnishings market.",
         aliases=("high point market",),
         official_url="https://www.highpointmarket.org/",
         directory_url="https://www.highpointmarket.org/ExhibitorDirectory?alpha=U",
     ),
     CuratedTradeShowSource(
+        show_name="Atlanta Market",
+        place="Atlanta, GA",
+        summary="Gift, home, decor, and lifestyle wholesale market.",
         aliases=("atlanta market",),
         official_url="https://www.atlantamarket.com/",
         directory_url="https://www.atlantamarket.com/exhibitor/exhibitor-directory",
     ),
     CuratedTradeShowSource(
+        show_name="Las Vegas Market",
+        place="Las Vegas, NV",
+        summary="Furniture, gift, and home wholesale market.",
         aliases=("las vegas market", "vegas market"),
         official_url="https://www.lasvegasmarket.com/en/Visit/Market-Dates-and-Hours",
         directory_url="https://www.lasvegasmarket.com/en/exhibitor/exhibitor-directory",
     ),
     CuratedTradeShowSource(
+        show_name="Lightovation",
+        place="Dallas, TX",
+        summary="Residential lighting trade show.",
         aliases=("lightovation",),
         official_url="https://www.dallasmarketcenter.com/lightovation",
     ),
     CuratedTradeShowSource(
+        show_name="National Restaurant Association Show",
+        place="Chicago, IL",
+        summary="Restaurant supply and foodservice trade show.",
         aliases=("national restaurant association show", "national restaurant show"),
         official_url="https://www.nationalrestaurantshow.com/",
         directory_url="https://www.nationalrestaurantshow.com/home/search/",
     ),
     CuratedTradeShowSource(
+        show_name="Sweets & Snacks Expo",
+        place="Las Vegas, NV",
+        summary="Confectionery and snack supplier trade show.",
         aliases=("sweets & snacks", "sweets and snacks", "sweets & snacks expo"),
         official_url="https://sweetsandsnacks.com/",
         directory_url="https://sse26.mapyourshow.com/",
     ),
     CuratedTradeShowSource(
+        show_name="The Car Wash Show",
+        place="Nashville, TN",
+        summary="Car wash supplier and equipment trade show.",
         aliases=("the car wash show",),
         official_url="https://thecarwashshow.com/",
     ),
     CuratedTradeShowSource(
+        show_name="InfoComm",
+        place="Las Vegas, NV",
+        summary="AV hardware and commercial technology trade show.",
         aliases=("infocomm", "infocomm las vegas"),
         official_url="https://www.infocommshow.org/",
     ),
     CuratedTradeShowSource(
+        show_name="LUXE PACK",
+        place="New York, NY",
+        summary="Packaging trade show for physical goods brands.",
         aliases=("luxe pack", "luxe pack new york", "luxe pack los angeles"),
         official_url="https://www.luxepack.com/",
     ),
     CuratedTradeShowSource(
+        show_name="PACK EXPO",
+        place="Las Vegas, NV",
+        summary="Packaging and processing supplier trade show.",
         aliases=("pack expo", "pack expo las vegas", "pack expo international"),
         official_url="https://www.packexpo.com/",
     ),
     CuratedTradeShowSource(
+        show_name="Global Pet Expo",
+        place="Orlando, FL",
+        summary="Pet product supplier trade show.",
         aliases=("global pet expo",),
         official_url="https://globalpetexpo.org/",
     ),
     CuratedTradeShowSource(
+        show_name="ASD Market Week",
+        place="Las Vegas, NV",
+        summary="General merchandise wholesale sourcing market.",
         aliases=("asd market week", "asd", "asd las vegas"),
         official_url="https://www.asdonline.com/",
     ),
     CuratedTradeShowSource(
+        show_name="NACS Show",
+        place="Las Vegas, NV",
+        summary="Convenience retail supplier trade show.",
         aliases=("nacs show",),
         official_url="https://www.nacsshow.com/About",
     ),
+)
+
+MONTH_PATTERN = r"(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)"
+DATE_RANGE_RE = re.compile(
+    rf"(?P<month>{MONTH_PATTERN})\s+(?P<day>\d{{1,2}})\s*(?:-|–|—)\s*(?:[A-Za-z]+,\s*)?(?:(?P<end_month>{MONTH_PATTERN})\s+)?(?P<end_day>\d{{1,2}}),?\s*(?P<year>20\d{{2}})",
+    re.IGNORECASE,
+)
+SINGLE_DATE_RE = re.compile(
+    rf"(?P<month>{MONTH_PATTERN})\s+(?P<day>\d{{1,2}}),?\s*(?P<year>20\d{{2}})",
+    re.IGNORECASE,
 )
 
 
@@ -251,6 +305,83 @@ def resolve_trade_show_scan_source_url(show_name: str, url: str) -> str:
     if curated_source is not None:
         return curated_source.directory_url or curated_source.official_url
     return url.strip()
+
+
+def _strip_html_to_text(value: str) -> str:
+    text = re.sub(r"<script\b[^>]*>.*?</script>", " ", value, flags=re.IGNORECASE | re.DOTALL)
+    text = re.sub(r"<style\b[^>]*>.*?</style>", " ", text, flags=re.IGNORECASE | re.DOTALL)
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = html_unescape(text)
+    text = text.replace("\xa0", " ")
+    text = re.sub(r"\s+", " ", text)
+    return text.strip()
+
+
+def _month_name_to_number(month_name: str) -> int:
+    return {
+        "jan": 1,
+        "feb": 2,
+        "mar": 3,
+        "apr": 4,
+        "may": 5,
+        "jun": 6,
+        "jul": 7,
+        "aug": 8,
+        "sep": 9,
+        "oct": 10,
+        "nov": 11,
+        "dec": 12,
+    }[month_name[:3].lower()]
+
+
+def _extract_start_dates_from_text(text: str) -> list[date]:
+    found: list[date] = []
+    seen: set[date] = set()
+    for match in DATE_RANGE_RE.finditer(text):
+        candidate = date(
+            int(match.group("year")),
+            _month_name_to_number(match.group("month")),
+            int(match.group("day")),
+        )
+        if candidate not in seen:
+            seen.add(candidate)
+            found.append(candidate)
+    for match in SINGLE_DATE_RE.finditer(text):
+        candidate = date(
+            int(match.group("year")),
+            _month_name_to_number(match.group("month")),
+            int(match.group("day")),
+        )
+        if candidate not in seen:
+            seen.add(candidate)
+            found.append(candidate)
+    return found
+
+
+def _fetch_curated_trade_show_candidates(start_date: date, end_date: date) -> list[TradeShowScanCandidate]:
+    headers = {"User-Agent": "Mozilla/5.0"}
+    candidates: list[TradeShowScanCandidate] = []
+    for source in CURATED_TRADE_SHOW_SOURCES:
+        try:
+            response = httpx.get(source.official_url, timeout=20.0, follow_redirects=True, headers=headers)
+            response.raise_for_status()
+        except Exception:  # noqa: BLE001
+            continue
+        page_text = _strip_html_to_text(response.text[:500000])
+        start_dates = _extract_start_dates_from_text(page_text)
+        matching_date = next((candidate for candidate in start_dates if start_date <= candidate <= end_date), None)
+        if matching_date is None:
+            continue
+        candidates.append(
+            TradeShowScanCandidate(
+                show_name=source.show_name,
+                event_date_raw=matching_date.isoformat(),
+                place=source.place,
+                link=source.directory_url or source.official_url,
+                summary=source.summary,
+            )
+        )
+    return candidates
 
 
 def is_trade_show_scan_final_source_url(url: str) -> bool:
@@ -498,6 +629,36 @@ def scan_upcoming_trade_shows_with_debug(
         )
         if candidates:
             break
+
+    if not candidates:
+        curated_candidates = _fetch_curated_trade_show_candidates(start_date, end_date)
+        curated_candidates = curated_candidates[: max(1, limit)]
+        for curated_candidate in curated_candidates:
+            dedupe_key = (
+                curated_candidate.show_name.lower(),
+                curated_candidate.event_date_raw,
+                curated_candidate.link.lower(),
+            )
+            if dedupe_key in seen_keys:
+                continue
+            seen_keys.add(dedupe_key)
+            candidates.append(curated_candidate)
+        pass_reports.append(
+            TradeShowScanPassDebug(
+                pass_label="curated_source_scan",
+                model_used="direct_fetch",
+                raw_count=len(curated_candidates),
+                source_count=len(CURATED_TRADE_SHOW_SOURCES),
+                accepted_count=len(candidates),
+                filtered_missing_fields=0,
+                filtered_non_physical=0,
+                filtered_non_official_source=0,
+                filtered_duplicate=0,
+                remapped_to_curated_source=0,
+                sample_links=tuple(candidate.link for candidate in curated_candidates[:3]),
+                sample_sources=tuple(source.official_url for source in CURATED_TRADE_SHOW_SOURCES[:3]),
+            )
+        )
 
     return TradeShowScanRunResult(
         candidates=candidates,

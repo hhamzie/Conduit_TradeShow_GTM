@@ -31,6 +31,7 @@ from app.trade_show_feeder import (
     is_trade_show_scan_final_source_url,
     resolve_trade_show_scan_source_url,
     scan_upcoming_trade_shows,
+    scan_upcoming_trade_shows_with_debug,
 )
 
 
@@ -1067,6 +1068,51 @@ class AutomationTests(unittest.TestCase):
         self.assertEqual(len(candidates), 1)
         self.assertEqual(candidates[0].show_name, "High Point Market")
         self.assertEqual(post_mock.call_count, 2)
+
+    def test_scan_upcoming_trade_shows_falls_back_to_curated_source_fetch(self) -> None:
+        empty_response = httpx.Response(
+            200,
+            json={},
+            request=httpx.Request("POST", "https://api.openai.com/v1/responses"),
+        )
+
+        def fake_get(url: str, **_: object) -> httpx.Response:
+            payloads = {
+                "https://www.highpointmarket.org/": "Market Oct 17-21, 2026",
+                "https://www.atlantamarket.com/": "Atlanta Market: June 9 - 14, 2026",
+                "https://www.lasvegasmarket.com/en/Visit/Market-Dates-and-Hours": "July 26 - Thursday, July 30, 2026",
+                "https://www.dallasmarketcenter.com/lightovation": "Jun 24 - 27, 2026",
+                "https://www.nationalrestaurantshow.com/": "May 16-19, 2026",
+                "https://sweetsandsnacks.com/": "May 19-21, 2026",
+                "https://thecarwashshow.com/": "May 11-13, 2026",
+            }
+            html = payloads.get(url, "")
+            return httpx.Response(
+                200,
+                text=html,
+                request=httpx.Request("GET", url),
+            )
+
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "test-openai-key", "TRADE_SHOW_SCAN_MODEL": "gpt-5"}):
+            get_settings.cache_clear()
+            try:
+                with (
+                    patch("app.trade_show_feeder.httpx.post", side_effect=[empty_response, empty_response, empty_response]),
+                    patch("app.trade_show_feeder.extract_text_from_openai_response", side_effect=[json.dumps({"shows": []}), json.dumps({"shows": []}), json.dumps({"shows": []})]),
+                    patch("app.trade_show_feeder.httpx.get", side_effect=fake_get),
+                ):
+                    result = scan_upcoming_trade_shows_with_debug(
+                        today=date(2026, 5, 10),
+                        lookahead_days=100,
+                    )
+            finally:
+                get_settings.cache_clear()
+
+        self.assertGreaterEqual(len(result.candidates), 4)
+        candidate_names = {candidate.show_name for candidate in result.candidates}
+        self.assertIn("Atlanta Market", candidate_names)
+        self.assertIn("National Restaurant Association Show", candidate_names)
+        self.assertEqual(result.debug.pass_reports[-1].pass_label, "curated_source_scan")
 
     def test_settings_default_trade_show_scan_lookahead_is_100_days(self) -> None:
         with patch.dict(os.environ, {}, clear=True):
