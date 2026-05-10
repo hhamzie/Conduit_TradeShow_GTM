@@ -1,5 +1,3 @@
-@import url("https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap");
-
 :root {
   --bg: #f2f6fd;
   --bg-deep: #e8eff9;
@@ -23,6 +21,10 @@
   --font-ui: "Plus Jakarta Sans", "Avenir Next", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
 }
 
+html {
+  font-synthesis: none;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -35,6 +37,7 @@ body {
   min-height: 100vh;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+  font-synthesis: none;
 }
 
 button,
