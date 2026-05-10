@@ -26,6 +26,7 @@ from app.trade_show_feeder import (
     TradeShowScanError,
     is_b2b_physical_goods_show,
     is_trade_show_scan_final_source_url,
+    resolve_trade_show_scan_source_url,
     scan_upcoming_trade_shows,
 )
 
@@ -1052,6 +1053,22 @@ class AutomationTests(unittest.TestCase):
         self.assertTrue(is_trade_show_scan_final_source_url("https://www.highpointmarket.org/ExhibitorDirectory?alpha=U"))
         self.assertTrue(is_trade_show_scan_final_source_url("https://sse26.mapyourshow.com/"))
         self.assertFalse(is_trade_show_scan_final_source_url("https://www.tsnn.com/tradeshows/high-point-market"))
+
+    def test_trade_show_scan_resolves_curated_show_to_official_directory_url(self) -> None:
+        self.assertEqual(
+            resolve_trade_show_scan_source_url(
+                "High Point Market",
+                "https://www.tsnn.com/tradeshows/high-point-market",
+            ),
+            "https://www.highpointmarket.org/ExhibitorDirectory?alpha=U",
+        )
+        self.assertEqual(
+            resolve_trade_show_scan_source_url(
+                "National Restaurant Association Show",
+                "https://www.eventsinamerica.com/events/national-restaurant-show",
+            ),
+            "https://www.nationalrestaurantshow.com/home/search/",
+        )
 
     def test_confirm_scanned_trade_shows_route_adds_shows(self) -> None:
         from app.main import confirm_scanned_trade_shows_route

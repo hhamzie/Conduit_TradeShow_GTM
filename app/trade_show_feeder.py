@@ -72,6 +72,13 @@ class TradeShowScanError(Exception):
         self.status_code = status_code
 
 
+@dataclass(frozen=True)
+class CuratedTradeShowSource:
+    aliases: tuple[str, ...]
+    official_url: str
+    directory_url: str = ""
+
+
 SCAN_MODEL_FALLBACKS = ("gpt-4.1-mini", "gpt-4.1")
 TRADE_SHOW_SCAN_DISCOVERY_DOMAINS = (
     "tsnn.com",
@@ -115,6 +122,65 @@ TRADE_SHOW_SCAN_ALLOWED_DOMAINS = (
     *TRADE_SHOW_SCAN_DIRECTORY_DOMAINS,
     *TRADE_SHOW_SCAN_OFFICIAL_DOMAINS,
 )
+CURATED_TRADE_SHOW_SOURCES = (
+    CuratedTradeShowSource(
+        aliases=("high point market",),
+        official_url="https://www.highpointmarket.org/",
+        directory_url="https://www.highpointmarket.org/ExhibitorDirectory?alpha=U",
+    ),
+    CuratedTradeShowSource(
+        aliases=("atlanta market",),
+        official_url="https://www.atlantamarket.com/",
+        directory_url="https://www.atlantamarket.com/exhibitor/exhibitor-directory",
+    ),
+    CuratedTradeShowSource(
+        aliases=("las vegas market", "vegas market"),
+        official_url="https://www.lasvegasmarket.com/en/Visit/Market-Dates-and-Hours",
+        directory_url="https://www.lasvegasmarket.com/en/exhibitor/exhibitor-directory",
+    ),
+    CuratedTradeShowSource(
+        aliases=("lightovation",),
+        official_url="https://www.dallasmarketcenter.com/lightovation",
+    ),
+    CuratedTradeShowSource(
+        aliases=("national restaurant association show", "national restaurant show"),
+        official_url="https://www.nationalrestaurantshow.com/",
+        directory_url="https://www.nationalrestaurantshow.com/home/search/",
+    ),
+    CuratedTradeShowSource(
+        aliases=("sweets & snacks", "sweets and snacks", "sweets & snacks expo"),
+        official_url="https://sweetsandsnacks.com/",
+        directory_url="https://sse26.mapyourshow.com/",
+    ),
+    CuratedTradeShowSource(
+        aliases=("the car wash show",),
+        official_url="https://thecarwashshow.com/",
+    ),
+    CuratedTradeShowSource(
+        aliases=("infocomm", "infocomm las vegas"),
+        official_url="https://www.infocommshow.org/",
+    ),
+    CuratedTradeShowSource(
+        aliases=("luxe pack", "luxe pack new york", "luxe pack los angeles"),
+        official_url="https://www.luxepack.com/",
+    ),
+    CuratedTradeShowSource(
+        aliases=("pack expo", "pack expo las vegas", "pack expo international"),
+        official_url="https://www.packexpo.com/",
+    ),
+    CuratedTradeShowSource(
+        aliases=("global pet expo",),
+        official_url="https://globalpetexpo.org/",
+    ),
+    CuratedTradeShowSource(
+        aliases=("asd market week", "asd", "asd las vegas"),
+        official_url="https://www.asdonline.com/",
+    ),
+    CuratedTradeShowSource(
+        aliases=("nacs show",),
+        official_url="https://www.nacsshow.com/About",
+    ),
+)
 
 
 def _normalize_source_domain(url: str) -> str:
@@ -128,6 +194,25 @@ def _normalize_source_domain(url: str) -> str:
 
 def _domain_matches_allowed_host(domain: str, allowed_hosts: tuple[str, ...]) -> bool:
     return any(domain == host or domain.endswith(f".{host}") for host in allowed_hosts)
+
+
+def _normalize_show_name(value: str) -> str:
+    return " ".join(value.strip().lower().replace("&", " and ").split())
+
+
+def _find_curated_trade_show_source(show_name: str) -> CuratedTradeShowSource | None:
+    normalized_name = _normalize_show_name(show_name)
+    for source in CURATED_TRADE_SHOW_SOURCES:
+        if any(alias in normalized_name for alias in source.aliases):
+            return source
+    return None
+
+
+def resolve_trade_show_scan_source_url(show_name: str, url: str) -> str:
+    curated_source = _find_curated_trade_show_source(show_name)
+    if curated_source is not None:
+        return curated_source.directory_url or curated_source.official_url
+    return url.strip()
 
 
 def is_trade_show_scan_final_source_url(url: str) -> bool:
@@ -270,7 +355,7 @@ def scan_upcoming_trade_shows(
             show_name = str(item.get("show_name") or "").strip()
             event_date_raw = str(item.get("event_date") or "").strip()
             place = str(item.get("place") or "").strip()
-            link = str(item.get("link") or "").strip()
+            link = resolve_trade_show_scan_source_url(show_name, str(item.get("link") or "").strip())
             summary = str(item.get("summary") or "").strip()
             if not (show_name and event_date_raw and place and link):
                 continue
