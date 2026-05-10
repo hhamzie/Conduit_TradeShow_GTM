@@ -36,6 +36,7 @@ from app.services import (
     list_shows,
     manual_trade_show_scan_already_ran_today,
     pause_show,
+    purge_show,
     QueuedBulkShow,
     queue_show_now,
     record_manual_trade_show_scan,
@@ -255,7 +256,7 @@ def update_show_route(
 def delete_show(show_id: int, request: Request, db: Session = Depends(get_db)):
     require_authenticated(request)
     show = _get_show_or_404(db, show_id)
-    db.delete(show)
+    purge_show(db, show)
     db.commit()
     return RedirectResponse("/shows/dashboard", status_code=status.HTTP_303_SEE_OTHER)
 
@@ -283,13 +284,69 @@ def delete_selected_shows(
         show = get_show(db, show_id)
         if show is None:
             continue
-        db.delete(show)
+        purge_show(db, show)
         deleted += 1
     db.commit()
     request.session["flash_message"] = {
         "tone": "success",
         "title": "Selected shows deleted.",
         "detail": f"Deleted {deleted} show(s).",
+    }
+    return RedirectResponse(target_path, status_code=status.HTTP_303_SEE_OTHER)
+
+
+@router.post("/shows/bulk/scrape")
+def scrape_selected_shows(
+    request: Request,
+    show_ids: list[int] = Form(default_factory=list),
+    next_path: str = Form("/shows/dashboard"),
+    db: Session = Depends(get_db),
+):
+    require_authenticated(request)
+    target_path = _sanitize_next_path(next_path, fallback="/shows/dashboard")
+    unique_ids = list(dict.fromkeys(show_ids))
+    if not unique_ids:
+        request.session["flash_message"] = {
+            "tone": "warning",
+            "title": "No shows selected.",
+            "detail": "Select at least one show first.",
+        }
+        return RedirectResponse(target_path, status_code=status.HTTP_303_SEE_OTHER)
+
+    queued_shows: list[QueuedBulkShow] = []
+    skipped = 0
+    for show_id in unique_ids:
+        show = get_show(db, show_id)
+        if show is None or show.status in {"queued", "scraping"} or not show.source_url.strip():
+            skipped += 1
+            continue
+        queued_shows.append(
+            QueuedBulkShow(
+                show_id=show.id,
+                show_name=show.name,
+                event_date_raw=show.event_date.isoformat(),
+                place=show.place,
+                link=show.source_url,
+            )
+        )
+
+    if not queued_shows:
+        request.session["flash_message"] = {
+            "tone": "warning",
+            "title": "Nothing to scrape.",
+            "detail": "The selected shows are already queued, scraping, or missing a directory link.",
+        }
+        return RedirectResponse(target_path, status_code=status.HTTP_303_SEE_OTHER)
+
+    job_id = bulk_scrape_jobs.start_job(
+        b"",
+        run_offset_days=get_settings().default_run_offset_days,
+        queued_shows=queued_shows,
+    )
+    request.session["flash_message"] = {
+        "tone": "success",
+        "title": "Scrape started.",
+        "detail": f"Queued {len(queued_shows)} show(s) for scraping. Skipped {skipped}. Job {job_id} is now running.",
     }
     return RedirectResponse(target_path, status_code=status.HTTP_303_SEE_OTHER)
 

@@ -20,7 +20,7 @@ from app.config import get_settings
 from app.database import Base
 from app.models import AutomationCheckpoint, ClaySyncRow, RunStatus, Show, ShowGuideRow, ShowStatus
 from app.providers import ClayPollResult, ClayRecord, ProviderResult, SmartleadSyncResult
-from app.services import _build_prepared_lead, BulkDirectScrapeResult, DirectScrapeResult, launch_show, register_bulk_shows, run_bulk_direct_scrape, run_show_scrape, run_weekly_show_sync, start_outbound_campaign, sync_show_from_clay, upsert_show
+from app.services import _build_prepared_lead, BulkDirectScrapeResult, DirectScrapeResult, launch_show, list_shows, register_bulk_shows, run_bulk_direct_scrape, run_show_scrape, run_weekly_show_sync, start_outbound_campaign, sync_show_from_clay, upsert_show
 from app.trade_show_feeder import (
     TradeShowScanCandidate,
     TradeShowScanDebug,
@@ -357,6 +357,56 @@ class AutomationTests(unittest.TestCase):
 
             self.assertTrue(created)
             self.assertEqual(show.name, "National Restaurant Association Show")
+
+    def test_upsert_show_reuses_existing_record_for_similar_name_within_five_day_window(self) -> None:
+        with self.Session() as session:
+            first_show, first_created = upsert_show(
+                session,
+                show_name="Sweets & Snacks",
+                event_date_raw="2026-05-18",
+                place="Las Vegas, NV",
+                link="https://sweetsandsnacks.com/",
+                run_offset_days=14,
+            )
+            session.commit()
+
+            second_show, second_created = upsert_show(
+                session,
+                show_name="Sweets & Snacks Expo",
+                event_date_raw="2026-05-19",
+                place="Las Vegas Convention Center",
+                link="https://sse26.mapyourshow.com/",
+                run_offset_days=21,
+            )
+            session.commit()
+
+            self.assertTrue(first_created)
+            self.assertFalse(second_created)
+            self.assertEqual(first_show.id, second_show.id)
+
+    def test_list_shows_collapses_existing_near_duplicate_shows(self) -> None:
+        with self.Session() as session:
+            first = make_show(
+                name="Sweets & Snacks",
+                event_date=date(2026, 5, 18),
+                source_url="https://sweetsandsnacks.com/",
+                company_count=1054,
+                latest_export_path="/tmp/first.csv",
+            )
+            second = make_show(
+                name="Sweets & Snacks Expo",
+                event_date=date(2026, 5, 19),
+                source_url="https://sse26.mapyourshow.com/",
+                company_count=1056,
+                latest_export_path="/tmp/second.csv",
+            )
+            session.add_all([first, second])
+            session.commit()
+
+            shows = list_shows(session)
+
+            self.assertEqual(len(shows), 1)
+            self.assertEqual(shows[0].company_count, 1056)
 
     def test_upsert_show_reuses_existing_record_for_similar_name_and_same_date(self) -> None:
         with self.Session() as session:
@@ -1441,6 +1491,64 @@ class AutomationTests(unittest.TestCase):
             self.assertEqual(start_job_mock.call_count, 1)
             queued_shows = start_job_mock.call_args.kwargs["queued_shows"]
             self.assertEqual([item.show_name for item in queued_shows], ["The Car Wash Show", "Atlanta Market"])
+
+    def test_scrape_selected_shows_route_queues_checked_shows(self) -> None:
+        from app.main import scrape_selected_shows
+
+        request = type("Req", (), {"session": {}})()
+        with self.Session() as session:
+            first = make_show(
+                name="Atlanta Market",
+                event_date=date(2026, 6, 9),
+                source_url="https://www.atlantamarket.com/exhibitor/exhibitor-directory",
+                status=ShowStatus.waiting.value,
+            )
+            second = make_show(
+                name="High Point Market",
+                event_date=date(2026, 10, 24),
+                source_url="https://www.highpointmarket.org/ExhibitorDirectory?alpha=A",
+                status=ShowStatus.scraping.value,
+            )
+            session.add_all([first, second])
+            session.commit()
+
+            with (
+                patch("app.web.routes.shows.require_authenticated"),
+                patch("app.web.routes.shows.bulk_scrape_jobs.start_job", return_value="job-456") as start_job_mock,
+            ):
+                response = scrape_selected_shows(
+                    request=request,
+                    show_ids=[first.id, second.id],
+                    db=session,
+                )
+
+            self.assertEqual(response.status_code, 303)
+            self.assertEqual(response.headers["location"], "/shows/dashboard")
+            self.assertEqual(start_job_mock.call_count, 1)
+            queued_shows = start_job_mock.call_args.kwargs["queued_shows"]
+            self.assertEqual([item.show_name for item in queued_shows], ["Atlanta Market"])
+
+    def test_delete_show_route_purges_related_show_data(self) -> None:
+        from app.main import delete_show
+
+        request = type("Req", (), {"session": {}})()
+        with self.Session() as session:
+            show = make_show()
+            session.add(show)
+            session.commit()
+
+            session.add(ShowGuideRow(show_id=show.id, sheet_key="company_summary", position=0, values_json="{}"))
+            session.add(ClaySyncRow(show_id=show.id, clay_row_id="row-1", row_status="ready"))
+            session.commit()
+
+            with patch("app.web.routes.shows.require_authenticated"):
+                response = delete_show(show_id=show.id, request=request, db=session)
+
+            self.assertEqual(response.status_code, 303)
+            self.assertEqual(response.headers["location"], "/shows/dashboard")
+            self.assertIsNone(session.get(Show, show.id))
+            self.assertEqual(session.scalars(select(ShowGuideRow)).all(), [])
+            self.assertEqual(session.scalars(select(ClaySyncRow)).all(), [])
 
     def test_run_direct_scrape_retries_until_minimum_company_count_is_met(self) -> None:
         from app.services import _run_direct_scrape

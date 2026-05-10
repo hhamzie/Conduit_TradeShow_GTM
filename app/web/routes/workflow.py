@@ -16,6 +16,7 @@ from app.services import (
     create_or_update_show,
     import_shows_from_csv,
     list_shows,
+    purge_show,
     register_bulk_shows,
     run_show_scrape,
     upsert_show,
@@ -236,6 +237,6 @@ def delete_all_shows(
     shows = list_shows(db)
     targets = shows_in_section(shows, section, datetime.now())
     for show in targets:
-        db.delete(show)
+        purge_show(db, show)
     db.commit()
     return RedirectResponse("/workflow", status_code=status.HTTP_303_SEE_OTHER)

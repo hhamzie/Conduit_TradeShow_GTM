@@ -88,6 +88,7 @@ SMARTLEAD_STATUS_ACTIVE = "active"
 SMARTLEAD_STATUS_PAUSED = "paused"
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 SLUG_RE = re.compile(r"[^a-z0-9]+")
+DUPLICATE_SHOW_DATE_WINDOW_DAYS = 5
 
 
 @dataclass(frozen=True)
@@ -296,6 +297,118 @@ def normalize_show_identity_url(value: str) -> str:
     return normalized
 
 
+def _date_window_bounds(event_date: date, *, days: int = DUPLICATE_SHOW_DATE_WINDOW_DAYS) -> tuple[date, date]:
+    return event_date - timedelta(days=days), event_date + timedelta(days=days)
+
+
+def _shows_represent_same_event(left: Show, right: Show) -> bool:
+    if abs((left.event_date - right.event_date).days) > DUPLICATE_SHOW_DATE_WINDOW_DAYS:
+        return False
+    if shows_have_matching_identity_name(left.name, right.name):
+        return True
+    left_url = normalize_show_identity_url(left.source_url)
+    right_url = normalize_show_identity_url(right.source_url)
+    return bool(left_url and right_url and left_url == right_url)
+
+
+def _show_status_rank(status: str) -> int:
+    ranking = {
+        ShowStatus.waiting.value: 0,
+        ShowStatus.queued.value: 1,
+        ShowStatus.scraping.value: 2,
+        ShowStatus.failed.value: 3,
+        ShowStatus.ready_for_review.value: 4,
+        ShowStatus.approved.value: 5,
+        ShowStatus.live.value: 6,
+    }
+    return ranking.get(status, -1)
+
+
+def _show_quality_score(show: Show) -> tuple[int, int, int, int, int, int, int]:
+    return (
+        _show_status_rank(show.status),
+        int(show.company_count or 0),
+        int(bool(show.latest_export_path.strip())),
+        int(bool(show.smartlead_campaign_id)),
+        int(bool(show.clay_table_id.strip())),
+        len(show.guide_rows),
+        len(show.runs),
+    )
+
+
+def _merge_show_into_primary(primary: Show, duplicate: Show) -> None:
+    primary_clay_rows = {row.clay_row_id: row for row in primary.clay_rows}
+    for row in list(duplicate.clay_rows):
+        existing = primary_clay_rows.get(row.clay_row_id)
+        if existing is None:
+            row.show = primary
+            primary_clay_rows[row.clay_row_id] = row
+            continue
+        if row.imported_to_smartlead and not existing.imported_to_smartlead:
+            existing.imported_to_smartlead = True
+            existing.imported_at = row.imported_at or existing.imported_at
+        existing.row_status = existing.row_status or row.row_status
+        existing.email = existing.email or row.email
+        existing.row_hash = existing.row_hash or row.row_hash
+        existing.last_seen_at = max(existing.last_seen_at or datetime.min, row.last_seen_at or datetime.min)
+
+    for row in list(duplicate.guide_rows):
+        row.show = primary
+    for run in list(duplicate.runs):
+        run.show = primary
+
+    if _show_quality_score(duplicate) > _show_quality_score(primary):
+        primary.name = duplicate.name
+        primary.place = duplicate.place
+        primary.source_url = duplicate.source_url
+        primary.event_date = duplicate.event_date
+        primary.run_offset_days = duplicate.run_offset_days
+        primary.run_at = duplicate.run_at
+        primary.status = duplicate.status
+
+    if duplicate.company_count > primary.company_count:
+        primary.company_count = duplicate.company_count
+        primary.failure_count = duplicate.failure_count
+        if duplicate.latest_export_path.strip():
+            primary.latest_export_path = duplicate.latest_export_path
+    if not primary.latest_export_path.strip() and duplicate.latest_export_path.strip():
+        primary.latest_export_path = duplicate.latest_export_path
+    if not primary.enriched_export_path.strip() and duplicate.enriched_export_path.strip():
+        primary.enriched_export_path = duplicate.enriched_export_path
+    if not primary.smartlead_ready_export_path.strip() and duplicate.smartlead_ready_export_path.strip():
+        primary.smartlead_ready_export_path = duplicate.smartlead_ready_export_path
+    if not primary.smartlead_campaign_id and duplicate.smartlead_campaign_id:
+        primary.smartlead_campaign_id = duplicate.smartlead_campaign_id
+        primary.smartlead_campaign_name = duplicate.smartlead_campaign_name
+    if not primary.clay_table_id.strip() and duplicate.clay_table_id.strip():
+        primary.clay_table_id = duplicate.clay_table_id
+        primary.clay_table_name = duplicate.clay_table_name
+        primary.clay_table_url = duplicate.clay_table_url
+    primary.clay_total_rows = max(primary.clay_total_rows, duplicate.clay_total_rows)
+    primary.clay_ready_rows = max(primary.clay_ready_rows, duplicate.clay_ready_rows)
+    primary.clay_failed_rows = max(primary.clay_failed_rows, duplicate.clay_failed_rows)
+    primary.clay_skipped_rows = max(primary.clay_skipped_rows, duplicate.clay_skipped_rows)
+    primary.smartlead_imported_rows = max(primary.smartlead_imported_rows, duplicate.smartlead_imported_rows)
+    if not primary.last_error.strip() and duplicate.last_error.strip():
+        primary.last_error = duplicate.last_error
+
+
+def _remove_show_files(show: Show, *, keep_paths: set[str] | None = None) -> None:
+    keep = {path.strip() for path in (keep_paths or set()) if path.strip()}
+    raw_paths = {
+        show.latest_export_path.strip(),
+        show.enriched_export_path.strip(),
+        show.smartlead_ready_export_path.strip(),
+    }
+    for raw_path in raw_paths:
+        if not raw_path or raw_path in keep:
+            continue
+        try:
+            Path(raw_path).expanduser().unlink(missing_ok=True)
+        except OSError:
+            continue
+
+
 def _find_matching_show(
     db: Session,
     *,
@@ -306,15 +419,32 @@ def _find_matching_show(
 ) -> Show | None:
     normalized_name = normalize_show_identity_name(show_name)
     normalized_url = normalize_show_identity_url(link)
-    candidates = list(db.scalars(select(Show).where(Show.event_date == event_date)))
+    window_start, window_end = _date_window_bounds(event_date)
+    candidates = list(
+        db.scalars(
+            select(Show).where(
+                Show.event_date >= window_start,
+                Show.event_date <= window_end,
+            )
+        )
+    )
+    best_match: Show | None = None
+    best_score: tuple[int, int] | None = None
     for candidate in candidates:
         if exclude_show_id is not None and candidate.id == exclude_show_id:
             continue
-        if shows_have_matching_identity_name(candidate.name, normalized_name):
-            return candidate
-        if normalized_url and normalize_show_identity_url(candidate.source_url) == normalized_url:
-            return candidate
-    return None
+        matches_name = shows_have_matching_identity_name(candidate.name, normalized_name)
+        matches_url = normalized_url and normalize_show_identity_url(candidate.source_url) == normalized_url
+        if not matches_name and not matches_url:
+            continue
+        score = (
+            0 if candidate.event_date == event_date else abs((candidate.event_date - event_date).days),
+            0 if matches_url else 1,
+        )
+        if best_score is None or score < best_score:
+            best_match = candidate
+            best_score = score
+    return best_match
 
 
 def find_matching_show(
@@ -1365,6 +1495,7 @@ def run_weekly_show_sync(db: Session, now: datetime | None = None) -> WeeklyShow
 
 
 def list_shows(db: Session) -> list[Show]:
+    collapse_duplicate_shows(db)
     return list(
         db.scalars(
             select(Show)
@@ -1372,6 +1503,54 @@ def list_shows(db: Session) -> list[Show]:
             .order_by(Show.event_date.asc(), Show.created_at.desc())
         )
     )
+
+
+def purge_show(db: Session, show: Show) -> None:
+    _remove_show_files(show)
+    for row in list(show.guide_rows):
+        db.delete(row)
+    for row in list(show.clay_rows):
+        db.delete(row)
+    for run in list(show.runs):
+        db.delete(run)
+    db.delete(show)
+
+
+def collapse_duplicate_shows(db: Session) -> int:
+    shows = list(
+        db.scalars(
+            select(Show)
+            .options(selectinload(Show.runs), selectinload(Show.clay_rows), selectinload(Show.guide_rows))
+            .order_by(Show.event_date.asc(), Show.created_at.asc(), Show.id.asc())
+        )
+    )
+    merged_count = 0
+    for index, show in enumerate(shows):
+        if db.get(Show, show.id) is None:
+            continue
+        for other in shows[index + 1 :]:
+            if db.get(Show, other.id) is None:
+                continue
+            if not _shows_represent_same_event(show, other):
+                continue
+            primary = show
+            duplicate = other
+            if _show_quality_score(other) > _show_quality_score(show):
+                primary = other
+                duplicate = show
+            keep_paths = {
+                primary.latest_export_path.strip(),
+                primary.enriched_export_path.strip(),
+                primary.smartlead_ready_export_path.strip(),
+            }
+            _merge_show_into_primary(primary, duplicate)
+            _remove_show_files(duplicate, keep_paths=keep_paths)
+            db.delete(duplicate)
+            show = primary
+            merged_count += 1
+    if merged_count:
+        db.commit()
+    return merged_count
 
 
 def show_needs_scrape(show: Show, *, minimum_company_count: int | None = None) -> bool:
