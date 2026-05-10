@@ -36,6 +36,7 @@ class Settings:
     default_browser_timeout_ms: int
     openai_api_key: str
     trade_show_scan_model: str
+    deploy_revision: str
     session_secret: str
     dashboard_username: str
     dashboard_password: str
@@ -99,6 +100,10 @@ def get_settings() -> Settings:
         default_browser_timeout_ms=int(os.getenv("DEFAULT_BROWSER_TIMEOUT_MS", "25000")),
         openai_api_key=os.getenv("OPENAI_API_KEY", "").strip(),
         trade_show_scan_model=os.getenv("TRADE_SHOW_SCAN_MODEL", "gpt-5").strip() or "gpt-5",
+        deploy_revision=(
+            os.getenv("RENDER_GIT_COMMIT", "").strip()
+            or os.getenv("SOURCE_VERSION", "").strip()
+        ),
         session_secret=os.getenv("SESSION_SECRET", "dev-session-secret-change-me"),
         dashboard_username=os.getenv("DASHBOARD_USERNAME", "admin"),
         dashboard_password=os.getenv("DASHBOARD_PASSWORD", "change-me-now"),

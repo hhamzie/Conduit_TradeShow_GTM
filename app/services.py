@@ -980,6 +980,11 @@ def manual_trade_show_scan_already_ran_today(db: Session, now: datetime | None =
     checkpoint = _get_automation_checkpoint(db, MANUAL_TRADE_SHOW_SCAN_CHECKPOINT_KEY)
     if checkpoint.last_run_at is None:
         return False
+    checkpoint_meta = _load_checkpoint_meta(checkpoint)
+    checkpoint_revision = str(checkpoint_meta.get("deploy_revision") or "").strip()
+    current_revision = settings.deploy_revision.strip()
+    if current_revision and checkpoint_revision and checkpoint_revision != current_revision:
+        return False
     previous_local = _localize_automation_timestamp(checkpoint.last_run_at, settings.weekly_show_sync_timezone)
     return previous_local.date() >= current_local.date()
 
@@ -994,9 +999,21 @@ def record_manual_trade_show_scan(db: Session, now: datetime | None = None) -> N
             "lookahead_days": settings.weekly_show_sync_lookahead_days,
             "recorded_on": current_local.date().isoformat(),
             "source": "manual_scan",
+            "deploy_revision": settings.deploy_revision.strip(),
         },
         sort_keys=True,
     )
+
+
+def _load_checkpoint_meta(checkpoint: AutomationCheckpoint) -> dict[str, object]:
+    raw = (checkpoint.meta_json or "").strip()
+    if not raw:
+        return {}
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        return {}
+    return payload if isinstance(payload, dict) else {}
 
 
 def _current_weekly_sync_window(now: datetime, settings) -> datetime:

@@ -822,6 +822,43 @@ class AutomationTests(unittest.TestCase):
         self.assertIn(b'"status":"locked"', second_response.body)
         self.assertIn(b"Search has already been done today.", second_response.body)
 
+    def test_scan_upcoming_trade_shows_route_resets_after_new_deploy_revision(self) -> None:
+        from app.main import scan_upcoming_trade_shows_route
+
+        request = type("Req", (), {"session": {}})()
+        candidate = TradeShowScanCandidate(
+            show_name="High Point Market",
+            event_date_raw="2026-05-25",
+            place="High Point NC",
+            link="https://example.com/high-point",
+            summary="Home furnishings suppliers.",
+        )
+        with self.Session() as session:
+            with (
+                patch.dict(os.environ, {"RENDER_GIT_COMMIT": "commit-a"}, clear=False),
+                patch("app.web.routes.shows.require_authenticated"),
+                patch("app.web.routes.shows.scan_upcoming_trade_shows", return_value=[candidate]),
+            ):
+                get_settings.cache_clear()
+                try:
+                    first_response = scan_upcoming_trade_shows_route(request=request, db=session)
+                finally:
+                    get_settings.cache_clear()
+
+            with (
+                patch.dict(os.environ, {"RENDER_GIT_COMMIT": "commit-b"}, clear=False),
+                patch("app.web.routes.shows.require_authenticated"),
+                patch("app.web.routes.shows.scan_upcoming_trade_shows", return_value=[candidate]),
+            ):
+                get_settings.cache_clear()
+                try:
+                    second_response = scan_upcoming_trade_shows_route(request=request, db=session)
+                finally:
+                    get_settings.cache_clear()
+
+        self.assertEqual(first_response.status_code, 200)
+        self.assertEqual(second_response.status_code, 200)
+
     def test_scan_upcoming_trade_shows_route_surfaces_provider_rate_limit_cleanly(self) -> None:
         from app.main import scan_upcoming_trade_shows_route
 
