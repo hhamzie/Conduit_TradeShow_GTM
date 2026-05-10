@@ -1293,19 +1293,16 @@ function initializeMultiSelectForms() {
     const syncSelectionState = () => {
       const items = getItems();
       const selectedCount = items.filter((item) => item.checked).length;
+      const hasSelection = selectedCount > 0;
 
       if (countTarget) {
         countTarget.textContent = `${selectedCount} selected`;
       }
 
-      selectionControls.forEach((control) => {
-        if (control instanceof HTMLElement) {
-          control.hidden = selectedCount === 0;
-        }
-      });
+      form.dataset.hasSelection = hasSelection ? "true" : "false";
 
       actionButtons.forEach((button) => {
-        button.disabled = selectedCount === 0;
+        button.disabled = !hasSelection;
       });
 
       if (selectAll instanceof HTMLInputElement) {

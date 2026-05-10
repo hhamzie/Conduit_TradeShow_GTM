@@ -549,8 +549,16 @@ button.button.subtle {
   gap: 12px;
 }
 
-.bulk-select-actions[hidden] {
-  display: none !important;
+.bulk-select-bar [data-selection-controls] {
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.bulk-select-bar[data-has-selection="true"] [data-selection-controls] {
+  visibility: visible;
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .bulk-select-label {
@@ -590,6 +598,15 @@ button.button.subtle {
 .dashboard-bulk-bar .bulk-select-actions {
   justify-self: end;
   flex: 0 0 auto;
+  min-height: 44px;
+}
+
+.dashboard-bulk-bar .bulk-select-count {
+  min-width: 88px;
+}
+
+.bulk-select-bar .bulk-select-count {
+  min-width: 88px;
 }
 
 .stats-grid {
