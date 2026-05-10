@@ -9,6 +9,17 @@
     </div>
     <div class="hero-dashboard-actions">
       {% if can_manage %}
+      <form class="header-icon-form" action="/shows/scrape-pending" method="post">
+        <button class="icon-button scan-trigger-button scrape-trigger-button" type="submit" data-tooltip="Scrape pending shows" aria-label="Scrape pending shows">
+          <svg viewBox="0 0 24 24" aria-hidden="true" class="icon-mark scan-icon-mark">
+            <path d="M4.75 7.25h14.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+            <path d="M4.75 12h14.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+            <path d="M4.75 16.75h9.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+            <path d="M17.25 15.75 19.5 18l-2.25 2.25" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M13.75 18h5.25" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+          </svg>
+        </button>
+      </form>
       <button class="icon-button scan-trigger-button" type="button" data-scan-open data-tooltip="Trade show scan" aria-label="Trade show scan">
         <svg viewBox="0 0 24 24" aria-hidden="true" class="icon-mark scan-icon-mark">
           <circle cx="12" cy="12" r="2.2" fill="currentColor"/>

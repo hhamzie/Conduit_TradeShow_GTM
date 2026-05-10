@@ -28,6 +28,7 @@ from app.show_guides import build_guide_sheet_views, get_guide_sheet
 from app.show_intelligence import build_show_analysis, build_show_analyses
 from app.services import (
     approve_show,
+    build_pending_scrape_queue,
     build_outbound_plan,
     find_matching_show,
     get_show,
@@ -339,6 +340,34 @@ def configure_selected_smartlead(
         "detail": f"Linked {linked}, skipped {skipped}, failed {failed}.",
     }
     return RedirectResponse(target_path, status_code=status.HTTP_303_SEE_OTHER)
+
+
+@router.post("/shows/scrape-pending")
+def scrape_pending_shows_route(
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    require_authenticated(request)
+    queued_shows = build_pending_scrape_queue(db)
+    if not queued_shows:
+        request.session["flash_message"] = {
+            "tone": "warning",
+            "title": "Nothing to scrape.",
+            "detail": "All tracked shows are already populated right now.",
+        }
+        return RedirectResponse("/shows/dashboard", status_code=status.HTTP_303_SEE_OTHER)
+
+    job_id = bulk_scrape_jobs.start_job(
+        b"",
+        run_offset_days=get_settings().default_run_offset_days,
+        queued_shows=queued_shows,
+    )
+    request.session["flash_message"] = {
+        "tone": "success",
+        "title": "Pending scrape started.",
+        "detail": f"Queued {len(queued_shows)} show(s) for scraping. Job {job_id} is now running.",
+    }
+    return RedirectResponse("/shows/dashboard", status_code=status.HTTP_303_SEE_OTHER)
 
 
 @router.post("/shows/scan-upcoming")

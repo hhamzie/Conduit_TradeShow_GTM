@@ -178,6 +178,38 @@ SHOW_NAME_NOISE_WORDS = {
     "annual",
 }
 
+SHOW_NAME_SMALL_WORDS = {
+    "a",
+    "an",
+    "and",
+    "as",
+    "at",
+    "by",
+    "for",
+    "from",
+    "in",
+    "of",
+    "on",
+    "or",
+    "the",
+    "to",
+    "vs",
+    "via",
+    "with",
+}
+
+SHOW_NAME_PHRASE_OVERRIDES = {
+    "Asd": "ASD",
+    "Avixa": "AVIXA",
+    "B2B": "B2B",
+    "Icff": "ICFF",
+    "Infocomm": "InfoComm",
+    "Nacs": "NACS",
+    "Nra": "NRA",
+    "Pack Expo": "PACK EXPO",
+    "Usa": "USA",
+}
+
 
 def normalize_show_identity_tokens(value: str) -> tuple[str, ...]:
     normalized = normalize_show_identity_name(value)
@@ -189,6 +221,37 @@ def normalize_show_identity_tokens(value: str) -> tuple[str, ...]:
         if token and token not in SHOW_NAME_NOISE_WORDS
     ]
     return tuple(dict.fromkeys(tokens))
+
+
+def _normalize_show_display_token(token: str, *, is_first: bool, is_last: bool) -> str:
+    segments = re.split(r"([-/])", token)
+    normalized_segments: list[str] = []
+    for segment in segments:
+        if segment in {"-", "/"}:
+            normalized_segments.append(segment)
+            continue
+        lowered = segment.lower()
+        if lowered in SHOW_NAME_SMALL_WORDS and not is_first and not is_last:
+            normalized_segments.append(lowered)
+            continue
+        normalized_segments.append(lowered[:1].upper() + lowered[1:])
+    return "".join(normalized_segments)
+
+
+def normalize_show_display_name(value: str) -> str:
+    collapsed = re.sub(r"\s+", " ", value.strip())
+    if not collapsed:
+        return ""
+
+    tokens = collapsed.split(" ")
+    normalized_tokens = [
+        _normalize_show_display_token(token, is_first=index == 0, is_last=index == len(tokens) - 1)
+        for index, token in enumerate(tokens)
+    ]
+    normalized = " ".join(normalized_tokens)
+    for source, target in SHOW_NAME_PHRASE_OVERRIDES.items():
+        normalized = re.sub(rf"\b{re.escape(source)}\b", target, normalized)
+    return normalized
 
 
 def shows_have_matching_identity_name(left: str, right: str) -> bool:
@@ -281,7 +344,7 @@ def upsert_show(
     link: str,
     run_offset_days: int,
 ) -> tuple[Show, bool]:
-    normalized_name = show_name.strip()
+    normalized_name = normalize_show_display_name(show_name)
     normalized_place = place.strip()
     normalized_link = link.strip()
     if not (normalized_name and event_date_raw.strip() and normalized_place and normalized_link):
@@ -433,7 +496,7 @@ def update_show(
     link: str,
     run_offset_days: int,
 ) -> None:
-    normalized_name = show_name.strip()
+    normalized_name = normalize_show_display_name(show_name)
     normalized_place = place.strip()
     normalized_link = link.strip()
     if not (normalized_name and event_date_raw.strip() and normalized_place and normalized_link):
@@ -1309,6 +1372,36 @@ def list_shows(db: Session) -> list[Show]:
             .order_by(Show.event_date.asc(), Show.created_at.desc())
         )
     )
+
+
+def show_needs_scrape(show: Show, *, minimum_company_count: int | None = None) -> bool:
+    threshold = minimum_company_count or get_settings().min_scrape_company_count
+    if show.status in {ShowStatus.queued.value, ShowStatus.scraping.value}:
+        return False
+    if not show.source_url.strip():
+        return False
+
+    export_exists = False
+    if show.latest_export_path.strip():
+        export_exists = Path(show.latest_export_path).expanduser().exists()
+    return not export_exists or int(show.company_count or 0) < threshold
+
+
+def build_pending_scrape_queue(db: Session) -> list[QueuedBulkShow]:
+    queued_shows: list[QueuedBulkShow] = []
+    for show in list_shows(db):
+        if not show_needs_scrape(show):
+            continue
+        queued_shows.append(
+            QueuedBulkShow(
+                show_id=show.id,
+                show_name=show.name,
+                event_date_raw=show.event_date.isoformat(),
+                place=show.place,
+                link=show.source_url,
+            )
+        )
+    return queued_shows
 
 
 def get_show(db: Session, show_id: int) -> Show | None:

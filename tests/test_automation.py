@@ -343,6 +343,21 @@ class AutomationTests(unittest.TestCase):
             shows = session.scalars(select(Show)).all()
             self.assertEqual(len(shows), 1)
 
+    def test_upsert_show_normalizes_display_name_before_storing(self) -> None:
+        with self.Session() as session:
+            show, created = upsert_show(
+                session,
+                show_name="NATIONAL RESTAURANT ASSOCIATION SHOW",
+                event_date_raw="2026-05-16",
+                place="Chicago, IL",
+                link="https://example.com/nra",
+                run_offset_days=14,
+            )
+            session.commit()
+
+            self.assertTrue(created)
+            self.assertEqual(show.name, "National Restaurant Association Show")
+
     def test_upsert_show_reuses_existing_record_for_similar_name_and_same_date(self) -> None:
         with self.Session() as session:
             first_show, first_created = upsert_show(
@@ -1368,6 +1383,64 @@ class AutomationTests(unittest.TestCase):
             self.assertIn(b'"job_id":"job-123"', response.body)
             self.assertIn("Started scrape", request.session["flash_message"]["detail"])
             self.assertEqual(start_job_mock.call_count, 1)
+
+    def test_scrape_pending_shows_route_only_queues_unpopulated_shows(self) -> None:
+        from app.main import scrape_pending_shows_route
+
+        request = type("Req", (), {"session": {}})()
+        with self.Session() as session, tempfile.TemporaryDirectory() as tmp_dir:
+            ready_export = Path(tmp_dir) / "ready.csv"
+            ready_export.write_text("company_name\nAcme\n", encoding="utf-8")
+            low_export = Path(tmp_dir) / "low.csv"
+            low_export.write_text("company_name\nTiny\n", encoding="utf-8")
+
+            show_needs_scrape = make_show(
+                name="Atlanta Market",
+                event_date=date(2026, 6, 9),
+                source_url="https://www.atlantamarket.com/exhibitor/exhibitor-directory",
+                latest_export_path="",
+                company_count=0,
+                status=ShowStatus.waiting.value,
+            )
+            show_ready = make_show(
+                name="High Point Market",
+                event_date=date(2026, 10, 24),
+                source_url="https://www.highpointmarket.org/ExhibitorDirectory?alpha=A",
+                latest_export_path=str(ready_export),
+                company_count=88,
+                status=ShowStatus.ready_for_review.value,
+            )
+            show_under_threshold = make_show(
+                name="The Car Wash Show",
+                event_date=date(2026, 5, 11),
+                source_url="https://thecarwashshow.com/exhibitors",
+                latest_export_path=str(low_export),
+                company_count=18,
+                status=ShowStatus.failed.value,
+            )
+            show_already_queued = make_show(
+                name="PACK EXPO",
+                event_date=date(2026, 6, 2),
+                source_url="https://www.packexpo.com/show-directory",
+                latest_export_path="",
+                company_count=0,
+                status=ShowStatus.queued.value,
+            )
+            session.add_all([show_needs_scrape, show_ready, show_under_threshold, show_already_queued])
+            session.commit()
+
+            with (
+                patch("app.web.routes.shows.require_authenticated"),
+                patch("app.web.routes.shows.bulk_scrape_jobs.start_job", return_value="job-123") as start_job_mock,
+            ):
+                response = scrape_pending_shows_route(request=request, db=session)
+
+            self.assertEqual(response.status_code, 303)
+            self.assertEqual(response.headers["location"], "/shows/dashboard")
+            self.assertEqual(request.session["flash_message"]["title"], "Pending scrape started.")
+            self.assertEqual(start_job_mock.call_count, 1)
+            queued_shows = start_job_mock.call_args.kwargs["queued_shows"]
+            self.assertEqual([item.show_name for item in queued_shows], ["The Car Wash Show", "Atlanta Market"])
 
     def test_run_direct_scrape_retries_until_minimum_company_count_is_met(self) -> None:
         from app.services import _run_direct_scrape

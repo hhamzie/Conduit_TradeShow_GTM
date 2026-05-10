@@ -611,11 +611,19 @@ button.button.subtle {
   gap: 10px;
 }
 
+.header-icon-form {
+  margin: 0;
+}
+
 .scan-trigger-button {
   width: 42px;
   height: 42px;
   border-radius: 999px;
   color: var(--accent-dark);
+}
+
+.scrape-trigger-button {
+  color: #3e5b79;
 }
 
 .scan-icon-mark {
