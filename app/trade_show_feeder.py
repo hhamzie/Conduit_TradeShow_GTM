@@ -169,45 +169,34 @@ def scan_upcoming_trade_shows(
         "required": ["shows"],
     }
 
-    prompt = (
+    base_prompt = (
         f"Find upcoming B2B physical-goods trade shows between {start_date.isoformat()} and {end_date.isoformat()}. "
         "Only include shows where exhibitors are likely manufacturers, wholesalers, suppliers, or brands selling physical goods. "
-        "Exclude software, creator, media, fintech, or purely digital events. "
+        "Exclude software, creator, media, fintech, and digital-only events. "
+        "Exclude interior-design, architecture, hospitality-design, property, and real-estate-adjacent events such as ICFF. "
         "Use trusted B2B trade show listing sources and official organizer or exhibitor-directory sources to discover the events. "
         "The final link you return must be the official exhibitor directory URL when possible. "
         "If there is no public directory, return the best official show page instead. "
-        "Prioritize official market and organizer sources such as Atlanta Market, Vegas Market, Dallas Market Center/Lightovation, InfoComm, ICFF, National Restaurant Show, and Sweets & Snacks when relevant. "
         "Focus on North American shows. Keep summaries short and direct."
     )
     if normalized_hint:
-        prompt = f"{prompt} Extra focus: {normalized_hint}."
+        base_prompt = f"{base_prompt} Extra focus: {normalized_hint}."
+
+    prompts = (
+        base_prompt,
+        (
+            f"{base_prompt} Prioritize official market and organizer sources for wholesale supplier markets such as "
+            "High Point Market, Atlanta Market, Vegas Market, Dallas Market Center, and Lightovation. "
+            "Look for upcoming shows in the next 100 days that are not already listed."
+        ),
+        (
+            f"{base_prompt} Prioritize foodservice, packaging, restaurant supply, snacks, housewares, gifting, "
+            "pet, manufacturing, sourcing, and hardware supplier shows. Search trusted listing sources plus official organizer pages."
+        ),
+    )
 
     request_payload = {
         "tool_choice": "auto",
-        "input": [
-            {
-                "role": "system",
-                "content": [
-                    {
-                        "type": "input_text",
-                        "text": (
-                            "You are a trade show feeder for outbound sales operations. "
-                            "Find real upcoming trade shows, not blog posts or recap articles. "
-                            "Return only events that fit B2B physical-goods supplier outreach."
-                        ),
-                    }
-                ],
-            },
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "input_text",
-                        "text": prompt,
-                    }
-                ],
-            },
-        ],
         "text": {
             "format": {
                 "type": "json_schema",
@@ -226,12 +215,87 @@ def scan_upcoming_trade_shows(
         if fallback_model != model
     )
 
+    candidates: list[TradeShowScanCandidate] = []
+    seen_keys: set[tuple[str, str, str]] = set()
+    for prompt in prompts:
+        raw_shows = _run_trade_show_scan_pass(
+            api_key=api_key,
+            candidate_models=candidate_models,
+            request_payload=request_payload,
+            prompt=prompt,
+        )
+        for item in raw_shows:
+            if not isinstance(item, dict):
+                continue
+            show_name = str(item.get("show_name") or "").strip()
+            event_date_raw = str(item.get("event_date") or "").strip()
+            place = str(item.get("place") or "").strip()
+            link = str(item.get("link") or "").strip()
+            summary = str(item.get("summary") or "").strip()
+            if not (show_name and event_date_raw and place and link):
+                continue
+            if not is_b2b_physical_goods_show(show_name, link):
+                continue
+            dedupe_key = (show_name.lower(), event_date_raw, link.lower())
+            if dedupe_key in seen_keys:
+                continue
+            seen_keys.add(dedupe_key)
+            candidates.append(
+                TradeShowScanCandidate(
+                    show_name=show_name,
+                    event_date_raw=event_date_raw,
+                    place=place,
+                    link=link,
+                    summary=summary,
+                )
+            )
+            if len(candidates) >= max(1, limit):
+                return candidates
+        if candidates:
+            return candidates
+
+    return candidates
+
+
+def _run_trade_show_scan_pass(
+    *,
+    api_key: str,
+    candidate_models: list[str],
+    request_payload: dict[str, object],
+    prompt: str,
+) -> list[dict[str, object]]:
+    payload_input = [
+        {
+            "role": "system",
+            "content": [
+                {
+                    "type": "input_text",
+                    "text": (
+                        "You are a trade show feeder for outbound sales operations. "
+                        "Find real upcoming trade shows, not blog posts or recap articles. "
+                        "Return only events that fit B2B physical-goods supplier outreach."
+                    ),
+                }
+            ],
+        },
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "input_text",
+                    "text": prompt,
+                }
+            ],
+        },
+    ]
+
     body: dict[str, object] | None = None
     last_error: httpx.HTTPStatusError | None = None
     for candidate_model in candidate_models:
         payload = dict(request_payload)
         payload["model"] = candidate_model
         payload["tools"] = [_build_scan_web_search_tool(candidate_model)]
+        payload["input"] = payload_input
         response = httpx.post(
             OPENAI_RESPONSES_URL,
             json=payload,
@@ -262,40 +326,7 @@ def scan_upcoming_trade_shows(
         return []
     parsed = json.loads(text)
     raw_shows = parsed.get("shows", []) if isinstance(parsed, dict) else []
-    if not isinstance(raw_shows, list):
-        return []
-
-    candidates: list[TradeShowScanCandidate] = []
-    seen_keys: set[tuple[str, str, str]] = set()
-    for item in raw_shows:
-        if not isinstance(item, dict):
-            continue
-        show_name = str(item.get("show_name") or "").strip()
-        event_date_raw = str(item.get("event_date") or "").strip()
-        place = str(item.get("place") or "").strip()
-        link = str(item.get("link") or "").strip()
-        summary = str(item.get("summary") or "").strip()
-        if not (show_name and event_date_raw and place and link):
-            continue
-        if not is_b2b_physical_goods_show(show_name, link):
-            continue
-        dedupe_key = (show_name.lower(), event_date_raw, link.lower())
-        if dedupe_key in seen_keys:
-            continue
-        seen_keys.add(dedupe_key)
-        candidates.append(
-            TradeShowScanCandidate(
-                show_name=show_name,
-                event_date_raw=event_date_raw,
-                place=place,
-                link=link,
-                summary=summary,
-            )
-        )
-        if len(candidates) >= max(1, limit):
-            break
-
-    return candidates
+    return raw_shows if isinstance(raw_shows, list) else []
 
 
 def _should_retry_scan_with_fallback(error: httpx.HTTPStatusError) -> bool:

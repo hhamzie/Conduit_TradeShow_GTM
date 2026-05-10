@@ -977,6 +977,51 @@ class AutomationTests(unittest.TestCase):
         self.assertNotIn("filters", second_tool)
         self.assertEqual(second_tool["user_location"]["country"], "US")
 
+    def test_scan_upcoming_trade_shows_uses_follow_up_passes_when_first_pass_is_empty(self) -> None:
+        empty_response = httpx.Response(
+            200,
+            json={},
+            request=httpx.Request("POST", "https://api.openai.com/v1/responses"),
+        )
+        populated_response = httpx.Response(
+            200,
+            json={},
+            request=httpx.Request("POST", "https://api.openai.com/v1/responses"),
+        )
+
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "test-openai-key", "TRADE_SHOW_SCAN_MODEL": "gpt-4.1-mini"}):
+            get_settings.cache_clear()
+            try:
+                with (
+                    patch("app.trade_show_feeder.httpx.post", side_effect=[empty_response, populated_response]) as post_mock,
+                    patch(
+                        "app.trade_show_feeder.extract_text_from_openai_response",
+                        side_effect=[
+                            json.dumps({"shows": []}),
+                            json.dumps(
+                                {
+                                    "shows": [
+                                        {
+                                            "show_name": "High Point Market",
+                                            "event_date": "2026-05-25",
+                                            "place": "High Point NC",
+                                            "link": "https://example.com/high-point",
+                                            "summary": "Home furnishings suppliers.",
+                                        }
+                                    ]
+                                }
+                            ),
+                        ],
+                    ),
+                ):
+                    candidates = scan_upcoming_trade_shows()
+            finally:
+                get_settings.cache_clear()
+
+        self.assertEqual(len(candidates), 1)
+        self.assertEqual(candidates[0].show_name, "High Point Market")
+        self.assertEqual(post_mock.call_count, 2)
+
     def test_settings_default_trade_show_scan_lookahead_is_100_days(self) -> None:
         with patch.dict(os.environ, {}, clear=True):
             get_settings.cache_clear()
