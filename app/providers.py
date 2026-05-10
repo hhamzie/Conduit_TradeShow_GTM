@@ -850,7 +850,6 @@ def _clone_template_settings(target_campaign_id: int, template_campaign_id: int,
 
     settings_payload = {}
     for key in (
-        "track_settings",
         "stop_lead_settings",
         "unsubscribe_text",
         "send_as_plain_text",

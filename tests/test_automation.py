@@ -1001,8 +1001,9 @@ class AutomationTests(unittest.TestCase):
                     patch(
                         "app.providers._get_smartlead_campaign",
                         return_value={
-                            "track_settings": {"reply_webhook": "slack"},
-                            "stop_lead_settings": {"stop_on_reply": True},
+                            "track_settings": ["DONT_EMAIL_OPEN", "DONT_LINK_CLICK"],
+                            "stop_lead_settings": "REPLY_TO_AN_EMAIL",
+                            "send_as_plain_text": True,
                         },
                     ),
                     patch(
@@ -1034,8 +1035,9 @@ class AutomationTests(unittest.TestCase):
         self.assertNotIn("/campaigns/654/schedule", request_paths)
 
         settings_payload = next(payload for _method, path, payload in request_calls if path == "/campaigns/654/settings")
-        self.assertEqual(settings_payload["track_settings"], {"reply_webhook": "slack"})
-        self.assertEqual(settings_payload["stop_lead_settings"], {"stop_on_reply": True})
+        self.assertNotIn("track_settings", settings_payload)
+        self.assertEqual(settings_payload["stop_lead_settings"], "REPLY_TO_AN_EMAIL")
+        self.assertEqual(settings_payload["send_as_plain_text"], True)
 
         sequence_payload = next(payload for _method, path, payload in request_calls if path == "/campaigns/654/sequences")
         self.assertEqual(sequence_payload["sequences"][0]["subject"], "meet us at car wash show")
