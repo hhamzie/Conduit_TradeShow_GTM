@@ -4,12 +4,14 @@ import os
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
+from uuid import uuid4
 
 from dotenv import load_dotenv
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
+BOOT_DEPLOY_REVISION = f"boot-{uuid4().hex}"
 load_dotenv(BASE_DIR / ".env")
 
 
@@ -103,6 +105,7 @@ def get_settings() -> Settings:
         deploy_revision=(
             os.getenv("RENDER_GIT_COMMIT", "").strip()
             or os.getenv("SOURCE_VERSION", "").strip()
+            or BOOT_DEPLOY_REVISION
         ),
         session_secret=os.getenv("SESSION_SECRET", "dev-session-secret-change-me"),
         dashboard_username=os.getenv("DASHBOARD_USERNAME", "admin"),

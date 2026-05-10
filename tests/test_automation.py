@@ -18,7 +18,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.config import get_settings
 from app.database import Base
-from app.models import ClaySyncRow, RunStatus, Show, ShowGuideRow, ShowStatus
+from app.models import AutomationCheckpoint, ClaySyncRow, RunStatus, Show, ShowGuideRow, ShowStatus
 from app.providers import ClayPollResult, ClayRecord, ProviderResult, SmartleadSyncResult
 from app.services import _build_prepared_lead, BulkDirectScrapeResult, DirectScrapeResult, launch_show, register_bulk_shows, run_bulk_direct_scrape, run_show_scrape, run_weekly_show_sync, start_outbound_campaign, sync_show_from_clay, upsert_show
 from app.trade_show_feeder import TradeShowScanCandidate, TradeShowScanError, is_b2b_physical_goods_show, scan_upcoming_trade_shows
@@ -859,6 +859,48 @@ class AutomationTests(unittest.TestCase):
         self.assertEqual(first_response.status_code, 200)
         self.assertEqual(second_response.status_code, 200)
 
+    def test_scan_upcoming_trade_shows_route_resets_when_old_checkpoint_has_no_revision(self) -> None:
+        from app.main import scan_upcoming_trade_shows_route
+
+        request = type("Req", (), {"session": {}})()
+        candidate = TradeShowScanCandidate(
+            show_name="High Point Market",
+            event_date_raw="2026-05-25",
+            place="High Point NC",
+            link="https://example.com/high-point",
+            summary="Home furnishings suppliers.",
+        )
+        with self.Session() as session:
+            with (
+                patch.dict(os.environ, {"RENDER_GIT_COMMIT": "commit-a"}, clear=False),
+                patch("app.web.routes.shows.require_authenticated"),
+                patch("app.web.routes.shows.scan_upcoming_trade_shows", return_value=[candidate]),
+            ):
+                get_settings.cache_clear()
+                try:
+                    first_response = scan_upcoming_trade_shows_route(request=request, db=session)
+                finally:
+                    get_settings.cache_clear()
+
+            checkpoint = session.scalar(select(AutomationCheckpoint).where(AutomationCheckpoint.key == "manual_trade_show_scan"))
+            assert checkpoint is not None
+            checkpoint.meta_json = "{}"
+            session.commit()
+
+            with (
+                patch.dict(os.environ, {"RENDER_GIT_COMMIT": "commit-b"}, clear=False),
+                patch("app.web.routes.shows.require_authenticated"),
+                patch("app.web.routes.shows.scan_upcoming_trade_shows", return_value=[candidate]),
+            ):
+                get_settings.cache_clear()
+                try:
+                    second_response = scan_upcoming_trade_shows_route(request=request, db=session)
+                finally:
+                    get_settings.cache_clear()
+
+        self.assertEqual(first_response.status_code, 200)
+        self.assertEqual(second_response.status_code, 200)
+
     def test_scan_upcoming_trade_shows_route_surfaces_provider_rate_limit_cleanly(self) -> None:
         from app.main import scan_upcoming_trade_shows_route
 
@@ -944,6 +986,7 @@ class AutomationTests(unittest.TestCase):
                 get_settings.cache_clear()
 
         self.assertEqual(settings.weekly_show_sync_lookahead_days, 100)
+        self.assertTrue(settings.deploy_revision)
 
     def test_icff_style_design_shows_are_excluded_from_trade_show_scan(self) -> None:
         self.assertFalse(

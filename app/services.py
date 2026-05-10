@@ -983,7 +983,7 @@ def manual_trade_show_scan_already_ran_today(db: Session, now: datetime | None =
     checkpoint_meta = _load_checkpoint_meta(checkpoint)
     checkpoint_revision = str(checkpoint_meta.get("deploy_revision") or "").strip()
     current_revision = settings.deploy_revision.strip()
-    if current_revision and checkpoint_revision and checkpoint_revision != current_revision:
+    if current_revision and checkpoint_revision != current_revision:
         return False
     previous_local = _localize_automation_timestamp(checkpoint.last_run_at, settings.weekly_show_sync_timezone)
     return previous_local.date() >= current_local.date()
