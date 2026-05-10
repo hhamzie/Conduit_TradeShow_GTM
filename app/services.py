@@ -90,6 +90,7 @@ SMARTLEAD_STATUS_PAUSED = "paused"
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 SLUG_RE = re.compile(r"[^a-z0-9]+")
 DUPLICATE_SHOW_DATE_WINDOW_DAYS = 5
+STALE_SCRAPE_RUN_TIMEOUT = timedelta(hours=2)
 
 
 @dataclass(frozen=True)
@@ -1672,11 +1673,21 @@ def remove_show_from_queue(db: Session, show: Show, *, now: datetime | None = No
             show.runs.remove(run)
         db.delete(run)
 
-    show.status = ShowStatus.waiting.value
-    baseline_run_at = show.run_at or now
-    deferred_run_at = now + timedelta(days=1)
-    show.run_at = baseline_run_at if baseline_run_at > deferred_run_at else deferred_run_at
+    if show.company_count > 0 and show.latest_export_path.strip():
+        show.status = ShowStatus.ready_for_review.value
+    else:
+        show.status = ShowStatus.waiting.value
+        baseline_run_at = show.run_at or now
+        deferred_run_at = now + timedelta(days=1)
+        show.run_at = baseline_run_at if baseline_run_at > deferred_run_at else deferred_run_at
     return True
+
+
+def _is_stale_running_run(run: CampaignRun, now: datetime) -> bool:
+    reference_time = run.started_at or run.created_at
+    if reference_time is None:
+        return True
+    return now - reference_time >= STALE_SCRAPE_RUN_TIMEOUT
 
 
 def reconcile_show_runtime_state(show: Show, *, now: datetime | None = None) -> bool:
@@ -1685,6 +1696,23 @@ def reconcile_show_runtime_state(show: Show, *, now: datetime | None = None) -> 
     queued_runs = [run for run in show.runs if run.status == RunStatus.queued.value]
 
     original_status = show.status
+    stale_running_runs = [run for run in running_runs if _is_stale_running_run(run, now)]
+
+    if show.status == ShowStatus.scraping.value and running_runs and len(stale_running_runs) == len(running_runs):
+        if show.company_count > 0 and show.latest_export_path.strip():
+            for run in stale_running_runs:
+                run.status = RunStatus.success.value
+                run.finished_at = run.finished_at or now
+            show.status = ShowStatus.ready_for_review.value
+            show.last_error = ""
+        else:
+            for run in stale_running_runs:
+                run.status = RunStatus.failed.value
+                run.error_message = run.error_message or "Scrape stalled and was reset."
+                run.finished_at = run.finished_at or now
+            show.status = ShowStatus.failed.value
+            show.last_error = show.last_error or "Scrape stalled and was reset."
+        running_runs = [run for run in show.runs if run.status == RunStatus.running.value]
 
     if show.status == ShowStatus.scraping.value and not running_runs:
         if queued_runs:

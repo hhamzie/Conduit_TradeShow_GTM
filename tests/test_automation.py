@@ -460,6 +460,34 @@ class AutomationTests(unittest.TestCase):
             assert refreshed is not None
             self.assertEqual(refreshed.status, ShowStatus.ready_for_review.value)
 
+    def test_list_shows_reconciles_stale_running_scrape_to_populated(self) -> None:
+        with self.Session() as session:
+            stale = make_show(
+                name="National Restaurant Association Show",
+                event_date=date(2026, 5, 16),
+                latest_export_path="/tmp/nra.csv",
+                company_count=1865,
+                status=ShowStatus.scraping.value,
+            )
+            session.add(stale)
+            session.flush()
+            session.add(
+                CampaignRun(
+                    show=stale,
+                    status=RunStatus.running.value,
+                    started_at=datetime(2026, 5, 10, 6, 0),
+                )
+            )
+            session.commit()
+
+            shows = list_shows(session)
+
+            self.assertEqual(shows[0].status, ShowStatus.ready_for_review.value)
+            self.assertEqual(shows[0].runs[0].status, RunStatus.success.value)
+            refreshed = session.get(Show, stale.id)
+            assert refreshed is not None
+            self.assertEqual(refreshed.status, ShowStatus.ready_for_review.value)
+
     def test_upsert_show_reuses_existing_record_for_similar_name_and_same_date(self) -> None:
         with self.Session() as session:
             first_show, first_created = upsert_show(
@@ -1896,6 +1924,33 @@ class AutomationTests(unittest.TestCase):
             assert refreshed is not None
             self.assertEqual(refreshed.status, ShowStatus.waiting.value)
             self.assertEqual(request.session["flash_message"]["title"], "Show removed.")
+
+    def test_remove_show_from_queue_keeps_populated_show_populated(self) -> None:
+        with self.Session() as session:
+            show = make_show(
+                status=ShowStatus.scraping.value,
+                run_at=datetime(2026, 5, 10, 8, 0),
+                latest_export_path="/tmp/nra.csv",
+                company_count=1865,
+            )
+            session.add(show)
+            session.flush()
+            session.add(
+                CampaignRun(
+                    show=show,
+                    status=RunStatus.running.value,
+                    started_at=datetime(2026, 5, 10, 6, 0),
+                )
+            )
+            session.commit()
+
+            removed = remove_show_from_queue(session, show, now=datetime(2026, 5, 10, 9, 0))
+            session.commit()
+
+            self.assertTrue(removed)
+            self.assertEqual(show.status, ShowStatus.ready_for_review.value)
+            self.assertEqual(show.run_at, datetime(2026, 5, 10, 8, 0))
+            self.assertEqual([run.status for run in show.runs], [RunStatus.success.value])
 
     def test_delete_show_leads_route_removes_selected_export_rows(self) -> None:
         from app.main import delete_show_leads
