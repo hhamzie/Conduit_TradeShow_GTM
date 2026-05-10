@@ -607,6 +607,59 @@ function renderScanResults(candidates) {
     .join("");
 }
 
+function prettifyScanPassLabel(value) {
+  if (!value) {
+    return "Scan";
+  }
+  return value
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function renderScanDebug(debug) {
+  if (!debug || !Array.isArray(debug.passes) || debug.passes.length === 0) {
+    return "";
+  }
+
+  const passMarkup = debug.passes
+    .map((pass) => {
+      const sampleLinks = Array.isArray(pass.sample_links) ? pass.sample_links.filter(Boolean) : [];
+      return `
+        <article class="scan-debug-pass">
+          <div class="scan-debug-pass-head">
+            <strong>${prettifyScanPassLabel(pass.pass_label)}</strong>
+            <span>${pass.model_used || "unknown model"}</span>
+          </div>
+          <div class="scan-debug-metrics">
+            <span>Raw ${pass.raw_count || 0}</span>
+            <span>Accepted ${pass.accepted_count || 0}</span>
+            <span>Missing ${pass.filtered_missing_fields || 0}</span>
+            <span>Not physical ${pass.filtered_non_physical || 0}</span>
+            <span>Not official ${pass.filtered_non_official_source || 0}</span>
+            <span>Duplicate ${pass.filtered_duplicate || 0}</span>
+            <span>Remapped ${pass.remapped_to_curated_source || 0}</span>
+          </div>
+          ${
+            sampleLinks.length
+              ? `<div class="scan-debug-links">${sampleLinks
+                  .slice(0, 3)
+                  .map((link) => `<a href="${link}" target="_blank" rel="noreferrer">${link}</a>`)
+                  .join("")}</div>`
+              : ""
+          }
+        </article>
+      `;
+    })
+    .join("");
+
+  return `
+    <p class="scan-debug-summary">
+      Window ${debug.start_date || "?"} to ${debug.end_date || "?"} · ${debug.lookahead_days || 0} days · ${debug.candidate_count || 0} kept
+    </p>
+    <div class="scan-debug-pass-list">${passMarkup}</div>
+  `;
+}
+
 function resetScanModalState(modal) {
   const results = modal.querySelector("[data-scan-results]");
   const empty = modal.querySelector("[data-scan-empty]");
@@ -615,6 +668,8 @@ function resetScanModalState(modal) {
   const message = modal.querySelector("[data-scan-message]");
   const progress = modal.querySelector("[data-scan-progress]");
   const elapsed = modal.querySelector("[data-scan-elapsed]");
+  const debugPanel = modal.querySelector("[data-scan-debug]");
+  const debugBody = modal.querySelector("[data-scan-debug-body]");
   if (results instanceof HTMLElement) {
     results.hidden = true;
   }
@@ -636,6 +691,13 @@ function resetScanModalState(modal) {
   }
   if (elapsed instanceof HTMLElement) {
     elapsed.textContent = "0s elapsed";
+  }
+  if (debugPanel instanceof HTMLElement) {
+    debugPanel.hidden = true;
+    debugPanel.open = false;
+  }
+  if (debugBody instanceof HTMLElement) {
+    debugBody.innerHTML = "";
   }
 }
 
@@ -671,6 +733,8 @@ async function handleScanSubmit(event) {
   const confirmButton = modal ? modal.querySelector("[data-scan-confirm]") : null;
   const progress = modal ? modal.querySelector("[data-scan-progress]") : null;
   const elapsed = modal ? modal.querySelector("[data-scan-elapsed]") : null;
+  const debugPanel = modal ? modal.querySelector("[data-scan-debug]") : null;
+  const debugBody = modal ? modal.querySelector("[data-scan-debug-body]") : null;
   const startedAt = Date.now();
   let elapsedTimer = 0;
 
@@ -703,6 +767,11 @@ async function handleScanSubmit(event) {
     const payload = await response.json();
     if (!response.ok || payload.status === "error") {
       throw new Error(payload.message || `Scan failed (${response.status}).`);
+    }
+
+    if (debugPanel instanceof HTMLElement && debugBody instanceof HTMLElement && payload.debug) {
+      debugBody.innerHTML = renderScanDebug(payload.debug);
+      debugPanel.hidden = false;
     }
 
     if (payload.status === "empty") {

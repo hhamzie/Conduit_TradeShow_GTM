@@ -1363,6 +1363,87 @@ button.button.subtle {
   overflow-wrap: anywhere;
 }
 
+.scan-debug-panel {
+  margin-top: 14px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #f8fbff;
+}
+
+.scan-debug-panel summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 12px 14px;
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.scan-debug-panel summary::-webkit-details-marker {
+  display: none;
+}
+
+.scan-debug-body {
+  display: grid;
+  gap: 12px;
+  padding: 0 14px 14px;
+}
+
+.scan-debug-summary {
+  margin: 0;
+  font-size: 0.84rem;
+  color: var(--muted);
+}
+
+.scan-debug-pass-list {
+  display: grid;
+  gap: 10px;
+}
+
+.scan-debug-pass {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #ffffff;
+}
+
+.scan-debug-pass-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.scan-debug-pass-head strong {
+  font-size: 0.88rem;
+}
+
+.scan-debug-pass-head span {
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.scan-debug-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  font-size: 0.8rem;
+  color: var(--ink-soft);
+}
+
+.scan-debug-links {
+  display: grid;
+  gap: 4px;
+}
+
+.scan-debug-links a {
+  font-size: 0.78rem;
+  color: var(--accent-dark);
+  overflow-wrap: anywhere;
+}
+
 @keyframes scan-pulse {
   0% {
     opacity: 0.95;

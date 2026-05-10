@@ -40,7 +40,7 @@ from app.services import (
     update_show,
     upsert_show,
 )
-from app.trade_show_feeder import TradeShowScanError, scan_upcoming_trade_shows
+from app.trade_show_feeder import TradeShowScanError, scan_upcoming_trade_shows_with_debug
 from app.web.presenters import (
     build_show_notice,
     get_run_status_label,
@@ -97,6 +97,30 @@ def _serialize_scan_candidate(candidate) -> dict[str, str]:
         "place": candidate.place,
         "link": candidate.link,
         "summary": candidate.summary,
+    }
+
+
+def _serialize_scan_debug(debug) -> dict[str, object]:
+    return {
+        "start_date": debug.start_date,
+        "end_date": debug.end_date,
+        "lookahead_days": debug.lookahead_days,
+        "candidate_count": debug.candidate_count,
+        "passes": [
+            {
+                "pass_label": report.pass_label,
+                "model_used": report.model_used,
+                "raw_count": report.raw_count,
+                "accepted_count": report.accepted_count,
+                "filtered_missing_fields": report.filtered_missing_fields,
+                "filtered_non_physical": report.filtered_non_physical,
+                "filtered_non_official_source": report.filtered_non_official_source,
+                "filtered_duplicate": report.filtered_duplicate,
+                "remapped_to_curated_source": report.remapped_to_curated_source,
+                "sample_links": list(report.sample_links),
+            }
+            for report in debug.pass_reports
+        ],
     }
 
 
@@ -328,13 +352,14 @@ def scan_upcoming_trade_shows_route(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
         )
     try:
-        candidates = scan_upcoming_trade_shows(query_hint=query_hint)
+        scan_result = scan_upcoming_trade_shows_with_debug(query_hint=query_hint)
     except ValueError as exc:
         return JSONResponse(
             {
                 "status": "error",
                 "message": str(exc),
                 "candidates": [],
+                "debug": None,
             },
             status_code=status.HTTP_400_BAD_REQUEST,
         )
@@ -344,6 +369,7 @@ def scan_upcoming_trade_shows_route(
                 "status": "error",
                 "message": str(exc),
                 "candidates": [],
+                "debug": None,
             },
             status_code=exc.status_code,
         )
@@ -353,10 +379,13 @@ def scan_upcoming_trade_shows_route(
                 "status": "error",
                 "message": f"Scan failed: {exc}",
                 "candidates": [],
+                "debug": None,
             },
             status_code=status.HTTP_502_BAD_GATEWAY,
         )
 
+    candidates = scan_result.candidates
+    debug_payload = _serialize_scan_debug(scan_result.debug)
     record_manual_trade_show_scan(db)
     db.commit()
 
@@ -366,6 +395,7 @@ def scan_upcoming_trade_shows_route(
                 "status": "empty",
                 "message": "No upcoming B2B physical-goods trade shows were found right now.",
                 "candidates": [],
+                "debug": debug_payload,
             }
         )
 
@@ -376,6 +406,7 @@ def scan_upcoming_trade_shows_route(
             "message": f"Found {len(serialized)} upcoming trade show(s).",
             "count": len(serialized),
             "candidates": serialized,
+            "debug": debug_payload,
         }
     )
 

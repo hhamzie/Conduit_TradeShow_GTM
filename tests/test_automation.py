@@ -23,7 +23,10 @@ from app.providers import ClayPollResult, ClayRecord, ProviderResult, SmartleadS
 from app.services import _build_prepared_lead, BulkDirectScrapeResult, DirectScrapeResult, launch_show, register_bulk_shows, run_bulk_direct_scrape, run_show_scrape, run_weekly_show_sync, start_outbound_campaign, sync_show_from_clay, upsert_show
 from app.trade_show_feeder import (
     TradeShowScanCandidate,
+    TradeShowScanDebug,
     TradeShowScanError,
+    TradeShowScanPassDebug,
+    TradeShowScanRunResult,
     is_b2b_physical_goods_show,
     is_trade_show_scan_final_source_url,
     resolve_trade_show_scan_source_url,
@@ -86,6 +89,32 @@ def build_guide_workbook_file() -> bytes:
     buffer = io.BytesIO()
     workbook.save(buffer)
     return buffer.getvalue()
+
+
+def make_scan_run_result(*candidates: TradeShowScanCandidate) -> TradeShowScanRunResult:
+    return TradeShowScanRunResult(
+        candidates=list(candidates),
+        debug=TradeShowScanDebug(
+            start_date="2026-05-09",
+            end_date="2026-08-17",
+            lookahead_days=100,
+            candidate_count=len(candidates),
+            pass_reports=(
+                TradeShowScanPassDebug(
+                    pass_label="broad_scan",
+                    model_used="gpt-4.1-mini",
+                    raw_count=len(candidates),
+                    accepted_count=len(candidates),
+                    filtered_missing_fields=0,
+                    filtered_non_physical=0,
+                    filtered_non_official_source=0,
+                    filtered_duplicate=0,
+                    remapped_to_curated_source=0,
+                    sample_links=tuple(candidate.link for candidate in candidates[:3]),
+                ),
+            ),
+        ),
+    )
 
 
 class AutomationTests(unittest.TestCase):
@@ -778,8 +807,8 @@ class AutomationTests(unittest.TestCase):
             with (
                 patch("app.web.routes.shows.require_authenticated"),
                 patch(
-                    "app.web.routes.shows.scan_upcoming_trade_shows",
-                    return_value=[
+                    "app.web.routes.shows.scan_upcoming_trade_shows_with_debug",
+                    return_value=make_scan_run_result(
                         TradeShowScanCandidate(
                             show_name="High Point Market",
                             event_date_raw="2026-05-25",
@@ -787,7 +816,7 @@ class AutomationTests(unittest.TestCase):
                             link="https://example.com/high-point",
                             summary="Home furnishings suppliers.",
                         )
-                    ],
+                    ),
                 ),
             ):
                 response = scan_upcoming_trade_shows_route(
@@ -800,6 +829,7 @@ class AutomationTests(unittest.TestCase):
         self.assertIn(b'"status":"ready"', response.body)
         self.assertIn(b'"count":1', response.body)
         self.assertIn(b"High Point Market", response.body)
+        self.assertIn(b'"debug"', response.body)
 
     def test_scan_upcoming_trade_shows_route_blocks_second_scan_same_day(self) -> None:
         from app.main import scan_upcoming_trade_shows_route
@@ -809,8 +839,8 @@ class AutomationTests(unittest.TestCase):
             with (
                 patch("app.web.routes.shows.require_authenticated"),
                 patch(
-                    "app.web.routes.shows.scan_upcoming_trade_shows",
-                    return_value=[
+                    "app.web.routes.shows.scan_upcoming_trade_shows_with_debug",
+                    return_value=make_scan_run_result(
                         TradeShowScanCandidate(
                             show_name="High Point Market",
                             event_date_raw="2026-05-25",
@@ -818,7 +848,7 @@ class AutomationTests(unittest.TestCase):
                             link="https://example.com/high-point",
                             summary="Home furnishings suppliers.",
                         )
-                    ],
+                    ),
                 ),
             ):
                 first_response = scan_upcoming_trade_shows_route(request=request, db=session)
@@ -844,7 +874,7 @@ class AutomationTests(unittest.TestCase):
             with (
                 patch.dict(os.environ, {"RENDER_GIT_COMMIT": "commit-a"}, clear=False),
                 patch("app.web.routes.shows.require_authenticated"),
-                patch("app.web.routes.shows.scan_upcoming_trade_shows", return_value=[candidate]),
+                patch("app.web.routes.shows.scan_upcoming_trade_shows_with_debug", return_value=make_scan_run_result(candidate)),
             ):
                 get_settings.cache_clear()
                 try:
@@ -855,7 +885,7 @@ class AutomationTests(unittest.TestCase):
             with (
                 patch.dict(os.environ, {"RENDER_GIT_COMMIT": "commit-b"}, clear=False),
                 patch("app.web.routes.shows.require_authenticated"),
-                patch("app.web.routes.shows.scan_upcoming_trade_shows", return_value=[candidate]),
+                patch("app.web.routes.shows.scan_upcoming_trade_shows_with_debug", return_value=make_scan_run_result(candidate)),
             ):
                 get_settings.cache_clear()
                 try:
@@ -881,7 +911,7 @@ class AutomationTests(unittest.TestCase):
             with (
                 patch.dict(os.environ, {"RENDER_GIT_COMMIT": "commit-a"}, clear=False),
                 patch("app.web.routes.shows.require_authenticated"),
-                patch("app.web.routes.shows.scan_upcoming_trade_shows", return_value=[candidate]),
+                patch("app.web.routes.shows.scan_upcoming_trade_shows_with_debug", return_value=make_scan_run_result(candidate)),
             ):
                 get_settings.cache_clear()
                 try:
@@ -897,7 +927,7 @@ class AutomationTests(unittest.TestCase):
             with (
                 patch.dict(os.environ, {"RENDER_GIT_COMMIT": "commit-b"}, clear=False),
                 patch("app.web.routes.shows.require_authenticated"),
-                patch("app.web.routes.shows.scan_upcoming_trade_shows", return_value=[candidate]),
+                patch("app.web.routes.shows.scan_upcoming_trade_shows_with_debug", return_value=make_scan_run_result(candidate)),
             ):
                 get_settings.cache_clear()
                 try:
@@ -916,7 +946,7 @@ class AutomationTests(unittest.TestCase):
             with (
                 patch("app.web.routes.shows.require_authenticated"),
                 patch(
-                    "app.web.routes.shows.scan_upcoming_trade_shows",
+                    "app.web.routes.shows.scan_upcoming_trade_shows_with_debug",
                     side_effect=TradeShowScanError(
                         "Trade show scan is rate limited right now. Try again later.",
                         status_code=429,
