@@ -605,6 +605,23 @@ button.button.subtle {
   min-width: 88px;
 }
 
+.workflow-bulk-bar {
+  display: grid !important;
+  grid-template-columns: 1fr auto;
+  justify-content: initial !important;
+  align-items: center;
+  width: 100%;
+}
+
+.workflow-bulk-bar .bulk-select-anchor {
+  justify-self: start;
+}
+
+.workflow-bulk-bar .bulk-select-actions {
+  justify-self: end;
+  min-height: 44px;
+}
+
 .bulk-select-bar .bulk-select-count {
   min-width: 88px;
 }
@@ -2703,10 +2720,18 @@ th {
   align-items: end;
 }
 
+.lead-meta-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
 .lead-table-toolbar {
   display: grid;
   grid-template-columns: auto 280px;
   align-items: center;
+  justify-content: end;
   gap: 10px;
 }
 
@@ -2749,7 +2774,12 @@ th {
 }
 
 .lead-delete-button[disabled] {
-  opacity: 0.45;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.lead-delete-button:not([disabled]) {
+  opacity: 1;
 }
 
 .lead-table-wrap {
@@ -2847,6 +2877,7 @@ th {
   .lead-table-toolbar {
     grid-template-columns: minmax(0, 1fr);
     align-items: start;
+    justify-content: start;
   }
 
   .profile-hero-tools,

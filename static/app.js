@@ -1197,7 +1197,7 @@ function updateLeadTable(table) {
   }
 
   if (pageTarget) {
-    pageTarget.textContent = matchCount === 0 ? "0-0 of 0" : `${rangeStart + 1}-${rangeEnd} of ${matchCount}`;
+    pageTarget.textContent = matchCount === 0 ? "Page 0 of 0" : `Page ${currentPage} of ${pageCount}`;
   }
   if (pagination instanceof HTMLElement) {
     pagination.hidden = matchCount <= pageSize;

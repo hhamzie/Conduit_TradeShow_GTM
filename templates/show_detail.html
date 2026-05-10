@@ -142,11 +142,16 @@
   <div class="panel-head lead-panel-head">
     <div>
       <h2>Exhibitor List</h2>
-      <p class="muted" data-lead-total>{{ analysis.export_company_count }} rows total</p>
+      <p class="muted lead-meta-line">
+        <span data-lead-total>{{ analysis.export_company_count }} rows total</span>
+        <span class="lead-results-meta" data-lead-results>{{ analysis.export_company_count }} shown</span>
+      </p>
     </div>
     {% if analysis.company_profiles %}
     <div class="lead-table-toolbar">
-      <span class="lead-results-meta" data-lead-results>{{ analysis.export_company_count }} shown</span>
+      {% if can_manage %}
+      <button class="button danger subtle lead-delete-button" type="button" data-lead-delete disabled>Delete</button>
+      {% endif %}
       <label class="lead-search-field" aria-label="Search exhibitors">
         <input type="text" placeholder="Search companies, booths, websites" data-lead-search />
       </label>
@@ -202,9 +207,6 @@
     <button class="button secondary subtle" type="button" data-lead-prev>Previous</button>
     <span class="lead-page-meta" data-lead-page>Page 1</span>
     <button class="button secondary subtle" type="button" data-lead-next>Next</button>
-    {% if can_manage %}
-    <button class="button danger subtle lead-delete-button" type="button" data-lead-delete disabled>Delete</button>
-    {% endif %}
   </div>
   {% else %}
   <div class="empty-state">
