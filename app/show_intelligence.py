@@ -3,6 +3,8 @@ from __future__ import annotations
 import csv
 from dataclasses import dataclass
 from datetime import date
+import hashlib
+import json
 from pathlib import Path
 import re
 from urllib.parse import urlparse
@@ -26,6 +28,7 @@ class ThemePlaybook:
 
 @dataclass(frozen=True)
 class CompanyProfile:
+    row_key: str
     name: str
     website_url: str
     domain: str
@@ -335,6 +338,7 @@ def _build_company_profile(row: dict[str, str], playbook: ThemePlaybook) -> Comp
 
     label, slug = _priority_badge(score)
     return CompanyProfile(
+        row_key=row["row_key"],
         name=row["company_name"],
         website_url=row["website_url"],
         domain=row["domain"],
@@ -618,6 +622,7 @@ def _load_company_rows(raw_path: str) -> list[dict[str, str]]:
             )
             rows.append(
                 {
+                    "row_key": _company_row_key(normalized),
                     "company_name": company_name,
                     "website_url": website_url,
                     "domain": _extract_domain(website_url),
@@ -625,6 +630,10 @@ def _load_company_rows(raw_path: str) -> list[dict[str, str]]:
                 }
             )
     return rows
+
+
+def _company_row_key(cells: dict[str, str]) -> str:
+    return hashlib.sha1(json.dumps(cells, sort_keys=True).encode("utf-8")).hexdigest()
 
 
 def _normalize_header(value: str) -> str:

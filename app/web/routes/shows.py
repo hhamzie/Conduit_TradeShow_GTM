@@ -30,6 +30,7 @@ from app.services import (
     approve_show,
     build_pending_scrape_queue,
     build_outbound_plan,
+    delete_show_export_rows,
     find_matching_show,
     get_show,
     launch_show,
@@ -273,6 +274,28 @@ def delete_show(show_id: int, request: Request, db: Session = Depends(get_db)):
     if _is_fetch_request(request):
         return JSONResponse({"ok": True, "deleted_id": deleted_show_id})
     return RedirectResponse("/shows/dashboard", status_code=status.HTTP_303_SEE_OTHER)
+
+
+@router.post("/shows/{show_id}/leads/delete")
+def delete_show_leads(
+    show_id: int,
+    request: Request,
+    row_keys: list[str] = Form(default_factory=list),
+    db: Session = Depends(get_db),
+):
+    require_authenticated(request)
+    show = _get_show_or_404(db, show_id)
+    remaining_count = delete_show_export_rows(show, row_keys)
+    db.commit()
+    if _is_fetch_request(request):
+        return JSONResponse(
+            {
+                "ok": True,
+                "deleted_count": len({key.strip() for key in row_keys if key.strip()}),
+                "remaining_count": remaining_count,
+            }
+        )
+    return RedirectResponse(f"/shows/{show_id}", status_code=status.HTTP_303_SEE_OTHER)
 
 
 @router.post("/show-bulk/delete")

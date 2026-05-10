@@ -138,11 +138,11 @@
   </div>
 </section>
 
-<section class="panel profile-card lead-panel">
+<section class="panel profile-card lead-panel" data-show-id="{{ show.id }}">
   <div class="panel-head lead-panel-head">
     <div>
       <h2>Exhibitor List</h2>
-      <p class="muted">{{ analysis.export_company_count }} rows total · scroll for more</p>
+      <p class="muted" data-lead-total>{{ analysis.export_company_count }} rows total</p>
     </div>
     {% if analysis.company_profiles %}
     <div class="lead-table-toolbar">
@@ -172,7 +172,7 @@
       </thead>
       <tbody>
         {% for company in analysis.company_profiles %}
-        <tr data-lead-row data-lead-search-text="{{ company.name }} {{ company.booth_number or '' }} {{ company.domain or '' }} {{ company.website_url or '' }} {{ company.rationale }}">
+        <tr data-lead-row data-lead-row-key="{{ company.row_key }}" data-lead-search-text="{{ company.name }} {{ company.booth_number or '' }} {{ company.domain or '' }} {{ company.website_url or '' }} {{ company.rationale }}">
           <td class="selection-col">
             <label class="selector-control" aria-label="Select {{ company.name }}">
               <input type="checkbox" data-lead-select-item />
@@ -202,8 +202,10 @@
     <button class="button secondary subtle" type="button" data-lead-prev>Previous</button>
     <span class="lead-page-meta" data-lead-page>Page 1</span>
     <button class="button secondary subtle" type="button" data-lead-next>Next</button>
+    {% if can_manage %}
+    <button class="button danger subtle lead-delete-button" type="button" data-lead-delete disabled>Delete</button>
+    {% endif %}
   </div>
-  <p class="mini-note">Search narrows the list. Scroll left or right if you need the full table.</p>
   {% else %}
   <div class="empty-state">
     <h3>No exhibitors yet</h3>

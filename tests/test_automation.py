@@ -1550,6 +1550,38 @@ class AutomationTests(unittest.TestCase):
             self.assertEqual(session.scalars(select(ShowGuideRow)).all(), [])
             self.assertEqual(session.scalars(select(ClaySyncRow)).all(), [])
 
+    def test_delete_show_leads_route_removes_selected_export_rows(self) -> None:
+        from app.main import delete_show_leads
+        from app.show_intelligence import _company_row_key
+
+        request = type("Req", (), {"session": {}, "headers": {"x-requested-with": "fetch"}})()
+        with self.Session() as session, tempfile.TemporaryDirectory() as tmp_dir:
+            export_path = Path(tmp_dir) / "leads.csv"
+            export_path.write_text(
+                "company_name,website_url,booth_number\nAcme,https://acme.com,101\nBravo,https://bravo.com,102\n",
+                encoding="utf-8",
+            )
+            show = make_show(latest_export_path=str(export_path), company_count=2)
+            session.add(show)
+            session.commit()
+
+            row_key = _company_row_key(
+                {
+                    "company_name": "Acme",
+                    "website_url": "https://acme.com",
+                    "booth_number": "101",
+                }
+            )
+
+            with patch("app.web.routes.shows.require_authenticated"):
+                response = delete_show_leads(show_id=show.id, request=request, row_keys=[row_key], db=session)
+
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(json.loads(response.body), {"ok": True, "deleted_count": 1, "remaining_count": 1})
+            self.assertEqual(show.company_count, 1)
+            self.assertIn("Bravo", export_path.read_text(encoding="utf-8"))
+            self.assertNotIn("Acme", export_path.read_text(encoding="utf-8"))
+
     def test_run_direct_scrape_retries_until_minimum_company_count_is_met(self) -> None:
         from app.services import _run_direct_scrape
 

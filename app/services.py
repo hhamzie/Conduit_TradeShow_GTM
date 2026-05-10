@@ -32,6 +32,7 @@ from app.providers import (
     push_to_clay,
     push_to_heyreach,
 )
+from app.show_intelligence import _company_row_key
 from app.trade_show_feeder import is_b2b_physical_goods_show, scan_upcoming_trade_shows
 from scraper import ScrapeOptions, run_scrape
 
@@ -1760,6 +1761,38 @@ def _write_csv(path: Path, rows: list[dict[str, str]], base_headers: list[str]) 
         writer.writeheader()
         for row in rows:
             writer.writerow({key: row.get(key, "") for key in fieldnames})
+
+
+def delete_show_export_rows(show: Show, row_keys: list[str]) -> int:
+    export_path_raw = (show.latest_export_path or "").strip()
+    if not export_path_raw:
+        raise ValueError("This show does not have an export yet.")
+
+    export_path = Path(export_path_raw).expanduser()
+    if not export_path.exists():
+        raise ValueError("The lead CSV file no longer exists.")
+
+    unique_keys = {key.strip() for key in row_keys if key.strip()}
+    if not unique_keys:
+        return show.company_count or 0
+
+    with export_path.open("r", encoding="utf-8-sig", newline="") as handle:
+        reader = csv.DictReader(handle)
+        fieldnames = list(reader.fieldnames or [])
+        kept_rows: list[dict[str, str]] = []
+        for raw_row in reader:
+            normalized = {
+                re.sub(r"[^a-z0-9]+", "_", key.strip().lower()).strip("_"): (value or "").strip()
+                for key, value in raw_row.items()
+                if key is not None
+            }
+            if _company_row_key(normalized) in unique_keys:
+                continue
+            kept_rows.append({key: value or "" for key, value in raw_row.items() if key is not None})
+
+    _write_csv(export_path, kept_rows, fieldnames)
+    show.company_count = len(kept_rows)
+    return len(kept_rows)
 
 
 def _row_hash(cells: dict[str, str]) -> str:

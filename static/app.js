@@ -1155,6 +1155,7 @@ function updateLeadTable(table) {
   const pageTarget = panel.querySelector("[data-lead-page]");
   const prevButton = panel.querySelector("[data-lead-prev]");
   const nextButton = panel.querySelector("[data-lead-next]");
+  const deleteButton = panel.querySelector("[data-lead-delete]");
   const query = searchInput instanceof HTMLInputElement ? searchInput.value.trim().toLowerCase() : "";
   const pageSize = 30;
   const requestedPage = Number.parseInt(panel.dataset.leadPage || "1", 10);
@@ -1196,7 +1197,7 @@ function updateLeadTable(table) {
   }
 
   if (pageTarget) {
-    pageTarget.textContent = matchCount === 0 ? "Page 0 of 0" : `Page ${currentPage} of ${pageCount}`;
+    pageTarget.textContent = matchCount === 0 ? "0-0 of 0" : `${rangeStart + 1}-${rangeEnd} of ${matchCount}`;
   }
   if (pagination instanceof HTMLElement) {
     pagination.hidden = matchCount <= pageSize;
@@ -1212,7 +1213,71 @@ function updateLeadTable(table) {
     const selectedCount = selectionItems.filter((item) => item.checked).length;
     selectAll.checked = selectionItems.length > 0 && selectedCount === selectionItems.length;
     selectAll.indeterminate = selectedCount > 0 && selectedCount < selectionItems.length;
+    if (deleteButton instanceof HTMLButtonElement) {
+      deleteButton.disabled = selectedCount === 0;
+    }
+  } else if (deleteButton instanceof HTMLButtonElement) {
+    deleteButton.disabled = true;
   }
+}
+
+async function handleLeadDeleteClick(event) {
+  const button = event.currentTarget;
+  if (!(button instanceof HTMLButtonElement)) {
+    return;
+  }
+  const panel = button.closest(".lead-panel");
+  const table = panel?.querySelector("[data-lead-table]");
+  if (!(panel instanceof HTMLElement) || !(table instanceof HTMLTableElement)) {
+    return;
+  }
+  const showId = panel.dataset.showId || "";
+  if (!showId) {
+    return;
+  }
+  const selectedRows = Array.from(table.querySelectorAll("[data-lead-row]")).filter((row) => {
+    const checkbox = row.querySelector("[data-lead-select-item]");
+    return checkbox instanceof HTMLInputElement && checkbox.checked;
+  });
+  if (selectedRows.length === 0) {
+    return;
+  }
+  if (!window.confirm("Delete the selected exhibitors from this lead CSV?")) {
+    return;
+  }
+
+  const payload = new FormData();
+  selectedRows.forEach((row) => {
+    const rowKey = row.getAttribute("data-lead-row-key") || "";
+    if (rowKey) {
+      payload.append("row_keys", rowKey);
+    }
+  });
+
+  const response = await fetch(`/shows/${encodeURIComponent(showId)}/leads/delete`, {
+    method: "POST",
+    body: payload,
+    credentials: "same-origin",
+    headers: {
+      "X-Requested-With": "fetch",
+    },
+  });
+  if (!response.ok) {
+    window.location.reload();
+    return;
+  }
+  const result = await response.json();
+  if (!result.ok) {
+    window.location.reload();
+    return;
+  }
+
+  selectedRows.forEach((row) => row.remove());
+  const totalTarget = panel.querySelector("[data-lead-total]");
+  if (totalTarget) {
+    totalTarget.textContent = `${result.remaining_count} rows total`;
+  }
+  updateLeadTable(table);
 }
 
 function initializeLeadTables() {
@@ -1270,6 +1335,13 @@ function initializeLeadTables() {
     selectionItems.forEach((item) => {
       item.addEventListener("change", () => updateLeadTable(table));
     });
+
+    const deleteButton = panel ? panel.querySelector("[data-lead-delete]") : null;
+    if (deleteButton instanceof HTMLButtonElement) {
+      deleteButton.addEventListener("click", (event) => {
+        void handleLeadDeleteClick(event);
+      });
+    }
   });
 }
 
