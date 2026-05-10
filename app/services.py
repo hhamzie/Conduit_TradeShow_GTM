@@ -1503,13 +1503,17 @@ def list_shows(db: Session) -> list[Show]:
             .order_by(Show.event_date.asc(), Show.created_at.desc())
         )
     )
+    now = datetime.now()
     names_updated = False
+    status_updated = False
     for show in shows:
         normalized_name = normalize_show_display_name(show.name)
         if normalized_name and normalized_name != show.name:
             show.name = normalized_name
             names_updated = True
-    if names_updated:
+        if reconcile_show_runtime_state(show, now=now):
+            status_updated = True
+    if names_updated or status_updated:
         db.commit()
     return shows
 
@@ -1654,6 +1658,7 @@ def queue_show_now(db: Session, show: Show) -> None:
 
 def remove_show_from_queue(db: Session, show: Show, *, now: datetime | None = None) -> bool:
     now = now or datetime.now()
+    reconcile_show_runtime_state(show, now=now)
     if show.status == ShowStatus.scraping.value:
         return False
 
@@ -1672,6 +1677,24 @@ def remove_show_from_queue(db: Session, show: Show, *, now: datetime | None = No
     deferred_run_at = now + timedelta(days=1)
     show.run_at = baseline_run_at if baseline_run_at > deferred_run_at else deferred_run_at
     return True
+
+
+def reconcile_show_runtime_state(show: Show, *, now: datetime | None = None) -> bool:
+    now = now or datetime.now()
+    running_runs = [run for run in show.runs if run.status == RunStatus.running.value]
+    queued_runs = [run for run in show.runs if run.status == RunStatus.queued.value]
+
+    original_status = show.status
+
+    if show.status == ShowStatus.scraping.value and not running_runs:
+        if queued_runs:
+            show.status = ShowStatus.queued.value
+        elif show.company_count > 0 and show.latest_export_path.strip():
+            show.status = ShowStatus.ready_for_review.value
+        else:
+            show.status = ShowStatus.failed.value if show.last_error.strip() else ShowStatus.waiting.value
+
+    return show.status != original_status
 
 
 def _normalize_enriched_key(value: str) -> str:

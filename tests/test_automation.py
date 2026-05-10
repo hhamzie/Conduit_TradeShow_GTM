@@ -440,6 +440,26 @@ class AutomationTests(unittest.TestCase):
             assert refreshed is not None
             self.assertEqual(refreshed.name, "Pack Expo")
 
+    def test_list_shows_reconciles_stale_scraping_show_to_populated(self) -> None:
+        with self.Session() as session:
+            stale = make_show(
+                name="National Restaurant Association Show",
+                event_date=date(2026, 5, 16),
+                latest_export_path="/tmp/nra.csv",
+                company_count=1865,
+                status=ShowStatus.scraping.value,
+            )
+            session.add(stale)
+            session.add(CampaignRun(show=stale, status=RunStatus.success.value, finished_at=datetime(2026, 5, 10, 9, 0)))
+            session.commit()
+
+            shows = list_shows(session)
+
+            self.assertEqual(shows[0].status, ShowStatus.ready_for_review.value)
+            refreshed = session.get(Show, stale.id)
+            assert refreshed is not None
+            self.assertEqual(refreshed.status, ShowStatus.ready_for_review.value)
+
     def test_upsert_show_reuses_existing_record_for_similar_name_and_same_date(self) -> None:
         with self.Session() as session:
             first_show, first_created = upsert_show(
