@@ -51,9 +51,9 @@
       <span class="bulk-select-count" data-selection-controls data-select-count>0 selected</span>
     </div>
     <div class="bulk-select-actions" data-selection-controls>
-      <button class="button secondary subtle" type="submit" formaction="/show-bulk/scrape" data-requires-selection disabled>Scrape</button>
-      <button class="button secondary subtle" type="submit" formaction="/show-bulk/smartlead" data-requires-selection disabled>Start outbound</button>
-      <button class="button danger subtle" type="submit" onclick="return confirm('Delete the selected shows?');" data-requires-selection disabled>Delete</button>
+      <button class="button secondary subtle" type="submit" formaction="/show-bulk/scrape" data-requires-selection data-confirm-title="Queue selected scrapes?" data-confirm-copy="Confirm you want to queue scrapes for the selected trade shows." data-confirm-button="Scrape" disabled>Scrape</button>
+      <button class="button secondary subtle" type="submit" formaction="/show-bulk/smartlead" data-requires-selection data-confirm-title="Create email campaigns?" data-confirm-copy="Confirm you want to create Smartlead campaigns for the selected trade shows. This does not launch sending." data-confirm-button="Create campaigns" disabled>Start outbound</button>
+      <button class="button danger subtle" type="submit" data-requires-selection data-confirm-title="Delete selected shows?" data-confirm-copy="Confirm you want to delete the selected trade shows and all of their saved data." data-confirm-button="Delete" data-confirm-tone="danger" disabled>Delete</button>
     </div>
   </form>
   {% endif %}
@@ -166,7 +166,7 @@
                   </svg>
                 </summary>
                 <div class="action-menu-panel">
-                  <form action="/shows/{{ analysis.show.id }}/delete" method="post" data-dashboard-delete-form onsubmit="return confirm('Delete this show from the dashboard?');">
+                  <form action="/shows/{{ analysis.show.id }}/delete" method="post" data-dashboard-delete-form data-confirm-form data-confirm-title="Delete {{ analysis.show.name }}?" data-confirm-copy="Confirm you want to delete {{ analysis.show.name }} and all of its saved data." data-confirm-button="Delete" data-confirm-tone="danger">
                     <button class="action-menu-link action-menu-button danger-link" type="submit">Delete show</button>
                   </form>
                 </div>

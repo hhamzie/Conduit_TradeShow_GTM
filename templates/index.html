@@ -46,11 +46,11 @@
         </summary>
         <div class="action-menu-panel">
           {% if show.status in ["waiting", "failed", "ready_for_review", "approved", "live"] %}
-          <form action="/shows/{{ show.id }}/run-now" method="post">
+          <form action="/shows/{{ show.id }}/run-now" method="post" data-confirm-form data-confirm-title="Refresh exhibitor list?" data-confirm-copy="Confirm you want to rerun scraping for {{ show.name }}." data-confirm-button="Refresh list">
             <button class="action-menu-link action-menu-button" type="submit">Run now</button>
           </form>
           {% endif %}
-          <form action="/shows/{{ show.id }}/delete" method="post" onsubmit="return confirm('Delete this show from the dashboard?');">
+          <form action="/shows/{{ show.id }}/delete" method="post" data-confirm-form data-confirm-title="Delete {{ show.name }}?" data-confirm-copy="Confirm you want to delete {{ show.name }} and all of its saved data." data-confirm-button="Delete" data-confirm-tone="danger">
             <button class="action-menu-link action-menu-button danger-link" type="submit">Delete show</button>
           </form>
         </div>
@@ -295,7 +295,7 @@
       <span class="bulk-select-count" data-selection-controls data-select-count>0 selected</span>
     </div>
     <div class="bulk-select-actions" data-selection-controls>
-      <button class="button danger subtle" type="submit" onclick="return confirm('Delete the selected shows?');" data-requires-selection disabled>Delete</button>
+      <button class="button danger subtle" type="submit" data-requires-selection data-confirm-title="Delete selected shows?" data-confirm-copy="Confirm you want to delete the selected trade shows and all of their saved data." data-confirm-button="Delete" data-confirm-tone="danger" disabled>Delete</button>
     </div>
   </form>
   {% endif %}
@@ -328,7 +328,7 @@
       <span class="bulk-select-count" data-selection-controls data-select-count>0 selected</span>
     </div>
     <div class="bulk-select-actions" data-selection-controls>
-      <button class="button danger subtle" type="submit" onclick="return confirm('Delete the selected shows?');" data-requires-selection disabled>Delete</button>
+      <button class="button danger subtle" type="submit" data-requires-selection data-confirm-title="Delete selected shows?" data-confirm-copy="Confirm you want to delete the selected trade shows and all of their saved data." data-confirm-button="Delete" data-confirm-tone="danger" disabled>Delete</button>
     </div>
   </form>
   {% endif %}
@@ -361,7 +361,7 @@
       <span class="bulk-select-count" data-selection-controls data-select-count>0 selected</span>
     </div>
     <div class="bulk-select-actions" data-selection-controls>
-      <button class="button danger subtle" type="submit" onclick="return confirm('Delete the selected shows?');" data-requires-selection disabled>Delete</button>
+      <button class="button danger subtle" type="submit" data-requires-selection data-confirm-title="Delete selected shows?" data-confirm-copy="Confirm you want to delete the selected trade shows and all of their saved data." data-confirm-button="Delete" data-confirm-tone="danger" disabled>Delete</button>
     </div>
   </form>
   {% endif %}

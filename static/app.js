@@ -516,6 +516,104 @@ function handleFlashModalKeydown(event) {
   }
 }
 
+function initializeActionConfirmModal() {
+  const modal = document.querySelector("[data-action-confirm-modal]");
+  const titleTarget = modal ? modal.querySelector("[data-action-confirm-title]") : null;
+  const copyTarget = modal ? modal.querySelector("[data-action-confirm-copy]") : null;
+  const confirmButton = modal ? modal.querySelector("[data-action-confirm-submit]") : null;
+  if (!(modal instanceof HTMLElement) || !(titleTarget instanceof HTMLElement) || !(copyTarget instanceof HTMLElement) || !(confirmButton instanceof HTMLButtonElement)) {
+    return {
+      confirmAction: async () => true,
+    };
+  }
+
+  let pendingResolve = null;
+
+  const closeModal = (confirmed) => {
+    modal.hidden = true;
+    delete document.body.dataset.modalOpen;
+    if (pendingResolve) {
+      pendingResolve(confirmed);
+      pendingResolve = null;
+    }
+  };
+
+  const confirmAction = ({ title, copy, buttonLabel, tone = "default" }) =>
+    new Promise((resolve) => {
+      pendingResolve = resolve;
+      titleTarget.textContent = title || "Confirm action";
+      copyTarget.textContent = copy || "Confirm you want to continue.";
+      confirmButton.textContent = buttonLabel || "Confirm";
+      confirmButton.classList.toggle("danger", tone === "danger");
+      modal.hidden = false;
+      document.body.dataset.modalOpen = "true";
+    });
+
+  modal.addEventListener("click", (event) => {
+    if (event.target === modal || event.target.matches("[data-action-confirm-close]")) {
+      closeModal(false);
+    }
+  });
+
+  confirmButton.addEventListener("click", () => {
+    closeModal(true);
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && !modal.hidden) {
+      closeModal(false);
+    }
+  });
+
+  document.addEventListener(
+    "submit",
+    (event) => {
+      const form = event.target;
+      if (!(form instanceof HTMLFormElement)) {
+        return;
+      }
+      const submitter = event.submitter instanceof HTMLElement ? event.submitter : null;
+      const configSource =
+        submitter && (submitter.dataset.confirmTitle || submitter.dataset.confirmCopy || submitter.dataset.confirmButton)
+          ? submitter
+          : form.hasAttribute("data-confirm-form")
+            ? form
+            : null;
+      if (!configSource) {
+        return;
+      }
+      if (form.dataset.confirmArmed === "true") {
+        delete form.dataset.confirmArmed;
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+
+      void confirmAction({
+        title: configSource.dataset.confirmTitle || "Confirm action",
+        copy: configSource.dataset.confirmCopy || "Confirm you want to continue.",
+        buttonLabel: configSource.dataset.confirmButton || "Confirm",
+        tone: configSource.dataset.confirmTone || "default",
+      }).then((confirmed) => {
+        if (!confirmed) {
+          return;
+        }
+        form.dataset.confirmArmed = "true";
+        if (submitter instanceof HTMLButtonElement || submitter instanceof HTMLInputElement) {
+          form.requestSubmit(submitter);
+          return;
+        }
+        form.requestSubmit();
+      });
+    },
+    true,
+  );
+
+  return { confirmAction };
+}
+
 function openOutboundModal(trigger) {
   const modal = document.querySelector("[data-outbound-modal]");
   const form = modal ? modal.querySelector("[data-outbound-form]") : null;
@@ -537,10 +635,10 @@ function openOutboundModal(trigger) {
   form.action = hasCampaign ? `/shows/${showId}/smartlead/rebuild` : `/shows/${showId}/smartlead/create`;
   if (hasCampaign) {
     copyTarget.textContent = campaignActive
-      ? `${showName} already has a live Smartlead campaign${campaignName ? `: ${campaignName}` : ""}.`
-      : `${showName} already has a Smartlead campaign${campaignName ? `: ${campaignName}` : ""}.`;
+      ? `Confirm you want to rebuild the live Smartlead campaign for ${showName}${campaignName ? `: ${campaignName}` : ""}.`
+      : `Confirm you want to rebuild the Smartlead campaign for ${showName}${campaignName ? `: ${campaignName}` : ""}.`;
   } else {
-    copyTarget.textContent = `Create a Smartlead campaign for ${showName} from the master template.`;
+    copyTarget.textContent = `Confirm you want to create a Smartlead campaign for ${showName} from the master template.`;
   }
 
   if (capacityTarget instanceof HTMLElement) {
@@ -1255,7 +1353,16 @@ async function handleLeadDeleteClick(event) {
   if (selectedRows.length === 0) {
     return;
   }
-  if (!window.confirm("Delete the selected exhibitors from this lead CSV?")) {
+  const { confirmAction } = window.codexActionConfirm || {};
+  const confirmed = typeof confirmAction === "function"
+    ? await confirmAction({
+        title: "Delete selected exhibitors?",
+        copy: "Confirm you want to delete the selected exhibitors from this lead CSV.",
+        buttonLabel: "Delete",
+        tone: "danger",
+      })
+    : window.confirm("Delete the selected exhibitors from this lead CSV?");
+  if (!confirmed) {
     return;
   }
 
@@ -1515,6 +1622,8 @@ function initializeDismissibleNotices() {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
+  window.codexActionConfirm = initializeActionConfirmModal();
+
   const directForms = document.querySelectorAll("[data-direct-download-form]");
   directForms.forEach((form) => {
     form.addEventListener("submit", handleDirectDownloadFormSubmit);

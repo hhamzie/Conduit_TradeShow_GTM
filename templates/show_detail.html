@@ -26,31 +26,31 @@
         </summary>
         <div class="action-menu-panel">
           {% if can_manage and show.status == "ready_for_review" %}
-          <form action="/shows/{{ show.id }}/approve" method="post">
+          <form action="/shows/{{ show.id }}/approve" method="post" data-confirm-form data-confirm-title="Mark {{ show.name }} ready?" data-confirm-copy="Confirm you want to mark {{ show.name }} ready to send." data-confirm-button="Mark ready">
             <button class="action-menu-link action-menu-button" type="submit">Mark ready to send</button>
           </form>
           {% elif can_manage and show.status == "approved" %}
-          <form action="/shows/{{ show.id }}/launch" method="post">
+          <form action="/shows/{{ show.id }}/launch" method="post" data-confirm-form data-confirm-title="Start email campaign?" data-confirm-copy="Confirm you want to start the email campaign for {{ show.name }}." data-confirm-button="Start campaign">
             <button class="action-menu-link action-menu-button" type="submit">Start email campaign</button>
           </form>
           {% elif can_manage and show.status in ["waiting", "failed", "live"] %}
-          <form action="/shows/{{ show.id }}/run-now" method="post">
+          <form action="/shows/{{ show.id }}/run-now" method="post" data-confirm-form data-confirm-title="Refresh exhibitor list?" data-confirm-copy="Confirm you want to rerun scraping for {{ show.name }}." data-confirm-button="Refresh list">
             <button class="action-menu-link action-menu-button" type="submit">Refresh exhibitor list</button>
           </form>
           {% endif %}
           {% if can_manage and show.clay_table_id %}
-          <form action="/shows/{{ show.id }}/sync-clay" method="post">
+          <form action="/shows/{{ show.id }}/sync-clay" method="post" data-confirm-form data-confirm-title="Refresh Clay table?" data-confirm-copy="Confirm you want to sync the latest Clay rows for {{ show.name }}." data-confirm-button="Refresh Clay">
             <button class="action-menu-link action-menu-button" type="submit">Refresh Clay table</button>
           </form>
           {% endif %}
           {% if can_manage and not show.smartlead_campaign_id %}
-          <form action="/shows/{{ show.id }}/smartlead/setup" method="post">
+          <form action="/shows/{{ show.id }}/smartlead/setup" method="post" data-confirm-form data-confirm-title="Create email campaign?" data-confirm-copy="Confirm you want to create a Smartlead campaign for {{ show.name }}. This does not launch sending." data-confirm-button="Create campaign">
             <input type="hidden" name="campaign_mode" value="smart" />
             <button class="action-menu-link action-menu-button" type="submit">Create email campaign</button>
           </form>
           {% endif %}
           {% if can_manage and show.smartlead_campaign_id and show.smartlead_status in ["active", "ready_to_launch", "paused"] %}
-          <form action="/shows/{{ show.id }}/pause" method="post">
+          <form action="/shows/{{ show.id }}/pause" method="post" data-confirm-form data-confirm-title="Pause email campaign?" data-confirm-copy="Confirm you want to pause the email campaign for {{ show.name }}." data-confirm-button="Pause campaign">
             <button class="action-menu-link action-menu-button" type="submit">Pause email campaign</button>
           </form>
           {% endif %}
@@ -71,7 +71,7 @@
           <a class="action-menu-link" href="{{ smartlead_campaign_url }}" target="_blank" rel="noreferrer">Open email campaign</a>
           {% endif %}
           {% if can_manage %}
-          <form action="/shows/{{ show.id }}/delete" method="post" onsubmit="return confirm('Delete this show from the dashboard?');">
+          <form action="/shows/{{ show.id }}/delete" method="post" data-confirm-form data-confirm-title="Delete {{ show.name }}?" data-confirm-copy="Confirm you want to delete {{ show.name }} and all of its saved data." data-confirm-button="Delete" data-confirm-tone="danger">
             <button class="action-menu-link action-menu-button danger-link" type="submit">Delete show</button>
           </form>
           {% endif %}
