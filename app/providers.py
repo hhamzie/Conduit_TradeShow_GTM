@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 SMARTLEAD_BATCH_SIZE = 400
 CLAY_PUSH_BATCH_SIZE = 100
 CLAY_PULL_PAGE_SIZE = 250
+DUPLICATE_CAMPAIGN_DATE_WINDOW_DAYS = 5
 CLAY_META_KEYS = {
     "id",
     "record_id",
@@ -34,6 +35,18 @@ CLAY_META_KEYS = {
     "status",
 }
 WEBSITE_RE = re.compile(r"^https?://", re.IGNORECASE)
+SHOW_NAME_NOISE_WORDS = {
+    "the",
+    "and",
+    "expo",
+    "show",
+    "fair",
+    "market",
+    "conference",
+    "event",
+    "events",
+    "annual",
+}
 
 
 @dataclass(frozen=True)
@@ -680,6 +693,77 @@ def _show_campaign_name(show: Show) -> str:
     return f"{show.name} - {_pretty_event_day(show)} {show.event_date.year}"
 
 
+def _normalize_campaign_identity_name(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", value.strip().lower()).strip()
+
+
+def _normalize_campaign_identity_tokens(value: str) -> tuple[str, ...]:
+    normalized = _normalize_campaign_identity_name(value)
+    if not normalized:
+        return ()
+    tokens = [token for token in normalized.split() if token and token not in SHOW_NAME_NOISE_WORDS]
+    return tuple(dict.fromkeys(tokens))
+
+
+def _campaign_names_match(left: str, right: str) -> bool:
+    normalized_left = _normalize_campaign_identity_name(left)
+    normalized_right = _normalize_campaign_identity_name(right)
+    if normalized_left and normalized_left == normalized_right:
+        return True
+
+    left_tokens = set(_normalize_campaign_identity_tokens(left))
+    right_tokens = set(_normalize_campaign_identity_tokens(right))
+    if not left_tokens or not right_tokens:
+        return False
+    if left_tokens == right_tokens:
+        return True
+
+    shared_tokens = left_tokens & right_tokens
+    smaller_token_count = min(len(left_tokens), len(right_tokens))
+    return smaller_token_count >= 2 and len(shared_tokens) == smaller_token_count
+
+
+def _parse_campaign_date_suffix(value: str) -> datetime | None:
+    match = re.search(r" - ([A-Za-z]+ \d{1,2}(?:st|nd|rd|th) \d{4})$", value.strip())
+    if not match:
+        return None
+    normalized = re.sub(r"(\d{1,2})(st|nd|rd|th)", r"\1", match.group(1))
+    try:
+        return datetime.strptime(normalized, "%B %d %Y")
+    except ValueError:
+        return None
+
+
+def _parse_campaign_name_and_date(value: str) -> tuple[str, datetime | None]:
+    candidate = str(value or "").strip()
+    if not candidate:
+        return "", None
+    parsed_date = _parse_campaign_date_suffix(candidate)
+    if parsed_date is None:
+        return candidate, None
+    return candidate.rsplit(" - ", 1)[0].strip(), parsed_date
+
+
+def _find_matching_smartlead_campaign(show: Show, campaigns: list[dict[str, object]]) -> dict[str, object] | None:
+    desired_name = _show_campaign_name(show)
+    for campaign in campaigns:
+        if str(campaign.get("name", "")).strip() == desired_name:
+            return campaign
+
+    for campaign in campaigns:
+        campaign_name = str(campaign.get("name", "")).strip()
+        if not campaign_name:
+            continue
+        parsed_name, parsed_date = _parse_campaign_name_and_date(campaign_name)
+        if parsed_date is None:
+            continue
+        if abs((parsed_date.date() - show.event_date).days) > DUPLICATE_CAMPAIGN_DATE_WINDOW_DAYS:
+            continue
+        if _campaign_names_match(parsed_name, show.name):
+            return campaign
+    return None
+
+
 def _extract_smartlead_data(payload: object) -> object:
     if isinstance(payload, dict) and "data" in payload:
         return payload["data"]
@@ -838,21 +922,20 @@ def ensure_smartlead_campaign(show: Show, *, force_rebuild: bool = False) -> Sma
             )
 
         if not force_rebuild:
-            for campaign in _list_smartlead_campaigns():
-                if str(campaign.get("name", "")).strip() != desired_name:
-                    continue
-                campaign_id = campaign.get("id")
-                if campaign_id is None:
-                    continue
-                show.smartlead_campaign_id = int(campaign_id)
-                show.smartlead_campaign_name = desired_name
-                return SmartleadSyncResult(
-                    "smartlead",
-                    "success",
-                    f"Reused existing Smartlead campaign {campaign_id}.",
-                    campaign_id=show.smartlead_campaign_id,
-                    campaign_name=show.smartlead_campaign_name,
-                )
+            existing_campaign = _find_matching_smartlead_campaign(show, _list_smartlead_campaigns())
+            if existing_campaign:
+                campaign_id = existing_campaign.get("id")
+                if campaign_id is not None:
+                    existing_name = str(existing_campaign.get("name", "")).strip() or desired_name
+                    show.smartlead_campaign_id = int(campaign_id)
+                    show.smartlead_campaign_name = existing_name
+                    return SmartleadSyncResult(
+                        "smartlead",
+                        "success",
+                        f"Reused existing Smartlead campaign {campaign_id}.",
+                        campaign_id=show.smartlead_campaign_id,
+                        campaign_name=show.smartlead_campaign_name,
+                    )
 
         payload: dict[str, object] = {"name": desired_name}
         client_id = _smartlead_client_id()

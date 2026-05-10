@@ -1126,6 +1126,39 @@ class AutomationTests(unittest.TestCase):
         self.assertEqual(result.campaign_id, 654)
         self.assertIn(("/campaigns/create"), [path for _method, path, _payload in request_calls])
 
+    def test_ensure_smartlead_campaign_reuses_similar_existing_campaign_with_nearby_date(self) -> None:
+        show = make_show(name="Sweets & Snacks", event_date=date(2026, 5, 18))
+
+        with patch.dict(
+            os.environ,
+            {
+                "SMARTLEAD_API_KEY": "test-key",
+                "SMARTLEAD_TEMPLATE_CAMPAIGN_ID": "999",
+            },
+        ):
+            get_settings.cache_clear()
+            try:
+                with (
+                    patch(
+                        "app.providers._list_smartlead_campaigns",
+                        return_value=[
+                            {
+                                "id": 4321,
+                                "name": "Sweets & Snacks Expo - May 19th 2026",
+                            }
+                        ],
+                    ),
+                    patch("app.providers._smartlead_request") as request_mock,
+                ):
+                    result = ensure_smartlead_campaign(show)
+            finally:
+                get_settings.cache_clear()
+
+        self.assertEqual(result.status, "success")
+        self.assertEqual(result.campaign_id, 4321)
+        self.assertEqual(result.campaign_name, "Sweets & Snacks Expo - May 19th 2026")
+        request_mock.assert_not_called()
+
     def test_scan_upcoming_trade_shows_route_returns_candidates(self) -> None:
         from app.main import scan_upcoming_trade_shows_route
 
