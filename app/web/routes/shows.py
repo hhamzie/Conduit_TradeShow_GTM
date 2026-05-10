@@ -40,6 +40,7 @@ from app.services import (
     purge_show,
     QueuedBulkShow,
     queue_show_now,
+    remove_show_from_queue,
     record_manual_trade_show_scan,
     start_outbound_campaign,
     sync_show_from_clay,
@@ -334,6 +335,47 @@ def delete_selected_shows(
     return RedirectResponse(target_path, status_code=status.HTTP_303_SEE_OTHER)
 
 
+@router.post("/show-bulk/remove")
+def remove_selected_shows_from_queue(
+    request: Request,
+    show_ids: list[int] = Form(default_factory=list),
+    next_path: str = Form("/workflow"),
+    db: Session = Depends(get_db),
+):
+    require_authenticated(request)
+    target_path = _sanitize_next_path(next_path, fallback="/workflow")
+    unique_ids = list(dict.fromkeys(show_ids))
+    if not unique_ids:
+        request.session["flash_message"] = {
+            "tone": "warning",
+            "title": "No shows selected.",
+            "detail": "Select at least one show first.",
+        }
+        return RedirectResponse(target_path, status_code=status.HTTP_303_SEE_OTHER)
+
+    removed = 0
+    skipped = 0
+    for show_id in unique_ids:
+        show = get_show(db, show_id)
+        if show is None:
+            continue
+        if remove_show_from_queue(db, show):
+            removed += 1
+        else:
+            skipped += 1
+    db.commit()
+    request.session["flash_message"] = {
+        "tone": "success" if skipped == 0 else "warning",
+        "title": "Selected shows removed." if removed else "Nothing removed.",
+        "detail": (
+            f"Removed {removed} show(s) from the active queue."
+            if skipped == 0
+            else f"Removed {removed} show(s). Skipped {skipped} show(s) that are already scraping."
+        ),
+    }
+    return RedirectResponse(target_path, status_code=status.HTTP_303_SEE_OTHER)
+
+
 @router.post("/show-bulk/scrape")
 def scrape_selected_shows(
     request: Request,
@@ -460,6 +502,24 @@ def create_smartlead_campaign_route(show_id: int, request: Request, db: Session 
         "detail": result.message,
     }
     return RedirectResponse("/shows/dashboard", status_code=status.HTTP_303_SEE_OTHER)
+
+
+@router.post("/shows/{show_id}/remove-from-queue")
+def remove_show_from_queue_route(show_id: int, request: Request, db: Session = Depends(get_db)):
+    require_authenticated(request)
+    show = _get_show_or_404(db, show_id)
+    removed = remove_show_from_queue(db, show)
+    db.commit()
+    request.session["flash_message"] = {
+        "tone": "success" if removed else "warning",
+        "title": "Show removed." if removed else "Show still scraping.",
+        "detail": (
+            f"Removed {show.name} from the active scrape queue."
+            if removed
+            else f"{show.name} is already scraping and cannot be removed right now."
+        ),
+    }
+    return RedirectResponse("/workflow", status_code=status.HTTP_303_SEE_OTHER)
 
 
 @router.post("/shows/{show_id}/smartlead/rebuild")

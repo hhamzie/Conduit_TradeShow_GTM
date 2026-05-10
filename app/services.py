@@ -1652,6 +1652,28 @@ def queue_show_now(db: Session, show: Show) -> None:
     db.commit()
 
 
+def remove_show_from_queue(db: Session, show: Show, *, now: datetime | None = None) -> bool:
+    now = now or datetime.now()
+    if show.status == ShowStatus.scraping.value:
+        return False
+
+    queued_or_running_runs = [
+        run
+        for run in list(show.runs)
+        if run.status in {RunStatus.queued.value, RunStatus.running.value}
+    ]
+    for run in queued_or_running_runs:
+        if run in show.runs:
+            show.runs.remove(run)
+        db.delete(run)
+
+    show.status = ShowStatus.waiting.value
+    baseline_run_at = show.run_at or now
+    deferred_run_at = now + timedelta(days=1)
+    show.run_at = baseline_run_at if baseline_run_at > deferred_run_at else deferred_run_at
+    return True
+
+
 def _normalize_enriched_key(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", "_", value.strip().lower()).strip("_")
 

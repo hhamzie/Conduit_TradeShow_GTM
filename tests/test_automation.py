@@ -20,7 +20,7 @@ from app.config import get_settings
 from app.database import Base
 from app.models import AutomationCheckpoint, CampaignRun, ClaySyncRow, RunStatus, Show, ShowGuideRow, ShowStatus
 from app.providers import ClayPollResult, ClayRecord, ProviderResult, SmartleadSyncResult, ensure_smartlead_campaign
-from app.services import _build_prepared_lead, BulkDirectScrapeResult, DirectScrapeResult, launch_show, list_shows, register_bulk_shows, run_bulk_direct_scrape, run_next_campaign, run_show_scrape, run_weekly_show_sync, start_outbound_campaign, sync_show_from_clay, upsert_show
+from app.services import _build_prepared_lead, BulkDirectScrapeResult, DirectScrapeResult, launch_show, list_shows, register_bulk_shows, remove_show_from_queue, run_bulk_direct_scrape, run_next_campaign, run_show_scrape, run_weekly_show_sync, start_outbound_campaign, sync_show_from_clay, upsert_show
 from app.trade_show_feeder import (
     TradeShowScanCandidate,
     TradeShowScanDebug,
@@ -1826,6 +1826,56 @@ class AutomationTests(unittest.TestCase):
             self.assertIsNone(session.get(Show, show.id))
             self.assertEqual(session.scalars(select(ShowGuideRow)).all(), [])
             self.assertEqual(session.scalars(select(ClaySyncRow)).all(), [])
+
+    def test_remove_show_from_queue_resets_status_and_clears_queued_runs(self) -> None:
+        with self.Session() as session:
+            show = make_show(
+                status=ShowStatus.queued.value,
+                run_at=datetime(2026, 5, 10, 8, 0),
+            )
+            session.add(show)
+            session.flush()
+            session.add_all(
+                [
+                    CampaignRun(show=show, status=RunStatus.queued.value),
+                    CampaignRun(show=show, status=RunStatus.running.value),
+                    CampaignRun(show=show, status=RunStatus.success.value),
+                ]
+            )
+            session.commit()
+
+            removed = remove_show_from_queue(session, show, now=datetime(2026, 5, 10, 9, 0))
+            session.commit()
+
+            self.assertTrue(removed)
+            self.assertEqual(show.status, ShowStatus.waiting.value)
+            self.assertEqual(show.run_at, datetime(2026, 5, 11, 9, 0))
+            remaining_statuses = sorted(run.status for run in show.runs)
+            self.assertEqual(remaining_statuses, [RunStatus.success.value])
+
+    def test_remove_show_from_queue_route_keeps_show_and_redirects_workflow(self) -> None:
+        from app.main import remove_show_from_queue_route
+
+        request = type("Req", (), {"session": {}})()
+        with self.Session() as session:
+            show = make_show(
+                status=ShowStatus.queued.value,
+                run_at=datetime(2026, 5, 10, 8, 0),
+            )
+            session.add(show)
+            session.flush()
+            session.add(CampaignRun(show=show, status=RunStatus.queued.value))
+            session.commit()
+
+            with patch("app.web.routes.shows.require_authenticated"):
+                response = remove_show_from_queue_route(show_id=show.id, request=request, db=session)
+
+            self.assertEqual(response.status_code, 303)
+            self.assertEqual(response.headers["location"], "/workflow")
+            refreshed = session.get(Show, show.id)
+            assert refreshed is not None
+            self.assertEqual(refreshed.status, ShowStatus.waiting.value)
+            self.assertEqual(request.session["flash_message"]["title"], "Show removed.")
 
     def test_delete_show_leads_route_removes_selected_export_rows(self) -> None:
         from app.main import delete_show_leads
