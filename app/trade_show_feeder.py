@@ -77,6 +77,7 @@ class TradeShowScanPassDebug:
     pass_label: str
     model_used: str
     raw_count: int
+    source_count: int
     accepted_count: int
     filtered_missing_fields: int
     filtered_non_physical: int
@@ -84,6 +85,7 @@ class TradeShowScanPassDebug:
     filtered_duplicate: int
     remapped_to_curated_source: int
     sample_links: tuple[str, ...]
+    sample_sources: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -112,6 +114,7 @@ class CuratedTradeShowSource:
 class TradeShowScanPassResponse:
     raw_shows: list[dict[str, object]]
     model_used: str
+    sources: tuple[str, ...]
 
 
 SCAN_MODEL_FALLBACKS = ("gpt-4.1-mini", "gpt-4.1")
@@ -272,6 +275,8 @@ def is_b2b_physical_goods_show(show_name: str, source_url: str = "") -> bool:
 def _build_scan_web_search_tool(model: str) -> dict[str, object]:
     tool: dict[str, object] = {
         "type": "web_search",
+        "external_web_access": True,
+        "search_context_size": "medium",
         "user_location": {
             "type": "approximate",
             "country": "US",
@@ -371,7 +376,8 @@ def scan_upcoming_trade_shows_with_debug(
     )
 
     request_payload = {
-        "tool_choice": "auto",
+        "tool_choice": "required",
+        "include": ["web_search_call.action.sources"],
         "text": {
             "format": {
                 "type": "json_schema",
@@ -408,6 +414,7 @@ def scan_upcoming_trade_shows_with_debug(
         filtered_duplicate = 0
         remapped_to_curated_source = 0
         sample_links: list[str] = []
+        sample_sources = list(pass_response.sources[:3])
 
         for item in raw_shows:
             if not isinstance(item, dict):
@@ -452,6 +459,7 @@ def scan_upcoming_trade_shows_with_debug(
                         pass_label=pass_label,
                         model_used=pass_response.model_used,
                         raw_count=len(raw_shows),
+                        source_count=len(pass_response.sources),
                         accepted_count=len(candidates),
                         filtered_missing_fields=filtered_missing_fields,
                         filtered_non_physical=filtered_non_physical,
@@ -459,6 +467,7 @@ def scan_upcoming_trade_shows_with_debug(
                         filtered_duplicate=filtered_duplicate,
                         remapped_to_curated_source=remapped_to_curated_source,
                         sample_links=tuple(sample_links),
+                        sample_sources=tuple(sample_sources),
                     )
                 )
                 return TradeShowScanRunResult(
@@ -476,6 +485,7 @@ def scan_upcoming_trade_shows_with_debug(
                 pass_label=pass_label,
                 model_used=pass_response.model_used,
                 raw_count=len(raw_shows),
+                source_count=len(pass_response.sources),
                 accepted_count=len(candidates),
                 filtered_missing_fields=filtered_missing_fields,
                 filtered_non_physical=filtered_non_physical,
@@ -483,6 +493,7 @@ def scan_upcoming_trade_shows_with_debug(
                 filtered_duplicate=filtered_duplicate,
                 remapped_to_curated_source=remapped_to_curated_source,
                 sample_links=tuple(sample_links),
+                sample_sources=tuple(sample_sources),
             )
         )
         if candidates:
@@ -564,17 +575,42 @@ def _run_trade_show_scan_pass(
     if body is None:
         if last_error is not None:
             raise _build_trade_show_scan_error(last_error) from last_error
-        return TradeShowScanPassResponse(raw_shows=[], model_used=used_model)
+        return TradeShowScanPassResponse(raw_shows=[], model_used=used_model, sources=())
 
     text = extract_text_from_openai_response(body)
+    sources = tuple(_extract_web_search_sources(body))
     if not text:
-        return TradeShowScanPassResponse(raw_shows=[], model_used=used_model)
+        return TradeShowScanPassResponse(raw_shows=[], model_used=used_model, sources=sources)
     parsed = json.loads(text)
     raw_shows = parsed.get("shows", []) if isinstance(parsed, dict) else []
     return TradeShowScanPassResponse(
         raw_shows=raw_shows if isinstance(raw_shows, list) else [],
         model_used=used_model,
+        sources=sources,
     )
+
+
+def _extract_web_search_sources(payload: dict[str, object]) -> list[str]:
+    sources: list[str] = []
+    output = payload.get("output")
+    if not isinstance(output, list):
+        return sources
+    for item in output:
+        if not isinstance(item, dict) or item.get("type") != "web_search_call":
+            continue
+        action = item.get("action")
+        if not isinstance(action, dict):
+            continue
+        action_sources = action.get("sources")
+        if not isinstance(action_sources, list):
+            continue
+        for source in action_sources:
+            if not isinstance(source, dict):
+                continue
+            url = str(source.get("url") or "").strip()
+            if url:
+                sources.append(url)
+    return sources
 
 
 def _should_retry_scan_with_fallback(error: httpx.HTTPStatusError) -> bool:

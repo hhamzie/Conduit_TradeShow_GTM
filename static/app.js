@@ -632,6 +632,7 @@ function renderScanDebug(debug) {
           </div>
           <div class="scan-debug-metrics">
             <span>Raw ${pass.raw_count || 0}</span>
+            <span>Sources ${pass.source_count || 0}</span>
             <span>Accepted ${pass.accepted_count || 0}</span>
             <span>Missing ${pass.filtered_missing_fields || 0}</span>
             <span>Not physical ${pass.filtered_non_physical || 0}</span>
@@ -640,8 +641,15 @@ function renderScanDebug(debug) {
             <span>Remapped ${pass.remapped_to_curated_source || 0}</span>
           </div>
           ${
-            sampleLinks.length
-              ? `<div class="scan-debug-links">${sampleLinks
+            sampleLinks.length || (Array.isArray(pass.sample_sources) && pass.sample_sources.length)
+              ? `<div class="scan-debug-links">${
+                  Array.isArray(pass.sample_sources)
+                    ? pass.sample_sources
+                        .slice(0, 3)
+                        .map((link) => `<a href="${link}" target="_blank" rel="noreferrer">${link}</a>`)
+                        .join("")
+                    : ""
+                }${sampleLinks
                   .slice(0, 3)
                   .map((link) => `<a href="${link}" target="_blank" rel="noreferrer">${link}</a>`)
                   .join("")}</div>`

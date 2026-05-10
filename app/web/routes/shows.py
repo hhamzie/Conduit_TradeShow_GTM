@@ -111,6 +111,7 @@ def _serialize_scan_debug(debug) -> dict[str, object]:
                 "pass_label": report.pass_label,
                 "model_used": report.model_used,
                 "raw_count": report.raw_count,
+                "source_count": report.source_count,
                 "accepted_count": report.accepted_count,
                 "filtered_missing_fields": report.filtered_missing_fields,
                 "filtered_non_physical": report.filtered_non_physical,
@@ -118,6 +119,7 @@ def _serialize_scan_debug(debug) -> dict[str, object]:
                 "filtered_duplicate": report.filtered_duplicate,
                 "remapped_to_curated_source": report.remapped_to_curated_source,
                 "sample_links": list(report.sample_links),
+                "sample_sources": list(report.sample_sources),
             }
             for report in debug.pass_reports
         ],

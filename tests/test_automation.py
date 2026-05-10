@@ -104,6 +104,7 @@ def make_scan_run_result(*candidates: TradeShowScanCandidate) -> TradeShowScanRu
                     pass_label="broad_scan",
                     model_used="gpt-4.1-mini",
                     raw_count=len(candidates),
+                    source_count=1 if candidates else 0,
                     accepted_count=len(candidates),
                     filtered_missing_fields=0,
                     filtered_non_physical=0,
@@ -111,6 +112,7 @@ def make_scan_run_result(*candidates: TradeShowScanCandidate) -> TradeShowScanRu
                     filtered_duplicate=0,
                     remapped_to_curated_source=0,
                     sample_links=tuple(candidate.link for candidate in candidates[:3]),
+                    sample_sources=tuple(candidate.link for candidate in candidates[:3]),
                 ),
             ),
         ),
@@ -1006,13 +1008,19 @@ class AutomationTests(unittest.TestCase):
         self.assertEqual(candidates[0].show_name, "High Point Market")
         self.assertEqual(post_mock.call_args_list[0].kwargs["json"]["model"], "gpt-5")
         self.assertEqual(post_mock.call_args_list[1].kwargs["json"]["model"], "gpt-4.1-mini")
+        self.assertEqual(post_mock.call_args_list[0].kwargs["json"]["tool_choice"], "required")
+        self.assertEqual(post_mock.call_args_list[0].kwargs["json"]["include"], ["web_search_call.action.sources"])
         first_tool = post_mock.call_args_list[0].kwargs["json"]["tools"][0]
         second_tool = post_mock.call_args_list[1].kwargs["json"]["tools"][0]
         self.assertIn("tsnn.com", first_tool["filters"]["allowed_domains"])
         self.assertIn("highpointmarket.org", first_tool["filters"]["allowed_domains"])
         self.assertIn("thecarwashshow.com", first_tool["filters"]["allowed_domains"])
+        self.assertTrue(first_tool["external_web_access"])
+        self.assertEqual(first_tool["search_context_size"], "medium")
         self.assertEqual(first_tool["user_location"]["country"], "US")
         self.assertNotIn("filters", second_tool)
+        self.assertTrue(second_tool["external_web_access"])
+        self.assertEqual(second_tool["search_context_size"], "medium")
         self.assertEqual(second_tool["user_location"]["country"], "US")
 
     def test_scan_upcoming_trade_shows_uses_follow_up_passes_when_first_pass_is_empty(self) -> None:
