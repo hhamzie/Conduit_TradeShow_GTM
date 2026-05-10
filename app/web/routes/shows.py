@@ -11,6 +11,7 @@ from starlette import status
 
 from app.config import get_settings
 from app.core.auth import can_manage, require_authenticated
+from app.core.bulk_jobs import bulk_scrape_jobs
 from app.core.templating import template_context, templates
 from app.database import get_db
 from app.guide_services import (
@@ -33,6 +34,7 @@ from app.services import (
     list_shows,
     manual_trade_show_scan_already_ran_today,
     pause_show,
+    QueuedBulkShow,
     queue_show_now,
     record_manual_trade_show_scan,
     start_outbound_campaign,
@@ -418,6 +420,7 @@ def scan_upcoming_trade_shows_route(
 def confirm_scanned_trade_shows_route(
     request: Request,
     candidates_json: str = Form(...),
+    scrape_after_add: str = Form("false"),
     db: Session = Depends(get_db),
 ):
     require_authenticated(request)
@@ -427,10 +430,13 @@ def confirm_scanned_trade_shows_route(
         raise HTTPException(status_code=400, detail="Invalid scan payload.") from exc
     if not isinstance(payload, list):
         raise HTTPException(status_code=400, detail="Invalid scan payload.")
+    if not payload:
+        raise HTTPException(status_code=400, detail="Select at least one scanned show.")
 
     created = 0
     updated = 0
     skipped = 0
+    queued_shows: list[QueuedBulkShow] = []
     for item in payload:
         if not isinstance(item, dict):
             skipped += 1
@@ -443,7 +449,7 @@ def confirm_scanned_trade_shows_route(
             skipped += 1
             continue
         try:
-            _show, created_now = upsert_show(
+            show, created_now = upsert_show(
                 db,
                 show_name=show_name,
                 event_date_raw=event_date_raw,
@@ -458,14 +464,34 @@ def confirm_scanned_trade_shows_route(
             created += 1
         else:
             updated += 1
+        queued_shows.append(
+            QueuedBulkShow(
+                show_id=show.id,
+                show_name=show.name,
+                event_date_raw=show.event_date.isoformat(),
+                place=show.place,
+                link=show.source_url,
+            )
+        )
 
     db.commit()
+    should_scrape = str(scrape_after_add).strip().lower() in {"1", "true", "yes"}
+    job_id = ""
+    if should_scrape and queued_shows:
+        job_id = bulk_scrape_jobs.start_job(
+            b"",
+            run_offset_days=get_settings().default_run_offset_days,
+            queued_shows=queued_shows,
+        )
     request.session["flash_message"] = {
         "tone": "success",
         "title": "Trade show scan applied.",
-        "detail": f"Added {created}, updated {updated}, skipped {skipped}.",
+        "detail": (
+            f"Added {created}, updated {updated}, skipped {skipped}. "
+            f"{'Started scrape for selected shows.' if should_scrape and queued_shows else ''}"
+        ).strip(),
     }
-    return JSONResponse({"ok": True, "redirect": "/shows/dashboard"})
+    return JSONResponse({"ok": True, "redirect": "/shows/dashboard", "job_id": job_id})
 
 
 @router.post("/shows/{show_id}/run-now")

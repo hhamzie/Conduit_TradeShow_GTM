@@ -240,12 +240,14 @@
     </div>
     <div class="scan-results" data-scan-results hidden>
       <p class="confirm-modal-copy" data-scan-message></p>
+      <p class="scan-selection-copy" data-scan-selection-count hidden></p>
       <div class="scan-result-list" data-scan-list></div>
       <form action="/shows/scan-upcoming/confirm" method="post" data-scan-confirm-form>
         <input type="hidden" name="candidates_json" value="" data-scan-payload />
         <div class="confirm-modal-actions">
           <button class="button secondary" type="button" data-scan-close>Close</button>
-          <button class="button" type="submit" data-scan-confirm>Add found shows</button>
+          <button class="button secondary subtle" type="submit" name="scrape_after_add" value="false" data-scan-confirm>Add selected</button>
+          <button class="button" type="submit" name="scrape_after_add" value="true" data-scan-confirm-scrape>Add + scrape selected</button>
         </div>
       </form>
     </div>

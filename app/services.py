@@ -449,6 +449,91 @@ def _run_direct_scrape(
     output_path: Path,
     require_website: bool = True,
     browser_mode: str = "auto",
+    agent_mode: str = "fallback",
+    workers: int | None = None,
+) -> DirectScrapeResult:
+    settings = get_settings()
+    minimum_company_count = settings.min_scrape_company_count
+    attempt_specs = (
+        {
+            "browser_mode": browser_mode,
+            "agent_mode": agent_mode,
+            "require_website": require_website,
+            "label": "default",
+        },
+        {
+            "browser_mode": "prefer",
+            "agent_mode": "fallback",
+            "require_website": True,
+            "label": "browser_retry",
+        },
+        {
+            "browser_mode": "prefer",
+            "agent_mode": "always",
+            "require_website": True,
+            "label": "agent_retry",
+        },
+        {
+            "browser_mode": "prefer",
+            "agent_mode": "always",
+            "require_website": False,
+            "label": "agent_retry_relaxed",
+        },
+    )
+    best_result: DirectScrapeResult | None = None
+    failure_messages: list[str] = []
+    seen_attempts: set[tuple[str, str, bool]] = set()
+    for attempt in attempt_specs:
+        attempt_key = (
+            str(attempt["browser_mode"]),
+            str(attempt["agent_mode"]),
+            bool(attempt["require_website"]),
+        )
+        if attempt_key in seen_attempts:
+            continue
+        seen_attempts.add(attempt_key)
+        try:
+            result = _run_direct_scrape_once(
+                show_name=show_name,
+                place=place,
+                link=link,
+                output_path=output_path,
+                require_website=bool(attempt["require_website"]),
+                browser_mode=str(attempt["browser_mode"]),
+                agent_mode=str(attempt["agent_mode"]),
+                workers=workers,
+            )
+        except Exception as exc:  # noqa: BLE001
+            failure_messages.append(f"{attempt['label']}: {exc}")
+            continue
+        if best_result is None or result.company_count > best_result.company_count:
+            best_result = result
+        if result.company_count >= minimum_company_count:
+            return result
+        failure_messages.append(
+            f"{attempt['label']}: only found {result.company_count} exhibitors"
+        )
+
+    if best_result is not None:
+        raise RuntimeError(
+            f"Scrape quality gate failed for {show_name}. "
+            f"Best attempt found {best_result.company_count} exhibitors; need at least {minimum_company_count}. "
+            f"Attempts: {'; '.join(failure_messages)}"
+        )
+    raise RuntimeError(
+        f"Scrape failed for {show_name}. Attempts: {'; '.join(failure_messages) or 'no successful scrape attempt'}"
+    )
+
+
+def _run_direct_scrape_once(
+    *,
+    show_name: str,
+    place: str,
+    link: str,
+    output_path: Path,
+    require_website: bool = True,
+    browser_mode: str = "auto",
+    agent_mode: str = "fallback",
     workers: int | None = None,
 ) -> DirectScrapeResult:
     settings = get_settings()
@@ -462,6 +547,7 @@ def _run_direct_scrape(
             sample_size=settings.default_sample_size,
             browser_mode=browser_mode,
             browser_timeout_ms=settings.default_browser_timeout_ms,
+            agent_mode=agent_mode,
             conference_name=show_name.strip(),
             conference_location=place.strip(),
             require_website=require_website,

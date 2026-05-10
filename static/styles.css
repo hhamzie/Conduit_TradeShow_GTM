@@ -1338,7 +1338,7 @@ button.button.subtle {
 .scan-result-list {
   display: grid;
   gap: 10px;
-  max-height: 360px;
+  max-height: 272px;
   overflow: auto;
   padding-right: 4px;
 }
@@ -1350,6 +1350,26 @@ button.button.subtle {
   border: 1px solid var(--line);
   border-radius: 14px;
   background: #ffffff;
+}
+
+.scan-result-option {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: start;
+  gap: 12px;
+  cursor: pointer;
+}
+
+.scan-result-body {
+  display: grid;
+  gap: 4px;
+}
+
+.scan-selection-copy {
+  margin: 0 0 10px;
+  font-size: 0.84rem;
+  font-weight: 700;
+  color: var(--muted);
 }
 
 .scan-result-card p {

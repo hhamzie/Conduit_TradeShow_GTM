@@ -1288,6 +1288,89 @@ class AutomationTests(unittest.TestCase):
             self.assertEqual(shows[0].name, "High Point Market")
             self.assertEqual(request.session["flash_message"]["title"], "Trade show scan applied.")
 
+    def test_confirm_scanned_trade_shows_route_can_start_scrape_job(self) -> None:
+        from app.main import confirm_scanned_trade_shows_route
+
+        request = type("Req", (), {"session": {}})()
+        payload = json.dumps(
+            [
+                {
+                    "show_name": "Atlanta Market",
+                    "event_date_raw": "2026-06-09",
+                    "place": "Atlanta, GA",
+                    "link": "https://www.atlantamarket.com/exhibitor/exhibitor-directory",
+                    "summary": "Wholesale market.",
+                }
+            ]
+        )
+        with self.Session() as session:
+            with (
+                patch("app.web.routes.shows.require_authenticated"),
+                patch("app.web.routes.shows.bulk_scrape_jobs.start_job", return_value="job-123") as start_job_mock,
+            ):
+                response = confirm_scanned_trade_shows_route(
+                    request=request,
+                    candidates_json=payload,
+                    scrape_after_add="true",
+                    db=session,
+                )
+
+            self.assertEqual(response.status_code, 200)
+            self.assertIn(b'"job_id":"job-123"', response.body)
+            self.assertIn("Started scrape", request.session["flash_message"]["detail"])
+            self.assertEqual(start_job_mock.call_count, 1)
+
+    def test_run_direct_scrape_retries_until_minimum_company_count_is_met(self) -> None:
+        from app.services import _run_direct_scrape
+
+        with patch.dict(os.environ, {"MIN_SCRAPE_COMPANY_COUNT": "51"}):
+            get_settings.cache_clear()
+            try:
+                with patch(
+                    "app.services._run_direct_scrape_once",
+                    side_effect=[
+                        DirectScrapeResult(Path("/tmp/one.csv"), 12, 0, "Show", "Place"),
+                        DirectScrapeResult(Path("/tmp/two.csv"), 44, 0, "Show", "Place"),
+                        DirectScrapeResult(Path("/tmp/three.csv"), 63, 0, "Show", "Place"),
+                    ],
+                ) as scrape_once_mock:
+                    result = _run_direct_scrape(
+                        show_name="Show",
+                        place="Place",
+                        link="https://example.com",
+                        output_path=Path("/tmp/output.csv"),
+                    )
+            finally:
+                get_settings.cache_clear()
+
+        self.assertEqual(result.company_count, 63)
+        self.assertEqual(scrape_once_mock.call_count, 3)
+
+    def test_run_direct_scrape_fails_when_all_attempts_stay_under_threshold(self) -> None:
+        from app.services import _run_direct_scrape
+
+        with patch.dict(os.environ, {"MIN_SCRAPE_COMPANY_COUNT": "51"}):
+            get_settings.cache_clear()
+            try:
+                with patch(
+                    "app.services._run_direct_scrape_once",
+                    side_effect=[
+                        DirectScrapeResult(Path("/tmp/one.csv"), 12, 0, "Show", "Place"),
+                        DirectScrapeResult(Path("/tmp/two.csv"), 18, 0, "Show", "Place"),
+                        DirectScrapeResult(Path("/tmp/three.csv"), 23, 0, "Show", "Place"),
+                        DirectScrapeResult(Path("/tmp/four.csv"), 39, 0, "Show", "Place"),
+                    ],
+                ):
+                    with self.assertRaisesRegex(RuntimeError, "need at least 51"):
+                        _run_direct_scrape(
+                            show_name="Show",
+                            place="Place",
+                            link="https://example.com",
+                            output_path=Path("/tmp/output.csv"),
+                        )
+            finally:
+                get_settings.cache_clear()
+
     def test_build_trade_show_guide_route_populates_rows_from_export(self) -> None:
         from app.main import build_trade_show_guide_route
 

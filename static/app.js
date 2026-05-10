@@ -589,22 +589,63 @@ function initializeOutboundModal() {
 
 function renderScanResults(candidates) {
   return candidates
-    .map((candidate) => {
+    .map((candidate, index) => {
       const name = candidate.show_name || "Untitled show";
       const date = candidate.event_date_raw || candidate.event_date || "";
       const place = candidate.place || "";
       const link = candidate.link || "";
       const summary = candidate.summary || "";
       return `
-        <article class="scan-result-card">
-          <strong>${name}</strong>
-          <span class="muted">${date}${place ? ` · ${place}` : ""}</span>
-          ${summary ? `<p>${summary}</p>` : ""}
-          ${link ? `<a href="${link}" target="_blank" rel="noreferrer">${link}</a>` : ""}
-        </article>
+        <label class="scan-result-card scan-result-option">
+          <span class="selector-control" aria-hidden="true">
+            <input type="checkbox" data-scan-candidate-index="${index}" checked />
+            <span></span>
+          </span>
+          <span class="scan-result-body">
+            <strong>${name}</strong>
+            <span class="muted">${date}${place ? ` · ${place}` : ""}</span>
+            ${summary ? `<p>${summary}</p>` : ""}
+            ${link ? `<a href="${link}" target="_blank" rel="noreferrer">${link}</a>` : ""}
+          </span>
+        </label>
       `;
     })
     .join("");
+}
+
+function updateScanSelectionState(modal) {
+  if (!(modal instanceof HTMLElement)) {
+    return;
+  }
+
+  const candidates = Array.isArray(modal._scanCandidates) ? modal._scanCandidates : [];
+  const selectedIndexes = Array.from(modal.querySelectorAll("[data-scan-candidate-index]"))
+    .filter((input) => input instanceof HTMLInputElement && input.checked)
+    .map((input) => Number.parseInt(input.dataset.scanCandidateIndex || "", 10))
+    .filter((index) => Number.isInteger(index) && index >= 0 && index < candidates.length);
+  const selectedCandidates = selectedIndexes.map((index) => candidates[index]);
+
+  const payloadField = modal.querySelector("[data-scan-payload]");
+  if (payloadField instanceof HTMLInputElement) {
+    payloadField.value = JSON.stringify(selectedCandidates);
+  }
+
+  const selectionCount = modal.querySelector("[data-scan-selection-count]");
+  if (selectionCount instanceof HTMLElement) {
+    selectionCount.hidden = candidates.length === 0;
+    selectionCount.textContent = `${selectedCandidates.length} of ${candidates.length} selected`;
+  }
+
+  const addButton = modal.querySelector("[data-scan-confirm]");
+  const scrapeButton = modal.querySelector("[data-scan-confirm-scrape]");
+  if (addButton instanceof HTMLButtonElement) {
+    addButton.disabled = selectedCandidates.length === 0;
+    addButton.textContent = `Add ${selectedCandidates.length || 0}`;
+  }
+  if (scrapeButton instanceof HTMLButtonElement) {
+    scrapeButton.disabled = selectedCandidates.length === 0;
+    scrapeButton.textContent = `Add + scrape ${selectedCandidates.length || 0}`;
+  }
 }
 
 function prettifyScanPassLabel(value) {
@@ -679,6 +720,7 @@ function resetScanModalState(modal) {
   const elapsed = modal.querySelector("[data-scan-elapsed]");
   const debugPanel = modal.querySelector("[data-scan-debug]");
   const debugBody = modal.querySelector("[data-scan-debug-body]");
+  const selectionCount = modal.querySelector("[data-scan-selection-count]");
   if (results instanceof HTMLElement) {
     results.hidden = true;
   }
@@ -708,6 +750,11 @@ function resetScanModalState(modal) {
   if (debugBody instanceof HTMLElement) {
     debugBody.innerHTML = "";
   }
+  if (selectionCount instanceof HTMLElement) {
+    selectionCount.hidden = true;
+    selectionCount.textContent = "";
+  }
+  modal._scanCandidates = [];
 }
 
 function openScanModal() {
@@ -739,7 +786,6 @@ async function handleScanSubmit(event) {
   const list = modal ? modal.querySelector("[data-scan-list]") : null;
   const payloadField = modal ? modal.querySelector("[data-scan-payload]") : null;
   const message = modal ? modal.querySelector("[data-scan-message]") : null;
-  const confirmButton = modal ? modal.querySelector("[data-scan-confirm]") : null;
   const progress = modal ? modal.querySelector("[data-scan-progress]") : null;
   const elapsed = modal ? modal.querySelector("[data-scan-elapsed]") : null;
   const debugPanel = modal ? modal.querySelector("[data-scan-debug]") : null;
@@ -798,12 +844,15 @@ async function handleScanSubmit(event) {
     if (list instanceof HTMLElement) {
       list.innerHTML = renderScanResults(candidates);
     }
+    if (modal instanceof HTMLElement) {
+      modal._scanCandidates = candidates;
+      modal.querySelectorAll("[data-scan-candidate-index]").forEach((input) => {
+        input.addEventListener("change", () => updateScanSelectionState(modal));
+      });
+      updateScanSelectionState(modal);
+    }
     if (payloadField instanceof HTMLInputElement) {
       payloadField.value = JSON.stringify(candidates);
-    }
-    if (confirmButton instanceof HTMLButtonElement) {
-      confirmButton.textContent = `Add ${candidates.length} show${candidates.length === 1 ? "" : "s"}`;
-      confirmButton.disabled = candidates.length === 0;
     }
     if (results instanceof HTMLElement) {
       results.hidden = false;
@@ -828,11 +877,12 @@ async function handleScanSubmit(event) {
 async function handleScanConfirm(event) {
   event.preventDefault();
   const form = event.currentTarget;
+  const submitter = event.submitter instanceof HTMLElement ? event.submitter : null;
   setFormBusyState(form, true, "Adding...");
   try {
     const response = await fetch(form.action, {
       method: "POST",
-      body: new FormData(form),
+      body: submitter ? new FormData(form, submitter) : new FormData(form),
       credentials: "same-origin",
     });
     const payload = await response.json();

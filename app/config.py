@@ -36,6 +36,7 @@ class Settings:
     default_sample_size: int
     default_browser_mode: str
     default_browser_timeout_ms: int
+    min_scrape_company_count: int
     openai_api_key: str
     trade_show_scan_model: str
     deploy_revision: str
@@ -100,6 +101,7 @@ def get_settings() -> Settings:
         default_sample_size=int(os.getenv("DEFAULT_SAMPLE_SIZE", "3")),
         default_browser_mode=os.getenv("DEFAULT_BROWSER_MODE", "auto"),
         default_browser_timeout_ms=int(os.getenv("DEFAULT_BROWSER_TIMEOUT_MS", "25000")),
+        min_scrape_company_count=max(1, int(os.getenv("MIN_SCRAPE_COMPANY_COUNT", "51"))),
         openai_api_key=os.getenv("OPENAI_API_KEY", "").strip(),
         trade_show_scan_model=os.getenv("TRADE_SHOW_SCAN_MODEL", "gpt-5").strip() or "gpt-5",
         deploy_revision=(
