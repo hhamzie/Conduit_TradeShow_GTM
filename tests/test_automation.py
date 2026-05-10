@@ -18,9 +18,9 @@ from sqlalchemy.orm import sessionmaker
 
 from app.config import get_settings
 from app.database import Base
-from app.models import AutomationCheckpoint, ClaySyncRow, RunStatus, Show, ShowGuideRow, ShowStatus
+from app.models import AutomationCheckpoint, CampaignRun, ClaySyncRow, RunStatus, Show, ShowGuideRow, ShowStatus
 from app.providers import ClayPollResult, ClayRecord, ProviderResult, SmartleadSyncResult
-from app.services import _build_prepared_lead, BulkDirectScrapeResult, DirectScrapeResult, launch_show, list_shows, register_bulk_shows, run_bulk_direct_scrape, run_show_scrape, run_weekly_show_sync, start_outbound_campaign, sync_show_from_clay, upsert_show
+from app.services import _build_prepared_lead, BulkDirectScrapeResult, DirectScrapeResult, launch_show, list_shows, register_bulk_shows, run_bulk_direct_scrape, run_next_campaign, run_show_scrape, run_weekly_show_sync, start_outbound_campaign, sync_show_from_clay, upsert_show
 from app.trade_show_feeder import (
     TradeShowScanCandidate,
     TradeShowScanDebug,
@@ -1598,6 +1598,34 @@ class AutomationTests(unittest.TestCase):
                             link="https://example.com",
                             output_path=Path("/tmp/output.csv"),
                         )
+            finally:
+                get_settings.cache_clear()
+
+    def test_run_next_campaign_uses_quality_gate_and_marks_low_result_failed(self) -> None:
+        with patch.dict(os.environ, {"MIN_SCRAPE_COMPANY_COUNT": "40"}):
+            get_settings.cache_clear()
+            try:
+                with self.Session() as session:
+                    show = make_show(
+                        status=ShowStatus.queued.value,
+                        company_count=0,
+                    )
+                    session.add(show)
+                    session.flush()
+                    session.add(CampaignRun(show=show, status=RunStatus.queued.value))
+                    session.commit()
+
+                    with patch(
+                        "app.services._run_direct_scrape",
+                        side_effect=RuntimeError("Best attempt found 39 exhibitors; need at least 40."),
+                    ):
+                        campaign_run = run_next_campaign(session)
+
+                    self.assertIsNotNone(campaign_run)
+                    assert campaign_run is not None
+                    self.assertEqual(campaign_run.status, RunStatus.failed.value)
+                    self.assertEqual(show.status, ShowStatus.failed.value)
+                    self.assertIn("need at least 40", show.last_error)
             finally:
                 get_settings.cache_clear()
 

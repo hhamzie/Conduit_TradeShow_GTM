@@ -47,6 +47,7 @@ from app.services import (
 )
 from app.trade_show_feeder import TradeShowScanError, scan_upcoming_trade_shows_with_debug
 from app.web.presenters import (
+    build_scrape_queue_positions,
     build_show_notice,
     get_run_status_label,
     get_show_status_label,
@@ -135,6 +136,7 @@ def _serialize_scan_debug(debug) -> dict[str, object]:
 @router.get("/shows/dashboard")
 def show_dashboard(request: Request, db: Session = Depends(get_db)):
     shows = list_shows(db)
+    queue_positions, queue_total = build_scrape_queue_positions(shows)
     analyses = build_show_analyses(shows, today=datetime.now().date(), company_limit=8)
     outbound_plans = {analysis.show.id: build_outbound_plan(db, analysis.show) for analysis in analyses}
     return templates.TemplateResponse(
@@ -146,6 +148,8 @@ def show_dashboard(request: Request, db: Session = Depends(get_db)):
             title="Show Dashboard",
             analyses=analyses,
             outbound_plans=outbound_plans,
+            queue_positions=queue_positions,
+            queue_total=queue_total,
             show_status_label_for=get_show_status_label,
             tracked_count=len(analyses),
             upcoming_count=sum(1 for analysis in analyses if analysis.days_until_event >= 0),
@@ -160,6 +164,8 @@ def show_dashboard(request: Request, db: Session = Depends(get_db)):
 @router.get("/shows/{show_id}")
 def show_detail(show_id: int, request: Request, db: Session = Depends(get_db)):
     show = _get_show_or_404(db, show_id)
+    all_shows = list_shows(db)
+    queue_positions, _queue_total = build_scrape_queue_positions(all_shows)
     export_path = Path(show.latest_export_path) if show.latest_export_path else None
     enriched_export_path = Path(show.enriched_export_path) if show.enriched_export_path else None
     smartlead_ready_path = Path(show.smartlead_ready_export_path) if show.smartlead_ready_export_path else None
@@ -173,7 +179,7 @@ def show_detail(show_id: int, request: Request, db: Session = Depends(get_db)):
             context_tab_label=f"{show.name} Profile",
             context_tab_href=f"/shows/{show.id}",
             show=show,
-            show_status_label=get_show_status_label(show.status),
+            show_status_label=get_show_status_label(show.status, queue_positions.get(show.id)),
             run_status_label_for=get_run_status_label,
             analysis=build_show_analysis(show, today=datetime.now().date(), company_limit=60),
             guide_sheets=build_guide_sheet_views(show),

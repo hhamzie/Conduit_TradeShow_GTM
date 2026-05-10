@@ -1904,19 +1904,14 @@ def run_next_campaign(db: Session) -> CampaignRun | None:
     db.commit()
 
     try:
-        result = run_scrape(
-            ScrapeOptions(
-                directory_url=show.source_url,
-                output_path=export_path_for_show(show),
-                workers=get_settings().default_scraper_workers,
-                max_pages=get_settings().default_max_pages,
-                sample_size=get_settings().default_sample_size,
-                browser_mode=get_settings().default_browser_mode,
-                browser_timeout_ms=get_settings().default_browser_timeout_ms,
-                conference_name=show.name,
-                conference_location=show.place,
-                require_website=True,
-            )
+        result = _run_direct_scrape(
+            show_name=show.name,
+            place=show.place,
+            link=show.source_url,
+            output_path=export_path_for_show(show),
+            require_website=True,
+            browser_mode=get_settings().default_browser_mode,
+            workers=get_settings().default_scraper_workers,
         )
     except Exception as exc:  # noqa: BLE001
         campaign_run.status = RunStatus.failed.value
@@ -1930,11 +1925,11 @@ def run_next_campaign(db: Session) -> CampaignRun | None:
     campaign_run.status = RunStatus.success.value
     campaign_run.output_path = str(result.output_path)
     campaign_run.company_count = result.company_count
-    campaign_run.failure_count = result.failures
+    campaign_run.failure_count = result.failure_count
     campaign_run.finished_at = datetime.now()
     show.latest_export_path = str(result.output_path)
     show.company_count = result.company_count
-    show.failure_count = result.failures
+    show.failure_count = result.failure_count
     show.status = ShowStatus.ready_for_review.value
     show.last_error = ""
 

@@ -15,7 +15,7 @@ SHOW_STATUS_LABELS = {
     "ready_for_review": "Populated",
     "approved": "Ready to launch",
     "live": "Live",
-    "failed": "Needs attention",
+    "failed": "Failed scrape",
 }
 RUN_STATUS_LABELS = {
     "queued": "Queued",
@@ -43,6 +43,8 @@ class ShowCard:
     run_timing: str
     provider_summary: str
     status_label: str
+    queue_position: int | None
+    queue_total: int
 
 
 @dataclass(frozen=True)
@@ -84,7 +86,9 @@ def summarize_show_error(error_text: str) -> str:
     return compact
 
 
-def get_show_status_label(status: str) -> str:
+def get_show_status_label(status: str, queue_position: int | None = None) -> str:
+    if status == "queued" and queue_position:
+        return f"#{queue_position} in line"
     return SHOW_STATUS_LABELS.get(status, status.replace("_", " ").title())
 
 
@@ -199,6 +203,32 @@ def format_run_at_label(show: Show, now: datetime) -> str:
     return f"Queues in under an hour · scheduled for {when_label}"
 
 
+def build_scrape_queue_positions(shows: list[Show]) -> tuple[dict[int, int], int]:
+    queue_items: list[tuple[int, datetime, int]] = []
+    for show in shows:
+        if show.status not in {"queued", "scraping"}:
+            continue
+        queued_or_running_runs = [run for run in show.runs if run.status in {RunStatus.queued.value, RunStatus.running.value}]
+        if queued_or_running_runs:
+            sort_at = min(
+                (
+                    run.started_at
+                    or run.created_at
+                    or show.run_at
+                    or datetime.max
+                )
+                for run in queued_or_running_runs
+            )
+        else:
+            sort_at = show.run_at or datetime.max
+        priority = 0 if show.status == "scraping" else 1
+        queue_items.append((priority, sort_at, show.id))
+
+    queue_items.sort(key=lambda item: (item[0], item[1], item[2]))
+    positions = {show_id: index for index, (_priority, _sort_at, show_id) in enumerate(queue_items, start=1)}
+    return positions, len(queue_items)
+
+
 def provider_status_summary(show: Show) -> str:
     if show.clay_status == "complete":
         return f"Clay resolved {show.clay_total_rows} rows and Smartlead processed {show.smartlead_imported_rows}."
@@ -216,7 +246,7 @@ def provider_status_summary(show: Show) -> str:
     return "Clay has nothing to send yet."
 
 
-def describe_show_flow(show: Show, now: datetime) -> dict[str, str]:
+def describe_show_flow(show: Show, now: datetime, *, queue_position: int | None = None, queue_total: int = 0) -> dict[str, str]:
     if show.status == "waiting":
         if show.run_at and show.run_at <= now:
             return {
@@ -231,16 +261,18 @@ def describe_show_flow(show: Show, now: datetime) -> dict[str, str]:
         }
 
     if show.status == "queued":
+        position_label = f"Queue position {queue_position} of {queue_total}" if queue_position else "Queued for scraping"
         return {
             "section": "in_progress",
-            "step": "Queued for worker",
-            "next_action": "The worker should pick this up next.",
+            "step": position_label,
+            "next_action": "The worker scrapes one show at a time and will move to this when earlier queued shows finish.",
         }
 
     if show.status == "scraping":
+        position_label = f"Scraping now · queue position {queue_position} of {queue_total}" if queue_position else "Scrape is running"
         return {
             "section": "in_progress",
-            "step": "Scrape is running",
+            "step": position_label,
             "next_action": "Wait for the export and Clay handoff to finish.",
         }
 
@@ -284,8 +316,8 @@ def describe_show_flow(show: Show, now: datetime) -> dict[str, str]:
     }
 
 
-def build_show_card(show: Show, now: datetime) -> ShowCard:
-    flow = describe_show_flow(show, now)
+def build_show_card(show: Show, now: datetime, *, queue_position: int | None = None, queue_total: int = 0) -> ShowCard:
+    flow = describe_show_flow(show, now, queue_position=queue_position, queue_total=queue_total)
     return ShowCard(
         show=show,
         error_summary=summarize_show_error(show.last_error),
@@ -293,16 +325,23 @@ def build_show_card(show: Show, now: datetime) -> ShowCard:
         step_label=flow["step"],
         next_action=flow["next_action"],
         section=flow["section"],
-        run_timing=format_run_at_label(show, now),
+        run_timing=(
+            f"{queue_position} of {queue_total} in scrape queue"
+            if show.status in {"queued", "scraping"} and queue_position and queue_total
+            else format_run_at_label(show, now)
+        ),
         provider_summary=provider_status_summary(show),
-        status_label=get_show_status_label(show.status),
+        status_label=get_show_status_label(show.status, queue_position),
+        queue_position=queue_position,
+        queue_total=queue_total,
     )
 
 
 def shows_in_section(shows: list[Show], section: str, now: datetime) -> list[Show]:
+    queue_positions, queue_total = build_scrape_queue_positions(shows)
     matched: list[Show] = []
     for show in shows:
-        card = build_show_card(show, now)
+        card = build_show_card(show, now, queue_position=queue_positions.get(show.id), queue_total=queue_total)
         if section == "active" and card.section in {"ready_now", "in_progress"}:
             matched.append(show)
             continue
@@ -312,7 +351,11 @@ def shows_in_section(shows: list[Show], section: str, now: datetime) -> list[Sho
 
 
 def build_workflow_dashboard_view(shows: list[Show], now: datetime) -> WorkflowDashboardView:
-    show_cards = [build_show_card(show, now) for show in shows]
+    queue_positions, queue_total = build_scrape_queue_positions(shows)
+    show_cards = [
+        build_show_card(show, now, queue_position=queue_positions.get(show.id), queue_total=queue_total)
+        for show in shows
+    ]
     scheduled_later = sorted(
         [item for item in show_cards if item.section == "scheduled_later"],
         key=lambda item: (item.show.run_at or datetime.max, item.show.event_date, item.show.id),

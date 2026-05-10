@@ -33,7 +33,11 @@ class WorkflowPresenterTests(unittest.TestCase):
     def test_build_workflow_dashboard_view_groups_shows(self) -> None:
         now = datetime(2026, 5, 1, 9, 0)
         shows = [
-            make_show(name="Queued", status=ShowStatus.queued.value),
+            make_show(
+                name="Queued",
+                status=ShowStatus.queued.value,
+                runs=[CampaignRun(status=RunStatus.queued.value, created_at=datetime(2026, 5, 1, 8, 0))],
+            ),
             make_show(name="Scheduled", run_at=datetime(2026, 5, 10, 9, 0)),
             make_show(name="Done", status=ShowStatus.ready_for_review.value, company_count=25),
         ]
@@ -44,7 +48,19 @@ class WorkflowPresenterTests(unittest.TestCase):
         self.assertEqual(view.scheduled_count, 1)
         self.assertEqual(view.completed_section_count, 1)
         self.assertEqual(view.completed_lead_count, 25)
+        self.assertEqual(view.active[0].status_label, "#1 in line")
+        self.assertEqual(view.active[0].run_timing, "1 of 1 in scrape queue")
         self.assertEqual(view.completed[0].status_label, "Populated")
+
+    def test_build_show_card_uses_queue_position_for_queued_shows(self) -> None:
+        now = datetime(2026, 5, 8, 12, 0)
+        show = make_show(status=ShowStatus.queued.value)
+
+        card = build_show_card(show, now, queue_position=2, queue_total=4)
+
+        self.assertEqual(card.status_label, "#2 in line")
+        self.assertEqual(card.step_label, "Queue position 2 of 4")
+        self.assertEqual(card.run_timing, "2 of 4 in scrape queue")
 
     def test_build_show_card_hides_old_completion_notice(self) -> None:
         now = datetime(2026, 5, 8, 12, 0)
