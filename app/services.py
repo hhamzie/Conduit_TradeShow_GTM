@@ -165,6 +165,59 @@ def normalize_show_identity_name(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", " ", value.strip().lower()).strip()
 
 
+SHOW_NAME_NOISE_WORDS = {
+    "the",
+    "and",
+    "expo",
+    "show",
+    "fair",
+    "market",
+    "conference",
+    "event",
+    "events",
+    "annual",
+}
+
+
+def normalize_show_identity_tokens(value: str) -> tuple[str, ...]:
+    normalized = normalize_show_identity_name(value)
+    if not normalized:
+        return ()
+    tokens = [
+        token
+        for token in normalized.split()
+        if token and token not in SHOW_NAME_NOISE_WORDS
+    ]
+    return tuple(dict.fromkeys(tokens))
+
+
+def shows_have_matching_identity_name(left: str, right: str) -> bool:
+    normalized_left = normalize_show_identity_name(left)
+    normalized_right = normalize_show_identity_name(right)
+    if not normalized_left or not normalized_right:
+        return False
+    if normalized_left == normalized_right:
+        return True
+
+    left_tokens = set(normalize_show_identity_tokens(left))
+    right_tokens = set(normalize_show_identity_tokens(right))
+    if not left_tokens or not right_tokens:
+        return False
+    if left_tokens == right_tokens:
+        return True
+
+    shared_tokens = left_tokens & right_tokens
+    smaller_token_count = min(len(left_tokens), len(right_tokens))
+    return smaller_token_count >= 2 and len(shared_tokens) == smaller_token_count
+
+
+def show_identity_name_key(value: str) -> str:
+    tokens = normalize_show_identity_tokens(value)
+    if tokens:
+        return " ".join(tokens)
+    return normalize_show_identity_name(value)
+
+
 def normalize_show_identity_url(value: str) -> str:
     raw_value = value.strip()
     if not raw_value:
@@ -194,7 +247,7 @@ def _find_matching_show(
     for candidate in candidates:
         if exclude_show_id is not None and candidate.id == exclude_show_id:
             continue
-        if normalize_show_identity_name(candidate.name) == normalized_name:
+        if shows_have_matching_identity_name(candidate.name, normalized_name):
             return candidate
         if normalized_url and normalize_show_identity_url(candidate.source_url) == normalized_url:
             return candidate
@@ -827,7 +880,7 @@ def register_bulk_shows(
         event_date = parse_show_date(event_date_raw)
         dedupe_key = (
             event_date.isoformat(),
-            normalize_show_identity_name(show_name),
+            show_identity_name_key(show_name),
             normalize_show_identity_url(link),
         )
         if dedupe_key in seen_upload_keys:
@@ -1110,7 +1163,7 @@ def run_weekly_show_sync(db: Session, now: datetime | None = None) -> WeeklyShow
 
         dedupe_key = (
             event_date.isoformat(),
-            normalize_show_identity_name(show_name),
+            show_identity_name_key(show_name),
             normalize_show_identity_url(link),
         )
         if dedupe_key in seen_upload_keys:

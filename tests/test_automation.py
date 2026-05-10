@@ -343,6 +343,35 @@ class AutomationTests(unittest.TestCase):
             shows = session.scalars(select(Show)).all()
             self.assertEqual(len(shows), 1)
 
+    def test_upsert_show_reuses_existing_record_for_similar_name_and_same_date(self) -> None:
+        with self.Session() as session:
+            first_show, first_created = upsert_show(
+                session,
+                show_name="Sweets & Snacks",
+                event_date_raw="2026-05-19",
+                place="Las Vegas, NV",
+                link="https://sweetsandsnacks.com/",
+                run_offset_days=14,
+            )
+            session.commit()
+
+            second_show, second_created = upsert_show(
+                session,
+                show_name="Sweets and Snacks Expo",
+                event_date_raw="2026-05-19",
+                place="Las Vegas Convention Center",
+                link="https://sse26.mapyourshow.com/",
+                run_offset_days=21,
+            )
+            session.commit()
+
+            self.assertTrue(first_created)
+            self.assertFalse(second_created)
+            self.assertEqual(first_show.id, second_show.id)
+            self.assertEqual(second_show.place, "Las Vegas Convention Center")
+            shows = session.scalars(select(Show)).all()
+            self.assertEqual(len(shows), 1)
+
     def test_run_show_scrape_marks_show_failed_when_scrape_raises(self) -> None:
         with self.Session() as session:
             show, _ = upsert_show(
@@ -646,6 +675,25 @@ class AutomationTests(unittest.TestCase):
             self.assertEqual(summary.created, 1)
             self.assertEqual(summary.updated, 1)
             self.assertEqual(summary.skipped, 1)
+            self.assertEqual(len(queued_shows), 2)
+            shows = session.scalars(select(Show)).all()
+            self.assertEqual(len(shows), 1)
+
+    def test_register_bulk_shows_collapses_similar_show_names_on_same_date(self) -> None:
+        payload = "\n".join(
+            [
+                "Show,Date,Place,Link",
+                "National Restaurant Show,2026-05-16,Chicago,https://www.nationalrestaurantshow.com/",
+                "National Restaurant Association Show,2026-05-16,Chicago,https://www.nationalrestaurantshow.com/home/search/",
+            ]
+        ).encode("utf-8")
+
+        with self.Session() as session:
+            summary, queued_shows = register_bulk_shows(session, payload, 14)
+
+            self.assertEqual(summary.created, 1)
+            self.assertEqual(summary.updated, 1)
+            self.assertEqual(summary.skipped, 0)
             self.assertEqual(len(queued_shows), 2)
             shows = session.scalars(select(Show)).all()
             self.assertEqual(len(shows), 1)
