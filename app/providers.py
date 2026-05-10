@@ -677,7 +677,7 @@ def _smartlead_client_id() -> int | None:
 
 
 def _show_campaign_name(show: Show) -> str:
-    return f"{show.name} - {show.event_date.isoformat()}"
+    return f"{show.name} - {_pretty_event_day(show)} {show.event_date.year}"
 
 
 def _extract_smartlead_data(payload: object) -> object:
@@ -728,9 +728,20 @@ def _extract_delay_in_days(sequence: dict[str, object]) -> int:
     return 0
 
 
-def _clone_template_settings(target_campaign_id: int, template_campaign_id: int) -> None:
+def _apply_show_placeholders(value: str, show: Show) -> str:
+    return (
+        value.replace("{{show_name}}", show.name)
+        .replace("{{show_name_lower}}", show.name.lower())
+    )
+
+
+def _clone_template_settings(target_campaign_id: int, template_campaign_id: int, show: Show) -> None:
     template = _get_smartlead_campaign(template_campaign_id)
+    if not template:
+        raise ValueError(f"Smartlead template campaign {template_campaign_id} could not be loaded.")
     template_sequences = _get_smartlead_sequences(template_campaign_id)
+    if not template_sequences:
+        raise ValueError(f"Smartlead template campaign {template_campaign_id} has no sequence steps to clone.")
     template_accounts = _get_smartlead_email_accounts(template_campaign_id)
 
     settings_payload = {}
@@ -757,29 +768,14 @@ def _clone_template_settings(target_campaign_id: int, template_campaign_id: int)
     if settings_payload:
         _smartlead_request("POST", f"/campaigns/{target_campaign_id}/settings", payload=settings_payload)
 
-    scheduler = template.get("scheduler_cron_value")
-    min_time_between = template.get("min_time_btwn_emails")
-    if isinstance(scheduler, dict):
-        schedule_payload = {
-            "schedule": {
-                "timezone": scheduler.get("tz") or scheduler.get("timezone") or "America/New_York",
-                "days": scheduler.get("days") or [1, 2, 3, 4, 5],
-                "start_hour": scheduler.get("startHour") or scheduler.get("start_hour") or "09:00",
-                "end_hour": scheduler.get("endHour") or scheduler.get("end_hour") or "17:00",
-            }
-        }
-        if min_time_between not in (None, ""):
-            schedule_payload["schedule"]["min_time_btw_emails"] = min_time_between
-        _smartlead_request("POST", f"/campaigns/{target_campaign_id}/schedule", payload=schedule_payload)
-
     if template_sequences:
         sequence_payload = {
             "sequences": [
                 {
                     "id": None,
                     "seq_number": sequence.get("seq_number") or (index + 1),
-                    "subject": sequence.get("subject", ""),
-                    "email_body": sequence.get("email_body", ""),
+                    "subject": _apply_show_placeholders(str(sequence.get("subject", "")), show),
+                    "email_body": _apply_show_placeholders(str(sequence.get("email_body", "")), show),
                     "seq_delay_details": {"delay_in_days": _extract_delay_in_days(sequence)},
                 }
                 for index, sequence in enumerate(template_sequences)
@@ -792,22 +788,24 @@ def _clone_template_settings(target_campaign_id: int, template_campaign_id: int)
         for account in template_accounts
         if account.get("id") is not None
     ]
-    if account_ids:
-        _smartlead_request(
-            "POST",
-            f"/campaigns/{target_campaign_id}/email-accounts",
-            payload={"email_account_ids": account_ids},
-        )
+    if not account_ids:
+        raise ValueError(f"Smartlead template campaign {template_campaign_id} has no sender accounts to clone.")
+
+    _smartlead_request(
+        "POST",
+        f"/campaigns/{target_campaign_id}/email-accounts",
+        payload={"email_account_ids": account_ids},
+    )
 
 
-def ensure_smartlead_campaign(show: Show) -> SmartleadSyncResult:
+def ensure_smartlead_campaign(show: Show, *, force_rebuild: bool = False) -> SmartleadSyncResult:
     settings = get_settings()
     if not settings.smartlead_api_key:
         return SmartleadSyncResult("smartlead", "skipped", "No Smartlead API key configured.")
 
     desired_name = _show_campaign_name(show)
     try:
-        if show.smartlead_campaign_id:
+        if show.smartlead_campaign_id and not force_rebuild:
             show.smartlead_campaign_name = show.smartlead_campaign_name or desired_name
             return SmartleadSyncResult(
                 "smartlead",
@@ -817,21 +815,22 @@ def ensure_smartlead_campaign(show: Show) -> SmartleadSyncResult:
                 campaign_name=show.smartlead_campaign_name,
             )
 
-        for campaign in _list_smartlead_campaigns():
-            if str(campaign.get("name", "")).strip() != desired_name:
-                continue
-            campaign_id = campaign.get("id")
-            if campaign_id is None:
-                continue
-            show.smartlead_campaign_id = int(campaign_id)
-            show.smartlead_campaign_name = desired_name
-            return SmartleadSyncResult(
-                "smartlead",
-                "success",
-                f"Reused existing Smartlead campaign {campaign_id}.",
-                campaign_id=show.smartlead_campaign_id,
-                campaign_name=show.smartlead_campaign_name,
-            )
+        if not force_rebuild:
+            for campaign in _list_smartlead_campaigns():
+                if str(campaign.get("name", "")).strip() != desired_name:
+                    continue
+                campaign_id = campaign.get("id")
+                if campaign_id is None:
+                    continue
+                show.smartlead_campaign_id = int(campaign_id)
+                show.smartlead_campaign_name = desired_name
+                return SmartleadSyncResult(
+                    "smartlead",
+                    "success",
+                    f"Reused existing Smartlead campaign {campaign_id}.",
+                    campaign_id=show.smartlead_campaign_id,
+                    campaign_name=show.smartlead_campaign_name,
+                )
 
         payload: dict[str, object] = {"name": desired_name}
         client_id = _smartlead_client_id()
@@ -847,18 +846,20 @@ def ensure_smartlead_campaign(show: Show) -> SmartleadSyncResult:
             )
 
         campaign_id = int(campaign_id_raw)
+        if settings.smartlead_template_campaign_id and settings.smartlead_template_campaign_id != str(campaign_id):
+            _clone_template_settings(campaign_id, int(settings.smartlead_template_campaign_id), show)
         show.smartlead_campaign_id = campaign_id
         show.smartlead_campaign_name = desired_name
-        if settings.smartlead_template_campaign_id and settings.smartlead_template_campaign_id != str(campaign_id):
-            _clone_template_settings(campaign_id, int(settings.smartlead_template_campaign_id))
 
         return SmartleadSyncResult(
             "smartlead",
             "success",
-            f"Created Smartlead campaign {campaign_id}.",
+            f"{'Rebuilt' if force_rebuild else 'Created'} Smartlead campaign {campaign_id}.",
             campaign_id=campaign_id,
             campaign_name=desired_name,
         )
+    except ValueError as exc:
+        return SmartleadSyncResult("smartlead", "failed", str(exc))
     except httpx.HTTPStatusError as exc:
         return SmartleadSyncResult(
             "smartlead",

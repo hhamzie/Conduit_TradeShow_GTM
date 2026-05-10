@@ -522,29 +522,42 @@ function openOutboundModal(trigger) {
   const copyTarget = modal ? modal.querySelector("[data-outbound-copy]") : null;
   const capacityTarget = modal ? modal.querySelector("[data-outbound-capacity-copy]") : null;
   const confirmButton = modal ? modal.querySelector("[data-outbound-confirm]") : null;
+  const openLink = modal ? modal.querySelector("[data-outbound-open]") : null;
   if (!(modal instanceof HTMLElement) || !(form instanceof HTMLFormElement) || !(copyTarget instanceof HTMLElement)) {
     return;
   }
 
   const showId = trigger.dataset.showId || "";
   const showName = trigger.dataset.showName || "this show";
-  const emailCount = Number.parseInt(trigger.dataset.emailCount || "0", 10) || 0;
-  const linkedinCount = Number.parseInt(trigger.dataset.linkedinCount || "0", 10) || 0;
-  const weeks = Number.parseInt(trigger.dataset.weeks || "3", 10) || 3;
-  const capacityBlocked = trigger.dataset.capacityBlocked === "true";
-  const capacityDetail = trigger.dataset.capacityDetail || "";
+  const hasCampaign = trigger.dataset.hasCampaign === "true";
+  const campaignUrl = trigger.dataset.campaignUrl || "";
+  const campaignName = trigger.dataset.campaignName || "";
+  const campaignActive = trigger.dataset.campaignActive === "true";
 
-  form.action = `/shows/${showId}/outbound/start`;
-  copyTarget.textContent =
-    `Start outbound for ${showName}? This will send ${emailCount} emails and ${linkedinCount} LinkedIn messages over the next ${weeks} weeks.`;
+  form.action = hasCampaign ? `/shows/${showId}/smartlead/rebuild` : `/shows/${showId}/smartlead/create`;
+  if (hasCampaign) {
+    copyTarget.textContent = campaignActive
+      ? `${showName} already has a live Smartlead campaign${campaignName ? `: ${campaignName}` : ""}.`
+      : `${showName} already has a Smartlead campaign${campaignName ? `: ${campaignName}` : ""}.`;
+  } else {
+    copyTarget.textContent = `Create a Smartlead campaign for ${showName} from the master template.`;
+  }
 
   if (capacityTarget instanceof HTMLElement) {
-    capacityTarget.textContent = capacityDetail;
-    capacityTarget.hidden = !capacityDetail;
+    capacityTarget.textContent = hasCampaign
+      ? "You can open the current campaign or rebuild a fresh one from the template. This does not launch sending."
+      : "This will clone the master template settings, sender accounts, and sequence copy. This does not launch sending.";
+    capacityTarget.hidden = false;
   }
 
   if (confirmButton instanceof HTMLButtonElement) {
-    confirmButton.disabled = capacityBlocked || emailCount <= 0;
+    confirmButton.disabled = false;
+    confirmButton.textContent = hasCampaign ? "Rebuild from template" : "Create campaign";
+  }
+
+  if (openLink instanceof HTMLAnchorElement) {
+    openLink.hidden = !hasCampaign || !campaignUrl;
+    openLink.href = campaignUrl || "#";
   }
 
   modal.hidden = false;

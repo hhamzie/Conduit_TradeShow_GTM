@@ -438,6 +438,54 @@ def configure_selected_smartlead(
     return RedirectResponse(target_path, status_code=status.HTTP_303_SEE_OTHER)
 
 
+@router.post("/shows/{show_id}/smartlead/create")
+def create_smartlead_campaign_route(show_id: int, request: Request, db: Session = Depends(get_db)):
+    require_authenticated(request)
+    show = _get_show_or_404(db, show_id)
+    result = ensure_smartlead_campaign(show)
+    if result.status != "success":
+        request.session["flash_message"] = {
+            "tone": "warning",
+            "title": "Smartlead campaign could not be created.",
+            "detail": result.message,
+        }
+        return RedirectResponse("/shows/dashboard", status_code=status.HTTP_303_SEE_OTHER)
+
+    show.smartlead_campaign_id = result.campaign_id
+    show.smartlead_campaign_name = result.campaign_name
+    db.commit()
+    request.session["flash_message"] = {
+        "tone": "success",
+        "title": "Smartlead campaign ready.",
+        "detail": result.message,
+    }
+    return RedirectResponse("/shows/dashboard", status_code=status.HTTP_303_SEE_OTHER)
+
+
+@router.post("/shows/{show_id}/smartlead/rebuild")
+def rebuild_smartlead_campaign_route(show_id: int, request: Request, db: Session = Depends(get_db)):
+    require_authenticated(request)
+    show = _get_show_or_404(db, show_id)
+    result = ensure_smartlead_campaign(show, force_rebuild=True)
+    if result.status != "success":
+        request.session["flash_message"] = {
+            "tone": "warning",
+            "title": "Smartlead campaign could not be rebuilt.",
+            "detail": result.message,
+        }
+        return RedirectResponse("/shows/dashboard", status_code=status.HTTP_303_SEE_OTHER)
+
+    show.smartlead_campaign_id = result.campaign_id
+    show.smartlead_campaign_name = result.campaign_name
+    db.commit()
+    request.session["flash_message"] = {
+        "tone": "success",
+        "title": "Smartlead campaign rebuilt.",
+        "detail": result.message,
+    }
+    return RedirectResponse("/shows/dashboard", status_code=status.HTTP_303_SEE_OTHER)
+
+
 @router.post("/shows/scrape-pending")
 def scrape_pending_shows_route(
     request: Request,

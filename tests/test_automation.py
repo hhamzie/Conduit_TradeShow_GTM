@@ -19,7 +19,7 @@ from sqlalchemy.orm import sessionmaker
 from app.config import get_settings
 from app.database import Base
 from app.models import AutomationCheckpoint, CampaignRun, ClaySyncRow, RunStatus, Show, ShowGuideRow, ShowStatus
-from app.providers import ClayPollResult, ClayRecord, ProviderResult, SmartleadSyncResult
+from app.providers import ClayPollResult, ClayRecord, ProviderResult, SmartleadSyncResult, ensure_smartlead_campaign
 from app.services import _build_prepared_lead, BulkDirectScrapeResult, DirectScrapeResult, launch_show, list_shows, register_bulk_shows, run_bulk_direct_scrape, run_next_campaign, run_show_scrape, run_weekly_show_sync, start_outbound_campaign, sync_show_from_clay, upsert_show
 from app.trade_show_feeder import (
     TradeShowScanCandidate,
@@ -915,6 +915,165 @@ class AutomationTests(unittest.TestCase):
             self.assertEqual(show.smartlead_campaign_id, 321)
             self.assertEqual(show.smartlead_campaign_name, "ICFF Buyers")
             self.assertEqual(request.session["flash_message"]["title"], "Smartlead campaign linked.")
+
+    def test_create_smartlead_campaign_route_links_campaign(self) -> None:
+        from app.main import create_smartlead_campaign_route
+
+        request = type("Req", (), {"session": {}})()
+        with self.Session() as session:
+            show = make_show()
+            session.add(show)
+            session.commit()
+
+            with (
+                patch("app.web.routes.shows.require_authenticated"),
+                patch(
+                    "app.web.routes.shows.ensure_smartlead_campaign",
+                    return_value=SmartleadSyncResult(
+                        name="smartlead",
+                        status="success",
+                        message="Created Smartlead campaign 654.",
+                        campaign_id=654,
+                        campaign_name="Luxe Pack - May 6th 2026",
+                    ),
+                ),
+            ):
+                response = create_smartlead_campaign_route(show_id=show.id, request=request, db=session)
+
+            self.assertEqual(response.status_code, 303)
+            self.assertEqual(response.headers["location"], "/shows/dashboard")
+            self.assertEqual(show.smartlead_campaign_id, 654)
+            self.assertEqual(show.smartlead_campaign_name, "Luxe Pack - May 6th 2026")
+            self.assertEqual(request.session["flash_message"]["title"], "Smartlead campaign ready.")
+
+    def test_rebuild_smartlead_campaign_route_forces_rebuild(self) -> None:
+        from app.main import rebuild_smartlead_campaign_route
+
+        request = type("Req", (), {"session": {}})()
+        with self.Session() as session:
+            show = make_show(smartlead_campaign_id=321, smartlead_campaign_name="Old Campaign")
+            session.add(show)
+            session.commit()
+
+            with (
+                patch("app.web.routes.shows.require_authenticated"),
+                patch(
+                    "app.web.routes.shows.ensure_smartlead_campaign",
+                    return_value=SmartleadSyncResult(
+                        name="smartlead",
+                        status="success",
+                        message="Rebuilt Smartlead campaign 654.",
+                        campaign_id=654,
+                        campaign_name="Luxe Pack - May 6th 2026",
+                    ),
+                ) as ensure_mock,
+            ):
+                response = rebuild_smartlead_campaign_route(show_id=show.id, request=request, db=session)
+
+            self.assertEqual(response.status_code, 303)
+            self.assertEqual(response.headers["location"], "/shows/dashboard")
+            self.assertEqual(show.smartlead_campaign_id, 654)
+            self.assertEqual(show.smartlead_campaign_name, "Luxe Pack - May 6th 2026")
+            self.assertEqual(ensure_mock.call_args.kwargs, {"force_rebuild": True})
+            self.assertEqual(request.session["flash_message"]["title"], "Smartlead campaign rebuilt.")
+
+    def test_ensure_smartlead_campaign_clones_template_settings_accounts_and_personalized_sequences(self) -> None:
+        show = make_show(name="Car Wash Show", event_date=date(2026, 5, 11))
+        request_calls: list[tuple[str, str, object | None]] = []
+
+        def fake_smartlead_request(method: str, path: str, *, payload=None, **_: object):
+            request_calls.append((method, path, payload))
+            if path == "/campaigns/create":
+                return 200, {"id": "654"}
+            return 200, {}
+
+        with patch.dict(
+            os.environ,
+            {
+                "SMARTLEAD_API_KEY": "test-key",
+                "SMARTLEAD_TEMPLATE_CAMPAIGN_ID": "999",
+            },
+        ):
+            get_settings.cache_clear()
+            try:
+                with (
+                    patch("app.providers._list_smartlead_campaigns", return_value=[]),
+                    patch(
+                        "app.providers._get_smartlead_campaign",
+                        return_value={
+                            "track_settings": {"reply_webhook": "slack"},
+                            "stop_lead_settings": {"stop_on_reply": True},
+                        },
+                    ),
+                    patch(
+                        "app.providers._get_smartlead_sequences",
+                        return_value=[
+                            {
+                                "seq_number": 1,
+                                "subject": "meet us at {{show_name_lower}}",
+                                "email_body": "We are heading to {{show_name}}.",
+                                "seq_delay_details": {"delay_in_days": 3},
+                            }
+                        ],
+                    ),
+                    patch("app.providers._get_smartlead_email_accounts", return_value=[{"id": 77}]),
+                    patch("app.providers._smartlead_request", side_effect=fake_smartlead_request),
+                ):
+                    result = ensure_smartlead_campaign(show)
+            finally:
+                get_settings.cache_clear()
+
+        self.assertEqual(result.status, "success")
+        self.assertEqual(result.campaign_id, 654)
+        self.assertEqual(result.campaign_name, "Car Wash Show - May 11th 2026")
+        request_paths = [path for _method, path, _payload in request_calls]
+        self.assertIn("/campaigns/create", request_paths)
+        self.assertIn("/campaigns/654/settings", request_paths)
+        self.assertIn("/campaigns/654/sequences", request_paths)
+        self.assertIn("/campaigns/654/email-accounts", request_paths)
+        self.assertNotIn("/campaigns/654/schedule", request_paths)
+
+        settings_payload = next(payload for _method, path, payload in request_calls if path == "/campaigns/654/settings")
+        self.assertEqual(settings_payload["track_settings"], {"reply_webhook": "slack"})
+        self.assertEqual(settings_payload["stop_lead_settings"], {"stop_on_reply": True})
+
+        sequence_payload = next(payload for _method, path, payload in request_calls if path == "/campaigns/654/sequences")
+        self.assertEqual(sequence_payload["sequences"][0]["subject"], "meet us at car wash show")
+        self.assertEqual(sequence_payload["sequences"][0]["email_body"], "We are heading to Car Wash Show.")
+
+    def test_ensure_smartlead_campaign_force_rebuild_skips_existing_linked_campaign(self) -> None:
+        show = make_show(smartlead_campaign_id=111, smartlead_campaign_name="Old", name="Car Wash Show", event_date=date(2026, 5, 11))
+        request_calls: list[tuple[str, str, object | None]] = []
+
+        def fake_smartlead_request(method: str, path: str, *, payload=None, **_: object):
+            request_calls.append((method, path, payload))
+            if path == "/campaigns/create":
+                return 200, {"id": "654"}
+            return 200, {}
+
+        with patch.dict(
+            os.environ,
+            {
+                "SMARTLEAD_API_KEY": "test-key",
+                "SMARTLEAD_TEMPLATE_CAMPAIGN_ID": "999",
+            },
+        ):
+            get_settings.cache_clear()
+            try:
+                with (
+                    patch("app.providers._list_smartlead_campaigns", return_value=[]),
+                    patch("app.providers._get_smartlead_campaign", return_value={"track_settings": {"reply_webhook": "slack"}}),
+                    patch("app.providers._get_smartlead_sequences", return_value=[{"seq_number": 1, "subject": "{{show_name}}", "email_body": "{{show_name_lower}}", "seq_delay_details": {"delay_in_days": 1}}]),
+                    patch("app.providers._get_smartlead_email_accounts", return_value=[{"id": 77}]),
+                    patch("app.providers._smartlead_request", side_effect=fake_smartlead_request),
+                ):
+                    result = ensure_smartlead_campaign(show, force_rebuild=True)
+            finally:
+                get_settings.cache_clear()
+
+        self.assertEqual(result.status, "success")
+        self.assertEqual(result.campaign_id, 654)
+        self.assertIn(("/campaigns/create"), [path for _method, path, _payload in request_calls])
 
     def test_scan_upcoming_trade_shows_route_returns_candidates(self) -> None:
         from app.main import scan_upcoming_trade_shows_route
