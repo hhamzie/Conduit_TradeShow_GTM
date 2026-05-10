@@ -358,6 +358,21 @@ class AutomationTests(unittest.TestCase):
             self.assertTrue(created)
             self.assertEqual(show.name, "National Restaurant Association Show")
 
+    def test_upsert_show_normalizes_pack_expo_display_name_before_storing(self) -> None:
+        with self.Session() as session:
+            show, created = upsert_show(
+                session,
+                show_name="PACK EXPO",
+                event_date_raw="2026-06-02",
+                place="Chicago, IL",
+                link="https://www.packexpo.com/show-directory",
+                run_offset_days=14,
+            )
+            session.commit()
+
+            self.assertTrue(created)
+            self.assertEqual(show.name, "Pack Expo")
+
     def test_upsert_show_reuses_existing_record_for_similar_name_within_five_day_window(self) -> None:
         with self.Session() as session:
             first_show, first_created = upsert_show(
@@ -407,6 +422,23 @@ class AutomationTests(unittest.TestCase):
 
             self.assertEqual(len(shows), 1)
             self.assertEqual(shows[0].company_count, 1056)
+
+    def test_list_shows_normalizes_legacy_display_names(self) -> None:
+        with self.Session() as session:
+            legacy = make_show(
+                name="PACK EXPO",
+                event_date=date(2026, 6, 2),
+                source_url="https://www.packexpo.com/show-directory",
+            )
+            session.add(legacy)
+            session.commit()
+
+            shows = list_shows(session)
+
+            self.assertEqual(shows[0].name, "Pack Expo")
+            refreshed = session.get(Show, legacy.id)
+            assert refreshed is not None
+            self.assertEqual(refreshed.name, "Pack Expo")
 
     def test_upsert_show_reuses_existing_record_for_similar_name_and_same_date(self) -> None:
         with self.Session() as session:

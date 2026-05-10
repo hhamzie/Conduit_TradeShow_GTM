@@ -208,7 +208,6 @@ SHOW_NAME_PHRASE_OVERRIDES = {
     "Infocomm": "InfoComm",
     "Nacs": "NACS",
     "Nra": "NRA",
-    "Pack Expo": "PACK EXPO",
     "Usa": "USA",
 }
 
@@ -1497,13 +1496,22 @@ def run_weekly_show_sync(db: Session, now: datetime | None = None) -> WeeklyShow
 
 def list_shows(db: Session) -> list[Show]:
     collapse_duplicate_shows(db)
-    return list(
+    shows = list(
         db.scalars(
             select(Show)
             .options(selectinload(Show.runs), selectinload(Show.clay_rows), selectinload(Show.guide_rows))
             .order_by(Show.event_date.asc(), Show.created_at.desc())
         )
     )
+    names_updated = False
+    for show in shows:
+        normalized_name = normalize_show_display_name(show.name)
+        if normalized_name and normalized_name != show.name:
+            show.name = normalized_name
+            names_updated = True
+    if names_updated:
+        db.commit()
+    return shows
 
 
 def purge_show(db: Session, show: Show) -> None:
