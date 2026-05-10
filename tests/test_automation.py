@@ -114,6 +114,7 @@ def make_scan_run_result(*candidates: TradeShowScanCandidate) -> TradeShowScanRu
                     remapped_to_curated_source=0,
                     sample_links=tuple(candidate.link for candidate in candidates[:3]),
                     sample_sources=tuple(candidate.link for candidate in candidates[:3]),
+                    error_message="",
                 ),
             ),
         ),
@@ -1113,6 +1114,61 @@ class AutomationTests(unittest.TestCase):
         self.assertIn("Atlanta Market", candidate_names)
         self.assertIn("National Restaurant Association Show", candidate_names)
         self.assertEqual(result.debug.pass_reports[-1].pass_label, "curated_source_scan")
+
+    def test_scan_upcoming_trade_shows_uses_curated_fallback_without_openai_key(self) -> None:
+        def fake_get(url: str, **_: object) -> httpx.Response:
+            payloads = {
+                "https://www.atlantamarket.com/": "Atlanta Market: June 9 - 14, 2026",
+                "https://www.nationalrestaurantshow.com/": "May 16-19, 2026",
+            }
+            html = payloads.get(url, "")
+            return httpx.Response(200, text=html, request=httpx.Request("GET", url))
+
+        with patch.dict(os.environ, {}, clear=True):
+            get_settings.cache_clear()
+            try:
+                with patch("app.trade_show_feeder.httpx.get", side_effect=fake_get):
+                    result = scan_upcoming_trade_shows_with_debug(
+                        today=date(2026, 5, 10),
+                        lookahead_days=100,
+                    )
+            finally:
+                get_settings.cache_clear()
+
+        self.assertGreaterEqual(len(result.candidates), 2)
+        self.assertEqual(result.debug.pass_reports[0].pass_label, "api_scan_unavailable")
+
+    def test_scan_upcoming_trade_shows_uses_curated_fallback_after_api_error(self) -> None:
+        error_response = httpx.Response(
+            429,
+            json={"error": {"message": "quota exceeded"}},
+            request=httpx.Request("POST", "https://api.openai.com/v1/responses"),
+        )
+
+        def fake_get(url: str, **_: object) -> httpx.Response:
+            payloads = {
+                "https://www.atlantamarket.com/": "Atlanta Market: June 9 - 14, 2026",
+                "https://www.nationalrestaurantshow.com/": "May 16-19, 2026",
+            }
+            html = payloads.get(url, "")
+            return httpx.Response(200, text=html, request=httpx.Request("GET", url))
+
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "test-openai-key", "TRADE_SHOW_SCAN_MODEL": "gpt-5"}):
+            get_settings.cache_clear()
+            try:
+                with (
+                    patch("app.trade_show_feeder.httpx.post", return_value=error_response),
+                    patch("app.trade_show_feeder.httpx.get", side_effect=fake_get),
+                ):
+                    result = scan_upcoming_trade_shows_with_debug(
+                        today=date(2026, 5, 10),
+                        lookahead_days=100,
+                    )
+            finally:
+                get_settings.cache_clear()
+
+        self.assertGreaterEqual(len(result.candidates), 2)
+        self.assertIn("quota exceeded", result.debug.pass_reports[0].error_message)
 
     def test_settings_default_trade_show_scan_lookahead_is_100_days(self) -> None:
         with patch.dict(os.environ, {}, clear=True):

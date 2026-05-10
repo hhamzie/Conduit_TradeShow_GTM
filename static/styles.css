@@ -1438,6 +1438,12 @@ button.button.subtle {
   gap: 4px;
 }
 
+.scan-debug-error {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--danger);
+}
+
 .scan-debug-links a {
   font-size: 0.78rem;
   color: var(--accent-dark);

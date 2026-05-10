@@ -88,6 +88,7 @@ class TradeShowScanPassDebug:
     remapped_to_curated_source: int
     sample_links: tuple[str, ...]
     sample_sources: tuple[str, ...]
+    error_message: str = ""
 
 
 @dataclass(frozen=True)
@@ -445,9 +446,6 @@ def scan_upcoming_trade_shows_with_debug(
 ) -> TradeShowScanRunResult:
     settings = get_settings()
     api_key = settings.openai_api_key
-    if not api_key:
-        raise ValueError("Set OPENAI_API_KEY before scanning for upcoming trade shows.")
-
     model = settings.trade_show_scan_model
     start_date = today or date.today()
     days_ahead = lookahead_days or settings.weekly_show_sync_lookahead_days
@@ -520,115 +518,159 @@ def scan_upcoming_trade_shows_with_debug(
         "max_output_tokens": 1800,
     }
 
-    candidate_models: list[str] = [model]
-    candidate_models.extend(
-        fallback_model
-        for fallback_model in SCAN_MODEL_FALLBACKS
-        if fallback_model != model
-    )
+    candidate_models: list[str] = []
+    if api_key:
+        candidate_models.append(model)
+        candidate_models.extend(
+            fallback_model
+            for fallback_model in SCAN_MODEL_FALLBACKS
+            if fallback_model != model
+        )
 
     candidates: list[TradeShowScanCandidate] = []
     pass_reports: list[TradeShowScanPassDebug] = []
     seen_keys: set[tuple[str, str, str]] = set()
-    prompt_labels = ("broad_scan", "market_scan", "supplier_scan")
-    for pass_label, prompt in zip(prompt_labels, prompts, strict=False):
-        pass_response = _run_trade_show_scan_pass(
-            api_key=api_key,
-            candidate_models=candidate_models,
-            request_payload=request_payload,
-            prompt=prompt,
-        )
-        raw_shows = pass_response.raw_shows
-        filtered_missing_fields = 0
-        filtered_non_physical = 0
-        filtered_non_official_source = 0
-        filtered_duplicate = 0
-        remapped_to_curated_source = 0
-        sample_links: list[str] = []
-        sample_sources = list(pass_response.sources[:3])
-
-        for item in raw_shows:
-            if not isinstance(item, dict):
-                filtered_missing_fields += 1
-                continue
-            show_name = str(item.get("show_name") or "").strip()
-            event_date_raw = str(item.get("event_date") or "").strip()
-            place = str(item.get("place") or "").strip()
-            original_link = str(item.get("link") or "").strip()
-            if original_link and len(sample_links) < 3:
-                sample_links.append(original_link)
-            link = resolve_trade_show_scan_source_url(show_name, original_link)
-            summary = str(item.get("summary") or "").strip()
-            if not (show_name and event_date_raw and place and link):
-                filtered_missing_fields += 1
-                continue
-            if not is_b2b_physical_goods_show(show_name, link):
-                filtered_non_physical += 1
-                continue
-            if original_link and link != original_link:
-                remapped_to_curated_source += 1
-            if not is_trade_show_scan_final_source_url(link):
-                filtered_non_official_source += 1
-                continue
-            dedupe_key = (show_name.lower(), event_date_raw, link.lower())
-            if dedupe_key in seen_keys:
-                filtered_duplicate += 1
-                continue
-            seen_keys.add(dedupe_key)
-            candidates.append(
-                TradeShowScanCandidate(
-                    show_name=show_name,
-                    event_date_raw=event_date_raw,
-                    place=place,
-                    link=link,
-                    summary=summary,
-                )
+    deferred_error: TradeShowScanError | None = None
+    if not api_key:
+        pass_reports.append(
+            TradeShowScanPassDebug(
+                pass_label="api_scan_unavailable",
+                model_used="no_api_key",
+                raw_count=0,
+                source_count=0,
+                accepted_count=0,
+                filtered_missing_fields=0,
+                filtered_non_physical=0,
+                filtered_non_official_source=0,
+                filtered_duplicate=0,
+                remapped_to_curated_source=0,
+                sample_links=(),
+                sample_sources=(),
+                error_message="OPENAI_API_KEY is not set. Using official-source fallback only.",
             )
-            if len(candidates) >= max(1, limit):
+        )
+    else:
+        prompt_labels = ("broad_scan", "market_scan", "supplier_scan")
+        for pass_label, prompt in zip(prompt_labels, prompts, strict=False):
+            try:
+                pass_response = _run_trade_show_scan_pass(
+                    api_key=api_key,
+                    candidate_models=candidate_models,
+                    request_payload=request_payload,
+                    prompt=prompt,
+                )
+            except TradeShowScanError as exc:
+                deferred_error = exc
                 pass_reports.append(
                     TradeShowScanPassDebug(
                         pass_label=pass_label,
-                        model_used=pass_response.model_used,
-                        raw_count=len(raw_shows),
-                        source_count=len(pass_response.sources),
+                        model_used=model,
+                        raw_count=0,
+                        source_count=0,
                         accepted_count=len(candidates),
-                        filtered_missing_fields=filtered_missing_fields,
-                        filtered_non_physical=filtered_non_physical,
-                        filtered_non_official_source=filtered_non_official_source,
-                        filtered_duplicate=filtered_duplicate,
-                        remapped_to_curated_source=remapped_to_curated_source,
-                        sample_links=tuple(sample_links),
-                        sample_sources=tuple(sample_sources),
+                        filtered_missing_fields=0,
+                        filtered_non_physical=0,
+                        filtered_non_official_source=0,
+                        filtered_duplicate=0,
+                        remapped_to_curated_source=0,
+                        sample_links=(),
+                        sample_sources=(),
+                        error_message=str(exc),
                     )
                 )
-                return TradeShowScanRunResult(
-                    candidates=candidates,
-                    debug=TradeShowScanDebug(
-                        start_date=start_date.isoformat(),
-                        end_date=end_date.isoformat(),
-                        lookahead_days=days_ahead,
-                        pass_reports=tuple(pass_reports),
-                        candidate_count=len(candidates),
-                    ),
+                break
+
+            raw_shows = pass_response.raw_shows
+            filtered_missing_fields = 0
+            filtered_non_physical = 0
+            filtered_non_official_source = 0
+            filtered_duplicate = 0
+            remapped_to_curated_source = 0
+            sample_links: list[str] = []
+            sample_sources = list(pass_response.sources[:3])
+
+            for item in raw_shows:
+                if not isinstance(item, dict):
+                    filtered_missing_fields += 1
+                    continue
+                show_name = str(item.get("show_name") or "").strip()
+                event_date_raw = str(item.get("event_date") or "").strip()
+                place = str(item.get("place") or "").strip()
+                original_link = str(item.get("link") or "").strip()
+                if original_link and len(sample_links) < 3:
+                    sample_links.append(original_link)
+                link = resolve_trade_show_scan_source_url(show_name, original_link)
+                summary = str(item.get("summary") or "").strip()
+                if not (show_name and event_date_raw and place and link):
+                    filtered_missing_fields += 1
+                    continue
+                if not is_b2b_physical_goods_show(show_name, link):
+                    filtered_non_physical += 1
+                    continue
+                if original_link and link != original_link:
+                    remapped_to_curated_source += 1
+                if not is_trade_show_scan_final_source_url(link):
+                    filtered_non_official_source += 1
+                    continue
+                dedupe_key = (show_name.lower(), event_date_raw, link.lower())
+                if dedupe_key in seen_keys:
+                    filtered_duplicate += 1
+                    continue
+                seen_keys.add(dedupe_key)
+                candidates.append(
+                    TradeShowScanCandidate(
+                        show_name=show_name,
+                        event_date_raw=event_date_raw,
+                        place=place,
+                        link=link,
+                        summary=summary,
+                    )
                 )
-        pass_reports.append(
-            TradeShowScanPassDebug(
-                pass_label=pass_label,
-                model_used=pass_response.model_used,
-                raw_count=len(raw_shows),
-                source_count=len(pass_response.sources),
-                accepted_count=len(candidates),
-                filtered_missing_fields=filtered_missing_fields,
-                filtered_non_physical=filtered_non_physical,
-                filtered_non_official_source=filtered_non_official_source,
-                filtered_duplicate=filtered_duplicate,
-                remapped_to_curated_source=remapped_to_curated_source,
-                sample_links=tuple(sample_links),
-                sample_sources=tuple(sample_sources),
+                if len(candidates) >= max(1, limit):
+                    pass_reports.append(
+                        TradeShowScanPassDebug(
+                            pass_label=pass_label,
+                            model_used=pass_response.model_used,
+                            raw_count=len(raw_shows),
+                            source_count=len(pass_response.sources),
+                            accepted_count=len(candidates),
+                            filtered_missing_fields=filtered_missing_fields,
+                            filtered_non_physical=filtered_non_physical,
+                            filtered_non_official_source=filtered_non_official_source,
+                            filtered_duplicate=filtered_duplicate,
+                            remapped_to_curated_source=remapped_to_curated_source,
+                            sample_links=tuple(sample_links),
+                            sample_sources=tuple(sample_sources),
+                        )
+                    )
+                    return TradeShowScanRunResult(
+                        candidates=candidates,
+                        debug=TradeShowScanDebug(
+                            start_date=start_date.isoformat(),
+                            end_date=end_date.isoformat(),
+                            lookahead_days=days_ahead,
+                            pass_reports=tuple(pass_reports),
+                            candidate_count=len(candidates),
+                        ),
+                    )
+            pass_reports.append(
+                TradeShowScanPassDebug(
+                    pass_label=pass_label,
+                    model_used=pass_response.model_used,
+                    raw_count=len(raw_shows),
+                    source_count=len(pass_response.sources),
+                    accepted_count=len(candidates),
+                    filtered_missing_fields=filtered_missing_fields,
+                    filtered_non_physical=filtered_non_physical,
+                    filtered_non_official_source=filtered_non_official_source,
+                    filtered_duplicate=filtered_duplicate,
+                    remapped_to_curated_source=remapped_to_curated_source,
+                    sample_links=tuple(sample_links),
+                    sample_sources=tuple(sample_sources),
+                )
             )
-        )
-        if candidates:
-            break
+            if candidates:
+                break
 
     if not candidates:
         curated_candidates = _fetch_curated_trade_show_candidates(start_date, end_date)
@@ -659,6 +701,8 @@ def scan_upcoming_trade_shows_with_debug(
                 sample_sources=tuple(source.official_url for source in CURATED_TRADE_SHOW_SOURCES[:3]),
             )
         )
+    if not candidates and deferred_error is not None:
+        raise deferred_error
 
     return TradeShowScanRunResult(
         candidates=candidates,

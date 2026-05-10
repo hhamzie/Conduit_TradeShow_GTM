@@ -120,6 +120,7 @@ def _serialize_scan_debug(debug) -> dict[str, object]:
                 "remapped_to_curated_source": report.remapped_to_curated_source,
                 "sample_links": list(report.sample_links),
                 "sample_sources": list(report.sample_sources),
+                "error_message": report.error_message,
             }
             for report in debug.pass_reports
         ],

@@ -640,6 +640,7 @@ function renderScanDebug(debug) {
             <span>Duplicate ${pass.filtered_duplicate || 0}</span>
             <span>Remapped ${pass.remapped_to_curated_source || 0}</span>
           </div>
+          ${pass.error_message ? `<p class="scan-debug-error">${pass.error_message}</p>` : ""}
           ${
             sampleLinks.length || (Array.isArray(pass.sample_sources) && pass.sample_sources.length)
               ? `<div class="scan-debug-links">${
