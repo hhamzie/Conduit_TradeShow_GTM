@@ -883,6 +883,55 @@ class AutomationTests(unittest.TestCase):
         self.assertIn(b"High Point Market", response.body)
         self.assertIn(b'"debug"', response.body)
 
+    def test_scan_upcoming_trade_shows_route_hides_existing_duplicates_from_candidates(self) -> None:
+        from app.main import scan_upcoming_trade_shows_route
+
+        request = type("Req", (), {"session": {}})()
+        with self.Session() as session:
+            existing_show, _ = upsert_show(
+                session,
+                show_name="National Restaurant Association Show",
+                event_date_raw="2026-05-16",
+                place="Chicago, IL",
+                link="https://www.nationalrestaurantshow.com/home/search/",
+                run_offset_days=14,
+            )
+            session.commit()
+
+            with (
+                patch("app.web.routes.shows.require_authenticated"),
+                patch(
+                    "app.web.routes.shows.scan_upcoming_trade_shows_with_debug",
+                    return_value=make_scan_run_result(
+                        TradeShowScanCandidate(
+                            show_name="National Restaurant Show",
+                            event_date_raw="2026-05-16",
+                            place="Chicago, IL",
+                            link="https://www.nationalrestaurantshow.com/",
+                            summary="Restaurant supply trade show.",
+                        ),
+                        TradeShowScanCandidate(
+                            show_name="Atlanta Market",
+                            event_date_raw="2026-06-09",
+                            place="Atlanta, GA",
+                            link="https://www.atlantamarket.com/exhibitor/exhibitor-directory",
+                            summary="Wholesale market.",
+                        ),
+                    ),
+                ),
+            ):
+                response = scan_upcoming_trade_shows_route(
+                    request=request,
+                    query_hint="home furnishings",
+                    db=session,
+                )
+
+        self.assertEqual(existing_show.name, "National Restaurant Association Show")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b'"count":1', response.body)
+        self.assertIn(b"Atlanta Market", response.body)
+        self.assertNotIn(b"National Restaurant Show", response.body)
+
     def test_scan_upcoming_trade_shows_route_blocks_second_scan_same_day(self) -> None:
         from app.main import scan_upcoming_trade_shows_route
 

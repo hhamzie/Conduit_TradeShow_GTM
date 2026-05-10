@@ -254,6 +254,24 @@ def _find_matching_show(
     return None
 
 
+def find_matching_show(
+    db: Session,
+    *,
+    show_name: str,
+    event_date_raw: str,
+    link: str,
+    exclude_show_id: int | None = None,
+) -> Show | None:
+    event_date = parse_show_date(event_date_raw)
+    return _find_matching_show(
+        db,
+        show_name=show_name,
+        event_date=event_date,
+        link=link,
+        exclude_show_id=exclude_show_id,
+    )
+
+
 def upsert_show(
     db: Session,
     *,

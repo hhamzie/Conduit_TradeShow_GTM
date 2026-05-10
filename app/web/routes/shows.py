@@ -29,6 +29,7 @@ from app.show_intelligence import build_show_analysis, build_show_analyses
 from app.services import (
     approve_show,
     build_outbound_plan,
+    find_matching_show,
     get_show,
     launch_show,
     list_shows,
@@ -389,7 +390,17 @@ def scan_upcoming_trade_shows_route(
             status_code=status.HTTP_502_BAD_GATEWAY,
         )
 
-    candidates = scan_result.candidates
+    candidates = [
+        candidate
+        for candidate in scan_result.candidates
+        if find_matching_show(
+            db,
+            show_name=candidate.show_name,
+            event_date_raw=candidate.event_date_raw,
+            link=candidate.link,
+        )
+        is None
+    ]
     debug_payload = _serialize_scan_debug(scan_result.debug)
     record_manual_trade_show_scan(db)
     db.commit()
