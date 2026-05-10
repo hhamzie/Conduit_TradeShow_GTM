@@ -1490,7 +1490,7 @@ class AutomationTests(unittest.TestCase):
             self.assertEqual(request.session["flash_message"]["title"], "Pending scrape started.")
             self.assertEqual(start_job_mock.call_count, 1)
             queued_shows = start_job_mock.call_args.kwargs["queued_shows"]
-            self.assertEqual([item.show_name for item in queued_shows], ["The Car Wash Show", "Atlanta Market"])
+            self.assertEqual([item.show_name for item in queued_shows], ["Atlanta Market"])
 
     def test_scrape_selected_shows_route_queues_checked_shows(self) -> None:
         from app.main import scrape_selected_shows
@@ -1602,7 +1602,7 @@ class AutomationTests(unittest.TestCase):
                 get_settings.cache_clear()
 
     def test_run_next_campaign_uses_quality_gate_and_marks_low_result_failed(self) -> None:
-        with patch.dict(os.environ, {"MIN_SCRAPE_COMPANY_COUNT": "40"}):
+        with patch.dict(os.environ, {"MIN_SCRAPE_COMPANY_COUNT": "6"}):
             get_settings.cache_clear()
             try:
                 with self.Session() as session:
@@ -1617,7 +1617,7 @@ class AutomationTests(unittest.TestCase):
 
                     with patch(
                         "app.services._run_direct_scrape",
-                        side_effect=RuntimeError("Best attempt found 39 exhibitors; need at least 40."),
+                        side_effect=RuntimeError("Best attempt found 5 exhibitors; need at least 6."),
                     ):
                         campaign_run = run_next_campaign(session)
 
@@ -1625,7 +1625,7 @@ class AutomationTests(unittest.TestCase):
                     assert campaign_run is not None
                     self.assertEqual(campaign_run.status, RunStatus.failed.value)
                     self.assertEqual(show.status, ShowStatus.failed.value)
-                    self.assertIn("need at least 40", show.last_error)
+                    self.assertIn("need at least 6", show.last_error)
             finally:
                 get_settings.cache_clear()
 

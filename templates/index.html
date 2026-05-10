@@ -284,7 +284,7 @@
     <span class="section-meta">{{ active_count }} shows</span>
   </summary>
   {% if active_count %}
-  <form id="bulk-form-active" class="section-toolbar compact bulk-select-bar" action="/shows/bulk/delete" method="post" data-multi-select-form>
+  <form id="bulk-form-active" class="section-toolbar compact bulk-select-bar" action="/show-bulk/delete" method="post" data-multi-select-form>
     <input type="hidden" name="next_path" value="/workflow" />
     <div class="bulk-select-anchor">
       <label class="selector-control" aria-label="Select all active shows">
@@ -294,7 +294,7 @@
       <span class="bulk-select-label">Select all</span>
     </div>
     <span class="bulk-select-count" data-select-count>0 selected</span>
-    <button class="button secondary subtle" type="submit" formaction="/shows/bulk/smartlead" data-requires-selection>Smartlead selected</button>
+    <button class="button secondary subtle" type="submit" formaction="/show-bulk/smartlead" data-requires-selection>Smartlead selected</button>
     <button class="button danger subtle" type="submit" onclick="return confirm('Delete the selected shows?');" data-requires-selection>Delete selected</button>
   </form>
   {% endif %}
@@ -316,7 +316,7 @@
     <span class="section-meta">{{ scheduled_count }} shows</span>
   </summary>
   {% if scheduled_count %}
-  <form id="bulk-form-scheduled" class="section-toolbar compact bulk-select-bar" action="/shows/bulk/delete" method="post" data-multi-select-form>
+  <form id="bulk-form-scheduled" class="section-toolbar compact bulk-select-bar" action="/show-bulk/delete" method="post" data-multi-select-form>
     <input type="hidden" name="next_path" value="/workflow" />
     <div class="bulk-select-anchor">
       <label class="selector-control" aria-label="Select all scheduled shows">
@@ -326,7 +326,7 @@
       <span class="bulk-select-label">Select all</span>
     </div>
     <span class="bulk-select-count" data-select-count>0 selected</span>
-    <button class="button secondary subtle" type="submit" formaction="/shows/bulk/smartlead" data-requires-selection>Smartlead selected</button>
+    <button class="button secondary subtle" type="submit" formaction="/show-bulk/smartlead" data-requires-selection>Smartlead selected</button>
     <button class="button danger subtle" type="submit" onclick="return confirm('Delete the selected shows?');" data-requires-selection>Delete selected</button>
   </form>
   {% endif %}
@@ -348,7 +348,7 @@
     <span class="section-meta">{{ completed_section_count }} shows</span>
   </summary>
   {% if completed_section_count %}
-  <form id="bulk-form-completed" class="section-toolbar compact bulk-select-bar" action="/shows/bulk/delete" method="post" data-multi-select-form>
+  <form id="bulk-form-completed" class="section-toolbar compact bulk-select-bar" action="/show-bulk/delete" method="post" data-multi-select-form>
     <input type="hidden" name="next_path" value="/workflow" />
     <div class="bulk-select-anchor">
       <label class="selector-control" aria-label="Select all completed shows">
@@ -358,7 +358,7 @@
       <span class="bulk-select-label">Select all</span>
     </div>
     <span class="bulk-select-count" data-select-count>0 selected</span>
-    <button class="button secondary subtle" type="submit" formaction="/shows/bulk/smartlead" data-requires-selection>Smartlead selected</button>
+    <button class="button secondary subtle" type="submit" formaction="/show-bulk/smartlead" data-requires-selection>Smartlead selected</button>
     <button class="button danger subtle" type="submit" onclick="return confirm('Delete the selected shows?');" data-requires-selection>Delete selected</button>
   </form>
   {% endif %}

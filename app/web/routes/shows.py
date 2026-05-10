@@ -78,6 +78,11 @@ def _sanitize_next_path(next_path: str | None, *, fallback: str) -> str:
     return fallback
 
 
+def _is_fetch_request(request: Request) -> bool:
+    headers = getattr(request, "headers", {})
+    return headers.get("x-requested-with") == "fetch"
+
+
 def _file_response(raw_path: str, *, not_found_detail: str) -> FileResponse:
     if not raw_path:
         raise HTTPException(status_code=404, detail=not_found_detail)
@@ -262,12 +267,15 @@ def update_show_route(
 def delete_show(show_id: int, request: Request, db: Session = Depends(get_db)):
     require_authenticated(request)
     show = _get_show_or_404(db, show_id)
+    deleted_show_id = show.id
     purge_show(db, show)
     db.commit()
+    if _is_fetch_request(request):
+        return JSONResponse({"ok": True, "deleted_id": deleted_show_id})
     return RedirectResponse("/shows/dashboard", status_code=status.HTTP_303_SEE_OTHER)
 
 
-@router.post("/shows/bulk/delete")
+@router.post("/show-bulk/delete")
 def delete_selected_shows(
     request: Request,
     show_ids: list[int] = Form(default_factory=list),
@@ -293,6 +301,8 @@ def delete_selected_shows(
         purge_show(db, show)
         deleted += 1
     db.commit()
+    if _is_fetch_request(request):
+        return JSONResponse({"ok": True, "deleted_count": deleted, "deleted_ids": unique_ids})
     request.session["flash_message"] = {
         "tone": "success",
         "title": "Selected shows deleted.",
@@ -301,7 +311,7 @@ def delete_selected_shows(
     return RedirectResponse(target_path, status_code=status.HTTP_303_SEE_OTHER)
 
 
-@router.post("/shows/bulk/scrape")
+@router.post("/show-bulk/scrape")
 def scrape_selected_shows(
     request: Request,
     show_ids: list[int] = Form(default_factory=list),
@@ -357,7 +367,7 @@ def scrape_selected_shows(
     return RedirectResponse(target_path, status_code=status.HTTP_303_SEE_OTHER)
 
 
-@router.post("/shows/bulk/smartlead")
+@router.post("/show-bulk/smartlead")
 def configure_selected_smartlead(
     request: Request,
     show_ids: list[int] = Form(default_factory=list),

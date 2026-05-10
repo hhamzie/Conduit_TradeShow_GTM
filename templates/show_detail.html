@@ -146,10 +146,10 @@
     </div>
     {% if analysis.company_profiles %}
     <div class="lead-table-toolbar">
+      <span class="lead-results-meta" data-lead-results>{{ analysis.export_company_count }} shown</span>
       <label class="lead-search-field" aria-label="Search exhibitors">
         <input type="text" placeholder="Search companies, booths, websites" data-lead-search />
       </label>
-      <span class="lead-results-meta" data-lead-results>{{ analysis.export_company_count }} shown</span>
     </div>
     {% endif %}
   </div>
@@ -197,6 +197,11 @@
         </tr>
       </tbody>
     </table>
+  </div>
+  <div class="lead-pagination" data-lead-pagination>
+    <button class="button secondary subtle" type="button" data-lead-prev>Previous</button>
+    <span class="lead-page-meta" data-lead-page>Page 1</span>
+    <button class="button secondary subtle" type="button" data-lead-next>Next</button>
   </div>
   <p class="mini-note">Search narrows the list. Scroll left or right if you need the full table.</p>
   {% else %}

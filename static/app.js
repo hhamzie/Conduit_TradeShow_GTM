@@ -1151,9 +1151,16 @@ function updateLeadTable(table) {
   const selectAll = table.querySelector("[data-lead-select-all]");
   const selectionItems = Array.from(table.querySelectorAll("[data-lead-select-item]"));
   const rows = Array.from(table.querySelectorAll("[data-lead-row]"));
+  const pagination = panel.querySelector("[data-lead-pagination]");
+  const pageTarget = panel.querySelector("[data-lead-page]");
+  const prevButton = panel.querySelector("[data-lead-prev]");
+  const nextButton = panel.querySelector("[data-lead-next]");
   const query = searchInput instanceof HTMLInputElement ? searchInput.value.trim().toLowerCase() : "";
+  const pageSize = 30;
+  const requestedPage = Number.parseInt(panel.dataset.leadPage || "1", 10);
+  let currentPage = Number.isFinite(requestedPage) && requestedPage > 0 ? requestedPage : 1;
 
-  let matchCount = 0;
+  const matchingRows = [];
 
   rows.forEach((row) => {
     const haystack = String(row.getAttribute("data-lead-search-text") || "").toLowerCase();
@@ -1162,9 +1169,18 @@ function updateLeadTable(table) {
       row.hidden = true;
       return;
     }
+    matchingRows.push(row);
+  });
 
-    matchCount += 1;
-    row.hidden = false;
+  const matchCount = matchingRows.length;
+  const pageCount = Math.max(1, Math.ceil(matchCount / pageSize));
+  currentPage = Math.min(currentPage, pageCount);
+  panel.dataset.leadPage = String(currentPage);
+  const rangeStart = matchCount === 0 ? 0 : (currentPage - 1) * pageSize;
+  const rangeEnd = Math.min(rangeStart + pageSize, matchCount);
+
+  matchingRows.forEach((row, index) => {
+    row.hidden = index < rangeStart || index >= rangeEnd;
   });
 
   if (emptyRow) {
@@ -1172,15 +1188,24 @@ function updateLeadTable(table) {
   }
 
   if (resultsTarget) {
-    const selectedCount = selectionItems.filter((item) => item.checked).length;
     if (matchCount === 0) {
-      resultsTarget.textContent = selectedCount > 0 ? `No matches · ${selectedCount} selected` : "No matches";
+      resultsTarget.textContent = "0 shown";
     } else {
-      resultsTarget.textContent =
-        selectedCount > 0
-          ? `${matchCount} shown · ${selectedCount} selected`
-          : `${matchCount} shown`;
+      resultsTarget.textContent = `${rangeStart + 1}-${rangeEnd} of ${matchCount} shown`;
     }
+  }
+
+  if (pageTarget) {
+    pageTarget.textContent = matchCount === 0 ? "Page 0 of 0" : `Page ${currentPage} of ${pageCount}`;
+  }
+  if (pagination instanceof HTMLElement) {
+    pagination.hidden = matchCount <= pageSize;
+  }
+  if (prevButton instanceof HTMLButtonElement) {
+    prevButton.disabled = currentPage <= 1;
+  }
+  if (nextButton instanceof HTMLButtonElement) {
+    nextButton.disabled = currentPage >= pageCount;
   }
 
   if (selectAll instanceof HTMLInputElement) {
@@ -1198,7 +1223,36 @@ function initializeLeadTables() {
     const panel = table.closest(".lead-panel");
     const searchInput = panel ? panel.querySelector("[data-lead-search]") : null;
     if (searchInput instanceof HTMLInputElement) {
-      searchInput.addEventListener("input", () => updateLeadTable(table));
+      searchInput.addEventListener("input", () => {
+        if (panel instanceof HTMLElement) {
+          panel.dataset.leadPage = "1";
+        }
+        updateLeadTable(table);
+      });
+    }
+
+    const prevButton = panel ? panel.querySelector("[data-lead-prev]") : null;
+    if (prevButton instanceof HTMLButtonElement) {
+      prevButton.addEventListener("click", () => {
+        if (!(panel instanceof HTMLElement)) {
+          return;
+        }
+        const currentPage = Number.parseInt(panel.dataset.leadPage || "1", 10);
+        panel.dataset.leadPage = String(Math.max(1, currentPage - 1));
+        updateLeadTable(table);
+      });
+    }
+
+    const nextButton = panel ? panel.querySelector("[data-lead-next]") : null;
+    if (nextButton instanceof HTMLButtonElement) {
+      nextButton.addEventListener("click", () => {
+        if (!(panel instanceof HTMLElement)) {
+          return;
+        }
+        const currentPage = Number.parseInt(panel.dataset.leadPage || "1", 10);
+        panel.dataset.leadPage = String(Math.max(1, currentPage + 1));
+        updateLeadTable(table);
+      });
     }
 
     const selectAll = table.querySelector("[data-lead-select-all]");
@@ -1274,6 +1328,8 @@ function initializeMultiSelectForms() {
       item.addEventListener("change", syncSelectionState);
     });
 
+    form.addEventListener("change", syncSelectionState);
+
     form.addEventListener("submit", (event) => {
       const selectedCount = getItems().filter((item) => item.checked).length;
       if (selectedCount === 0) {
@@ -1283,6 +1339,85 @@ function initializeMultiSelectForms() {
 
     syncSelectionState();
   });
+}
+
+function removeDashboardShowRows(showIds) {
+  showIds.forEach((showId) => {
+    document.querySelectorAll(`[data-show-row-id="${CSS.escape(String(showId))}"]`).forEach((row) => {
+      row.remove();
+    });
+  });
+  document.querySelectorAll("[data-multi-select-form]").forEach((form) => {
+    if (form instanceof HTMLFormElement) {
+      form.dispatchEvent(new Event("change"));
+    }
+  });
+}
+
+async function handleDashboardDeleteSubmit(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  if (!(form instanceof HTMLFormElement)) {
+    return;
+  }
+  const response = await fetch(form.action, {
+    method: "POST",
+    body: new FormData(form),
+    credentials: "same-origin",
+    headers: {
+      "X-Requested-With": "fetch",
+    },
+  });
+  if (!response.ok) {
+    window.location.reload();
+    return;
+  }
+  const payload = await response.json();
+  if (!payload.ok) {
+    window.location.reload();
+    return;
+  }
+  if (payload.deleted_id) {
+    removeDashboardShowRows([payload.deleted_id]);
+  }
+}
+
+async function handleDashboardBulkDeleteSubmit(event) {
+  const form = event.currentTarget;
+  if (!(form instanceof HTMLFormElement)) {
+    return;
+  }
+  const submitter = event.submitter instanceof HTMLElement ? event.submitter : null;
+  const action = submitter?.getAttribute("formaction") || form.action;
+  if (!action.includes("/show-bulk/delete")) {
+    return;
+  }
+  event.preventDefault();
+
+  const payload = new FormData(form);
+  document.querySelectorAll(`[form="${CSS.escape(form.id)}"][data-select-item]`).forEach((item) => {
+    if (item instanceof HTMLInputElement && item.checked) {
+      payload.append(item.name, item.value);
+    }
+  });
+  const response = await fetch(action, {
+    method: "POST",
+    body: payload,
+    credentials: "same-origin",
+    headers: {
+      "X-Requested-With": "fetch",
+    },
+  });
+  if (!response.ok) {
+    window.location.reload();
+    return;
+  }
+  const result = await response.json();
+  if (!result.ok) {
+    window.location.reload();
+    return;
+  }
+  removeDashboardShowRows(result.deleted_ids || []);
 }
 
 function initializeDismissibleNotices() {
@@ -1347,4 +1482,18 @@ document.addEventListener("DOMContentLoaded", () => {
   initializeDismissibleNotices();
   initializeOutboundModal();
   initializeScanModal();
+
+  const dashboardDeleteForms = document.querySelectorAll("[data-dashboard-delete-form]");
+  dashboardDeleteForms.forEach((form) => {
+    form.addEventListener("submit", (event) => {
+      void handleDashboardDeleteSubmit(event);
+    });
+  });
+
+  const dashboardBulkForms = document.querySelectorAll("[data-dashboard-bulk-form]");
+  dashboardBulkForms.forEach((form) => {
+    form.addEventListener("submit", (event) => {
+      void handleDashboardBulkDeleteSubmit(event);
+    });
+  });
 });
