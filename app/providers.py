@@ -814,6 +814,14 @@ def _get_smartlead_webhook(webhook_id: int) -> dict[str, object]:
     return data if isinstance(data, dict) else {}
 
 
+def _list_smartlead_lead_categories() -> list[dict[str, object]]:
+    _status_code, body = _smartlead_request("GET", "/leads/fetch-categories")
+    data = _extract_smartlead_data(body)
+    if isinstance(data, list):
+        return [item for item in data if isinstance(item, dict)]
+    return []
+
+
 def _event_type_map_from_webhook(event_types: object) -> dict[str, bool]:
     if isinstance(event_types, dict):
         return {
@@ -850,40 +858,103 @@ def _clone_template_webhooks(target_campaign_id: int, template_campaign_id: int,
     desired_name = _show_campaign_name(show)
     template_webhooks = _get_smartlead_campaign_webhooks(template_campaign_id)
     for webhook_summary in template_webhooks:
-        webhook_id = webhook_summary.get("id")
-        if webhook_id is None:
-            raise ValueError(f"Smartlead template campaign {template_campaign_id} returned a webhook without an id.")
-        webhook_detail = _get_smartlead_webhook(int(webhook_id))
-        webhook_url = str(webhook_detail.get("webhook_url", "")).strip()
-        if not webhook_url:
-            raise ValueError(f"Smartlead template webhook {webhook_id} is missing a webhook URL.")
+        webhook_detail: dict[str, object] | None = None
 
-        event_type_map = _event_type_map_from_webhook(
-            webhook_detail.get("event_type_map") or webhook_detail.get("event_types")
-        )
-        if not event_type_map:
-            raise ValueError(f"Smartlead template webhook {webhook_id} is missing event types.")
+        def ensure_webhook_detail() -> dict[str, object]:
+            nonlocal webhook_detail
+            if webhook_detail is not None:
+                return webhook_detail
+            webhook_id = webhook_summary.get("id")
+            if webhook_id is None:
+                raise ValueError(
+                    f"Smartlead template campaign {template_campaign_id} returned a webhook without an id."
+                )
+            webhook_detail = _get_smartlead_webhook(int(webhook_id))
+            return webhook_detail
+
+        webhook_url = str(webhook_summary.get("webhook_url", "")).strip()
+        if not webhook_url:
+            webhook_url = str(ensure_webhook_detail().get("webhook_url", "")).strip()
+        if not webhook_url:
+            raise ValueError("Smartlead template webhook is missing a webhook URL.")
+
+        event_types = webhook_summary.get("event_types")
+        if not isinstance(event_types, list) or not event_types:
+            event_types = ensure_webhook_detail().get("event_types")
+            if not isinstance(event_types, list) or not event_types:
+                event_type_map = _event_type_map_from_webhook(ensure_webhook_detail().get("event_type_map"))
+                event_types = [key for key, enabled in event_type_map.items() if enabled]
+        if not isinstance(event_types, list) or not event_types:
+            raise ValueError("Smartlead template webhook is missing event types.")
 
         payload: dict[str, object] = {
+            "id": None,
             "name": desired_name,
             "webhook_url": webhook_url,
-            "email_campaign_id": target_campaign_id,
-            "association_type": 3,
-            "event_type_map": event_type_map,
-            "force_create": True,
+            "event_types": [str(event_type).strip() for event_type in event_types if str(event_type).strip()],
         }
+        if not payload["event_types"]:
+            raise ValueError("Smartlead template webhook is missing event types.")
 
-        category_id_map = _category_id_map_from_webhook(
-            webhook_detail.get("category_id_map") or webhook_detail.get("categories")
-        )
-        if category_id_map:
-            payload["category_id_map"] = category_id_map
+        categories = webhook_summary.get("categories")
+        if not isinstance(categories, list):
+            categories = ensure_webhook_detail().get("categories")
+            if not isinstance(categories, list):
+                categories = None
+        if categories:
+            cleaned_categories = [str(category).strip() for category in categories if str(category).strip()]
+            if cleaned_categories:
+                payload["categories"] = cleaned_categories
 
-        webhook_type = webhook_detail.get("webhook_type")
-        if isinstance(webhook_type, str) and webhook_type.strip():
-            payload["webhook_type"] = webhook_type
+        _smartlead_request("POST", f"/campaigns/{target_campaign_id}/webhooks", payload=payload)
 
-        _smartlead_request("POST", "/webhook/create", payload=payload)
+
+def _normalize_ai_categorisation_option_ids(raw_options: object) -> list[int]:
+    categories = _list_smartlead_lead_categories()
+    if not categories:
+        return []
+
+    id_lookup: dict[str, int] = {}
+    name_lookup: dict[str, int] = {}
+    ordered_ids: list[int] = []
+    for category in categories:
+        category_id = category.get("id")
+        if category_id is None:
+            continue
+        try:
+            normalized_id = int(category_id)
+        except (TypeError, ValueError):
+            continue
+        ordered_ids.append(normalized_id)
+        id_lookup[str(normalized_id)] = normalized_id
+        name = str(category.get("name", "")).strip().lower()
+        if name:
+            name_lookup[name] = normalized_id
+
+    selected_ids: list[int] = []
+    if isinstance(raw_options, list):
+        for option in raw_options:
+            option_text = str(option).strip()
+            if not option_text:
+                continue
+            if option_text in id_lookup:
+                selected_ids.append(id_lookup[option_text])
+                continue
+            lowered = option_text.lower()
+            if lowered in name_lookup:
+                selected_ids.append(name_lookup[lowered])
+
+    if not selected_ids:
+        selected_ids = ordered_ids
+
+    deduped: list[int] = []
+    seen: set[int] = set()
+    for category_id in selected_ids:
+        if category_id in seen:
+            continue
+        seen.add(category_id)
+        deduped.append(category_id)
+    return deduped
 
 
 def _extract_delay_in_days(sequence: dict[str, object]) -> int:
@@ -951,8 +1022,6 @@ def _clone_template_settings(target_campaign_id: int, template_campaign_id: int,
         "force_plain_text",
         "follow_up_percentage",
         "enable_ai_esp_matching",
-        "ai_categorisation_options",
-        "out_of_office_detection_settings",
         "auto_pause_domain_leads_on_reply",
         "ignore_ss_mailbox_sending_limit",
         "bounce_autopause_threshold",
@@ -960,6 +1029,10 @@ def _clone_template_settings(target_campaign_id: int, template_campaign_id: int,
     ):
         if template.get(key) not in (None, "", []):
             settings_payload[key] = template.get(key)
+
+    ai_option_ids = _normalize_ai_categorisation_option_ids(template.get("ai_categorisation_options"))
+    if ai_option_ids:
+        settings_payload["ai_categorisation_options"] = ai_option_ids
 
     template_show_name = _template_show_name(template)
 

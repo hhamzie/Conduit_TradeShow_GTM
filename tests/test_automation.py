@@ -1089,9 +1089,6 @@ class AutomationTests(unittest.TestCase):
                                 "Interested",
                                 "Information Request",
                             ],
-                            "out_of_office_detection_settings": {
-                                "exclude_ooo_from_metrics": True,
-                            },
                         },
                     ),
                     patch(
@@ -1106,6 +1103,14 @@ class AutomationTests(unittest.TestCase):
                         ],
                     ),
                     patch("app.providers._get_smartlead_email_accounts", return_value=[{"id": 77}]),
+                    patch(
+                        "app.providers._list_smartlead_lead_categories",
+                        return_value=[
+                            {"id": 1, "name": "Interested"},
+                            {"id": 5, "name": "Information Request"},
+                            {"id": 9, "name": "Sender Originated Bounce"},
+                        ],
+                    ),
                     patch("app.providers._get_smartlead_campaign_webhooks", return_value=[{"id": 88}]),
                     patch(
                         "app.providers._get_smartlead_webhook",
@@ -1140,31 +1145,25 @@ class AutomationTests(unittest.TestCase):
         self.assertEqual(settings_payload["send_as_plain_text"], True)
         self.assertEqual(
             settings_payload["ai_categorisation_options"],
-            ["Sender Originated Bounce", "Interested", "Information Request"],
-        )
-        self.assertEqual(
-            settings_payload["out_of_office_detection_settings"],
-            {"exclude_ooo_from_metrics": True},
+            [9, 1, 5],
         )
 
         sequence_payload = next(payload for _method, path, payload in request_calls if path == "/campaigns/654/sequences")
         self.assertEqual(sequence_payload["sequences"][0]["subject"], "meet us at car wash show")
         self.assertEqual(sequence_payload["sequences"][0]["email_body"], "We are heading to Car Wash Show.")
 
-        webhook_payload = next(payload for _method, path, payload in request_calls if path == "/webhook/create")
+        webhook_payload = next(payload for _method, path, payload in request_calls if path == "/campaigns/654/webhooks")
+        self.assertEqual(webhook_payload["id"], None)
         self.assertEqual(webhook_payload["name"], "Car Wash Show - May 11th 2026")
         self.assertEqual(
             webhook_payload["webhook_url"],
             "https://smartlead-inbound.hhammad1212.workers.dev",
         )
-        self.assertEqual(webhook_payload["email_campaign_id"], 654)
-        self.assertEqual(webhook_payload["association_type"], 3)
-        self.assertEqual(webhook_payload["event_type_map"], {"LEAD_CATEGORY_UPDATED": True})
+        self.assertEqual(webhook_payload["event_types"], ["LEAD_CATEGORY_UPDATED"])
         self.assertEqual(
-            webhook_payload["category_id_map"],
-            {"Information Request": True, "Interested": True},
+            webhook_payload["categories"],
+            ["Information Request", "Interested"],
         )
-        self.assertEqual(webhook_payload["webhook_type"], "HTTP")
 
     def test_ensure_smartlead_campaign_rewrites_literal_template_show_name_in_sequences(self) -> None:
         show = make_show(name="Atlanta Market", event_date=date(2026, 6, 9))
