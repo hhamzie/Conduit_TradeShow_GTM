@@ -62,6 +62,25 @@ class WorkflowPresenterTests(unittest.TestCase):
         self.assertEqual(card.step_label, "Queue position 2 of 4")
         self.assertEqual(card.run_timing, "2 of 4 in scrape queue")
 
+    def test_build_show_card_shows_elapsed_time_for_scraping_shows(self) -> None:
+        now = datetime(2026, 5, 8, 12, 0)
+        show = make_show(
+            status=ShowStatus.scraping.value,
+            runs=[
+                CampaignRun(
+                    status=RunStatus.running.value,
+                    started_at=now - timedelta(minutes=17),
+                    created_at=now - timedelta(minutes=18),
+                )
+            ],
+        )
+
+        card = build_show_card(show, now, queue_position=1, queue_total=3)
+
+        self.assertEqual(card.status_label, "Scraping")
+        self.assertEqual(card.step_label, "Scraping now · queue position 1 of 3")
+        self.assertEqual(card.run_timing, "Scraping for 17m")
+
     def test_build_show_card_hides_old_completion_notice(self) -> None:
         now = datetime(2026, 5, 8, 12, 0)
         show = make_show(

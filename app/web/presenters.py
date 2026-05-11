@@ -203,6 +203,37 @@ def format_run_at_label(show: Show, now: datetime) -> str:
     return f"Queues in under an hour · scheduled for {when_label}"
 
 
+def _active_scrape_started_at(show: Show) -> datetime | None:
+    running_runs = [run for run in show.runs if run.status == RunStatus.running.value]
+    if not running_runs:
+        return None
+    return min(
+        (
+            run.started_at
+            or run.created_at
+            or show.run_at
+        )
+        for run in running_runs
+        if (run.started_at or run.created_at or show.run_at) is not None
+    )
+
+
+def format_scrape_elapsed_label(show: Show, now: datetime) -> str:
+    started_at = _active_scrape_started_at(show)
+    if started_at is None:
+        return "Scrape is running now"
+
+    elapsed_seconds = max(0, int((now - started_at).total_seconds()))
+    hours, remainder = divmod(elapsed_seconds, 3600)
+    minutes = remainder // 60
+
+    if hours > 0:
+        return f"Scraping for {hours}h {minutes}m"
+    if minutes > 0:
+        return f"Scraping for {minutes}m"
+    return "Scraping for under 1m"
+
+
 def build_scrape_queue_positions(shows: list[Show]) -> tuple[dict[int, int], int]:
     queue_items: list[tuple[int, datetime, int]] = []
     for show in shows:
@@ -318,6 +349,13 @@ def describe_show_flow(show: Show, now: datetime, *, queue_position: int | None 
 
 def build_show_card(show: Show, now: datetime, *, queue_position: int | None = None, queue_total: int = 0) -> ShowCard:
     flow = describe_show_flow(show, now, queue_position=queue_position, queue_total=queue_total)
+    if show.status == "scraping":
+        run_timing = format_scrape_elapsed_label(show, now)
+    elif show.status in {"queued", "scraping"} and queue_position and queue_total:
+        run_timing = f"{queue_position} of {queue_total} in scrape queue"
+    else:
+        run_timing = format_run_at_label(show, now)
+
     return ShowCard(
         show=show,
         error_summary=summarize_show_error(show.last_error),
@@ -325,11 +363,7 @@ def build_show_card(show: Show, now: datetime, *, queue_position: int | None = N
         step_label=flow["step"],
         next_action=flow["next_action"],
         section=flow["section"],
-        run_timing=(
-            f"{queue_position} of {queue_total} in scrape queue"
-            if show.status in {"queued", "scraping"} and queue_position and queue_total
-            else format_run_at_label(show, now)
-        ),
+        run_timing=run_timing,
         provider_summary=provider_status_summary(show),
         status_label=get_show_status_label(show.status, queue_position),
         queue_position=queue_position,
