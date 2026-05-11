@@ -34,7 +34,7 @@ from app.providers import (
 )
 from app.show_intelligence import _company_row_key
 from app.trade_show_feeder import is_b2b_physical_goods_show, scan_upcoming_trade_shows
-from scraper import ScrapeOptions, run_scrape
+from scraper import ScrapeOptions, run_agent_directory_csv_fallback, run_scrape
 
 
 MANUAL_TRADE_SHOW_SCAN_CHECKPOINT_KEY = "manual_trade_show_scan"
@@ -727,10 +727,41 @@ def _run_direct_scrape(
         )
 
     if best_result is not None:
+        try:
+            fallback_result = _run_openai_directory_csv_fallback(
+                show_name=show_name,
+                place=place,
+                link=link,
+                output_path=output_path,
+            )
+        except Exception as fallback_exc:  # noqa: BLE001
+            failure_messages.append(f"openai_csv_fallback: {fallback_exc}")
+        else:
+            if fallback_result.company_count >= minimum_company_count:
+                return fallback_result
+            best_result = fallback_result if fallback_result.company_count > best_result.company_count else best_result
+            failure_messages.append(
+                f"openai_csv_fallback: only found {fallback_result.company_count} exhibitors"
+            )
         raise RuntimeError(
             f"Scrape quality gate failed for {show_name}. "
             f"Best attempt found {best_result.company_count} exhibitors; need at least {minimum_company_count}. "
             f"Attempts: {'; '.join(failure_messages)}"
+        )
+    try:
+        fallback_result = _run_openai_directory_csv_fallback(
+            show_name=show_name,
+            place=place,
+            link=link,
+            output_path=output_path,
+        )
+    except Exception as fallback_exc:  # noqa: BLE001
+        failure_messages.append(f"openai_csv_fallback: {fallback_exc}")
+    else:
+        if fallback_result.company_count >= minimum_company_count:
+            return fallback_result
+        failure_messages.append(
+            f"openai_csv_fallback: only found {fallback_result.company_count} exhibitors"
         )
     raise RuntimeError(
         f"Scrape failed for {show_name}. Attempts: {'; '.join(failure_messages) or 'no successful scrape attempt'}"
@@ -763,6 +794,38 @@ def _run_direct_scrape_once(
             conference_name=show_name.strip(),
             conference_location=place.strip(),
             require_website=require_website,
+        )
+    )
+    return DirectScrapeResult(
+        output_path=result.output_path,
+        company_count=result.company_count,
+        failure_count=result.failures,
+        conference_name=result.conference_name,
+        conference_location=result.conference_location,
+    )
+
+
+def _run_openai_directory_csv_fallback(
+    *,
+    show_name: str,
+    place: str,
+    link: str,
+    output_path: Path,
+) -> DirectScrapeResult:
+    result = run_agent_directory_csv_fallback(
+        ScrapeOptions(
+            directory_url=link.strip(),
+            output_path=output_path,
+            workers=1,
+            max_pages=get_settings().default_max_pages,
+            sample_size=get_settings().default_sample_size,
+            browser_mode="prefer",
+            browser_timeout_ms=get_settings().default_browser_timeout_ms,
+            agent_mode="always",
+            agent_model="gpt-5",
+            conference_name=show_name.strip(),
+            conference_location=place.strip(),
+            require_website=False,
         )
     )
     return DirectScrapeResult(

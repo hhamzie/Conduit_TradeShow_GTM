@@ -18,28 +18,31 @@ def run_worker_loop() -> None:
     logger.info("Worker started. Poll interval=%ss", poll_seconds)
 
     while True:
-        with SessionLocal() as db:
-            weekly_sync = run_weekly_show_sync(db)
-            if weekly_sync is not None:
-                logger.info(
-                    "Weekly trade show sync finished. created=%s updated=%s skipped=%s filtered_out=%s",
-                    weekly_sync.created,
-                    weekly_sync.updated,
-                    weekly_sync.skipped,
-                    weekly_sync.filtered_out,
-                )
+        try:
+            with SessionLocal() as db:
+                weekly_sync = run_weekly_show_sync(db)
+                if weekly_sync is not None:
+                    logger.info(
+                        "Weekly trade show sync finished. created=%s updated=%s skipped=%s filtered_out=%s",
+                        weekly_sync.created,
+                        weekly_sync.updated,
+                        weekly_sync.skipped,
+                        weekly_sync.filtered_out,
+                    )
 
-            queued = queue_due_shows(db)
-            if queued:
-                logger.info("Queued %s due show(s).", queued)
+                queued = queue_due_shows(db)
+                if queued:
+                    logger.info("Queued %s due show(s).", queued)
 
-            campaign_run = run_next_campaign(db)
-            if campaign_run is not None:
-                logger.info("Processed campaign run %s with status=%s.", campaign_run.id, campaign_run.status)
+                campaign_run = run_next_campaign(db)
+                if campaign_run is not None:
+                    logger.info("Processed campaign run %s with status=%s.", campaign_run.id, campaign_run.status)
 
-            synced = sync_approved_shows(db)
-            if synced:
-                logger.info("Touched %s approved show(s) for provider sync.", synced)
+                synced = sync_approved_shows(db)
+                if synced:
+                    logger.info("Touched %s approved show(s) for provider sync.", synced)
+        except Exception:  # noqa: BLE001
+            logger.exception("Worker loop iteration failed. Continuing after backoff.")
 
         time.sleep(poll_seconds)
 

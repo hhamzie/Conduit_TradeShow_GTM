@@ -43,6 +43,7 @@ DEFAULT_BROWSER_TIMEOUT_MS = 25000
 DEFAULT_AGENT_MODE = os.getenv("SCRAPER_AGENT_MODE", "fallback")
 DEFAULT_AGENT_MODEL = os.getenv("SCRAPER_AGENT_MODEL", "gpt-4.1-mini")
 OPENAI_RESPONSES_URL = os.getenv("OPENAI_RESPONSES_URL", "https://api.openai.com/v1/responses")
+AGENT_MODEL_CANDIDATES = ("gpt-5", "gpt-4.1-mini", "gpt-4.1")
 MYS_DEFAULT_PAGE_SIZE = 50
 EXPOFP_DATA_FILENAME = "data.js"
 REQUEST_TIMEOUT_SECONDS = 30
@@ -6891,6 +6892,115 @@ def collect_entries_with_agent_fallback(
             queued_pages.add(next_page_url)
 
     return entries, adapter_title
+
+
+def _preferred_agent_models(preferred_model: str) -> tuple[str, ...]:
+    candidates: list[str] = []
+    normalized_preferred = preferred_model.strip()
+    if normalized_preferred:
+        candidates.append(normalized_preferred)
+    for candidate in AGENT_MODEL_CANDIDATES:
+        if candidate not in candidates:
+            candidates.append(candidate)
+    return tuple(candidates)
+
+
+def run_agent_directory_csv_fallback(options: ScrapeOptions) -> ScrapeResult:
+    seed_url = normalize_http_url(options.directory_url)
+    if not seed_url:
+        raise ValueError("Please provide a valid http(s) directory URL.")
+    if not openai_agent_is_configured():
+        raise RuntimeError("OpenAI agent CSV fallback needs OPENAI_API_KEY.")
+
+    browser_options = BrowserFallbackOptions(
+        mode=options.browser_mode,
+        timeout_ms=options.browser_timeout_ms,
+    )
+    browser_renderer: BrowserRenderer | None = None
+    if browser_options.enabled and BrowserRenderer.is_available():
+        browser_renderer = BrowserRenderer(timeout_ms=browser_options.timeout_ms)
+
+    try:
+        static_loader = load_static_page
+        browser_loader = (
+            (lambda url: load_browser_page(browser_renderer, url))
+            if browser_renderer is not None
+            else None
+        )
+        page_loader = browser_loader or static_loader
+        seed_url, _seed_html, seed_page = resolve_seed_page(seed_url, page_loader)
+
+        last_error: Exception | None = None
+        entries: list[DirectoryEntry] = []
+        adapter_title = ""
+        for model in _preferred_agent_models(options.agent_model):
+            try:
+                entries, adapter_title = collect_entries_with_agent_fallback(
+                    seed_url=seed_url,
+                    seed_page=seed_page,
+                    max_pages=options.max_pages,
+                    page_loader=page_loader,
+                    model=model,
+                )
+            except Exception as exc:  # noqa: BLE001
+                last_error = exc
+                continue
+            if entries:
+                break
+
+        if not entries:
+            if last_error is not None:
+                raise RuntimeError(
+                    f"OpenAI CSV fallback could not recover exhibitor links: {last_error}"
+                ) from last_error
+            raise RuntimeError("OpenAI CSV fallback did not recover any exhibitor links.")
+
+        conference_name = normalize_conference_label(options.conference_name)
+        if not conference_name:
+            conference_name = normalize_conference_label(adapter_title or infer_conference_name(seed_url, seed_page))
+        conference_location = normalize_text(options.conference_location)
+        if not conference_location:
+            conference_location = infer_conference_location(
+                seed_url,
+                seed_page,
+                conference_name=conference_name,
+            )
+
+        records = [
+            CompanyRecord(
+                sort_index=entry.sort_index,
+                directory_page=entry.directory_page,
+                company_name=maybe_enrich_company_name(entry.company_name, entry.website_url_hint),
+                profile_url=entry.profile_url,
+                website_url=validated_company_website_url(entry.company_name, entry.website_url_hint),
+                booth_number=entry.booth_number,
+            )
+            for entry in entries
+            if entry.company_name
+        ]
+        records.sort(key=lambda record: record.sort_index)
+
+        output_path = resolve_output_path(
+            str(options.output_path) if options.output_path is not None else None,
+            seed_url=seed_url,
+            seed_page=seed_page,
+        )
+        write_csv(
+            output_path,
+            records,
+            conference_name=conference_name,
+            conference_location=conference_location,
+        )
+        return ScrapeResult(
+            output_path=output_path,
+            company_count=len(records),
+            failures=0,
+            conference_name=conference_name,
+            conference_location=conference_location,
+        )
+    finally:
+        if browser_renderer is not None:
+            browser_renderer.close()
 
 
 def scrape_profile_details(profile_url: str) -> tuple[str, str]:

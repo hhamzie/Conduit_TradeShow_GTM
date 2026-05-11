@@ -2124,6 +2124,64 @@ class AutomationTests(unittest.TestCase):
             finally:
                 get_settings.cache_clear()
 
+    def test_run_direct_scrape_uses_openai_csv_fallback_after_quality_gate_failure(self) -> None:
+        from app.services import _run_direct_scrape
+
+        with patch.dict(os.environ, {"MIN_SCRAPE_COMPANY_COUNT": "51"}):
+            get_settings.cache_clear()
+            try:
+                with (
+                    patch(
+                        "app.services._run_direct_scrape_once",
+                        side_effect=[
+                            DirectScrapeResult(Path("/tmp/one.csv"), 12, 0, "Show", "Place"),
+                            DirectScrapeResult(Path("/tmp/two.csv"), 18, 0, "Show", "Place"),
+                            DirectScrapeResult(Path("/tmp/three.csv"), 23, 0, "Show", "Place"),
+                            DirectScrapeResult(Path("/tmp/four.csv"), 39, 0, "Show", "Place"),
+                        ],
+                    ),
+                    patch(
+                        "app.services._run_openai_directory_csv_fallback",
+                        return_value=DirectScrapeResult(Path("/tmp/agent.csv"), 62, 0, "Show", "Place"),
+                    ) as agent_fallback_mock,
+                ):
+                    result = _run_direct_scrape(
+                        show_name="Show",
+                        place="Place",
+                        link="https://example.com",
+                        output_path=Path("/tmp/output.csv"),
+                    )
+            finally:
+                get_settings.cache_clear()
+
+        self.assertEqual(result.company_count, 62)
+        agent_fallback_mock.assert_called_once()
+
+    def test_run_direct_scrape_uses_openai_csv_fallback_after_total_failure(self) -> None:
+        from app.services import _run_direct_scrape
+
+        with patch.dict(os.environ, {"MIN_SCRAPE_COMPANY_COUNT": "51"}):
+            get_settings.cache_clear()
+            try:
+                with (
+                    patch("app.services._run_direct_scrape_once", side_effect=RuntimeError("scrape exploded")),
+                    patch(
+                        "app.services._run_openai_directory_csv_fallback",
+                        return_value=DirectScrapeResult(Path("/tmp/agent.csv"), 58, 0, "Show", "Place"),
+                    ) as agent_fallback_mock,
+                ):
+                    result = _run_direct_scrape(
+                        show_name="Show",
+                        place="Place",
+                        link="https://example.com",
+                        output_path=Path("/tmp/output.csv"),
+                    )
+            finally:
+                get_settings.cache_clear()
+
+        self.assertEqual(result.company_count, 58)
+        agent_fallback_mock.assert_called_once()
+
     def test_run_next_campaign_uses_quality_gate_and_marks_low_result_failed(self) -> None:
         with patch.dict(os.environ, {"MIN_SCRAPE_COMPANY_COUNT": "6"}):
             get_settings.cache_clear()
