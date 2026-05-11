@@ -1084,6 +1084,14 @@ class AutomationTests(unittest.TestCase):
                             "track_settings": ["DONT_EMAIL_OPEN", "DONT_LINK_CLICK"],
                             "stop_lead_settings": "REPLY_TO_AN_EMAIL",
                             "send_as_plain_text": True,
+                            "ai_categorisation_options": [
+                                "Sender Originated Bounce",
+                                "Interested",
+                                "Information Request",
+                            ],
+                            "out_of_office_detection_settings": {
+                                "exclude_ooo_from_metrics": True,
+                            },
                         },
                     ),
                     patch(
@@ -1130,6 +1138,14 @@ class AutomationTests(unittest.TestCase):
         self.assertNotIn("track_settings", settings_payload)
         self.assertEqual(settings_payload["stop_lead_settings"], "REPLY_TO_AN_EMAIL")
         self.assertEqual(settings_payload["send_as_plain_text"], True)
+        self.assertEqual(
+            settings_payload["ai_categorisation_options"],
+            ["Sender Originated Bounce", "Interested", "Information Request"],
+        )
+        self.assertEqual(
+            settings_payload["out_of_office_detection_settings"],
+            {"exclude_ooo_from_metrics": True},
+        )
 
         sequence_payload = next(payload for _method, path, payload in request_calls if path == "/campaigns/654/sequences")
         self.assertEqual(sequence_payload["sequences"][0]["subject"], "meet us at car wash show")
