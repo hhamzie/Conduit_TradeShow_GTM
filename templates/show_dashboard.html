@@ -109,7 +109,6 @@
                 data-show-id="{{ analysis.show.id }}"
                 data-show-name="{{ analysis.show.name }}"
                 data-has-campaign="{{ 'true' if analysis.show.smartlead_campaign_id else 'false' }}"
-                data-campaign-url="{{ 'https://app.smartlead.ai/app/campaigns/' ~ analysis.show.smartlead_campaign_id if analysis.show.smartlead_campaign_id else '' }}"
                 data-campaign-name="{{ analysis.show.smartlead_campaign_name or '' }}"
                 data-campaign-active="{{ 'true' if analysis.has_running_campaign else 'false' }}"
               >
@@ -198,7 +197,6 @@
     <form action="" method="post" data-outbound-form>
       <div class="confirm-modal-actions">
         <button class="button secondary" type="button" data-outbound-close>Cancel</button>
-        <a class="button secondary subtle" href="#" target="_blank" rel="noreferrer" data-outbound-open hidden>Open campaign</a>
         <button class="button" type="submit" data-outbound-confirm>Create campaign</button>
       </div>
     </form>

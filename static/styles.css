@@ -1259,13 +1259,13 @@ button.button.subtle {
 }
 
 .confirm-modal {
-  width: min(100%, 440px);
-  padding: 24px;
+  width: min(100%, 520px);
+  padding: 28px;
   border-radius: 18px;
   border: 1px solid var(--line-strong);
   background: #ffffff;
   display: grid;
-  gap: 12px;
+  gap: 14px;
   position: relative;
 }
 
@@ -1277,13 +1277,24 @@ button.button.subtle {
 .confirm-modal-copy {
   margin: 0;
   line-height: 1.55;
+  max-width: 28rem;
 }
 
 .confirm-modal-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 10px;
-  margin-top: 6px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 10px;
+  align-items: stretch;
+}
+
+.confirm-modal-actions .button {
+  width: 100%;
+  min-height: 64px;
+  justify-content: center;
+  text-align: center;
+  padding-inline: 20px;
+  border-radius: 22px;
 }
 
 .scan-modal {

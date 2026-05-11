@@ -620,7 +620,6 @@ function openOutboundModal(trigger) {
   const copyTarget = modal ? modal.querySelector("[data-outbound-copy]") : null;
   const capacityTarget = modal ? modal.querySelector("[data-outbound-capacity-copy]") : null;
   const confirmButton = modal ? modal.querySelector("[data-outbound-confirm]") : null;
-  const openLink = modal ? modal.querySelector("[data-outbound-open]") : null;
   if (!(modal instanceof HTMLElement) || !(form instanceof HTMLFormElement) || !(copyTarget instanceof HTMLElement)) {
     return;
   }
@@ -628,7 +627,6 @@ function openOutboundModal(trigger) {
   const showId = trigger.dataset.showId || "";
   const showName = trigger.dataset.showName || "this show";
   const hasCampaign = trigger.dataset.hasCampaign === "true";
-  const campaignUrl = trigger.dataset.campaignUrl || "";
   const campaignName = trigger.dataset.campaignName || "";
   const campaignActive = trigger.dataset.campaignActive === "true";
 
@@ -651,11 +649,6 @@ function openOutboundModal(trigger) {
   if (confirmButton instanceof HTMLButtonElement) {
     confirmButton.disabled = false;
     confirmButton.textContent = hasCampaign ? "Rebuild from template" : "Create campaign";
-  }
-
-  if (openLink instanceof HTMLAnchorElement) {
-    openLink.hidden = !hasCampaign || !campaignUrl;
-    openLink.href = campaignUrl || "#";
   }
 
   modal.hidden = false;
