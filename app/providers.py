@@ -800,6 +800,92 @@ def _get_smartlead_email_accounts(campaign_id: int) -> list[dict[str, object]]:
     return []
 
 
+def _get_smartlead_campaign_webhooks(campaign_id: int) -> list[dict[str, object]]:
+    _status_code, body = _smartlead_request("GET", f"/campaigns/{campaign_id}/webhooks")
+    data = _extract_smartlead_data(body)
+    if isinstance(data, list):
+        return [item for item in data if isinstance(item, dict)]
+    return []
+
+
+def _get_smartlead_webhook(webhook_id: int) -> dict[str, object]:
+    _status_code, body = _smartlead_request("GET", f"/webhook/{webhook_id}")
+    data = _extract_smartlead_data(body)
+    return data if isinstance(data, dict) else {}
+
+
+def _event_type_map_from_webhook(event_types: object) -> dict[str, bool]:
+    if isinstance(event_types, dict):
+        return {
+            str(key).strip(): bool(value)
+            for key, value in event_types.items()
+            if str(key).strip() and bool(value)
+        }
+    if isinstance(event_types, list):
+        return {
+            str(event_type).strip(): True
+            for event_type in event_types
+            if str(event_type).strip()
+        }
+    return {}
+
+
+def _category_id_map_from_webhook(categories: object) -> dict[str, bool]:
+    if isinstance(categories, dict):
+        return {
+            str(key).strip(): bool(value)
+            for key, value in categories.items()
+            if str(key).strip() and bool(value)
+        }
+    if isinstance(categories, list):
+        return {
+            str(category).strip(): True
+            for category in categories
+            if str(category).strip()
+        }
+    return {}
+
+
+def _clone_template_webhooks(target_campaign_id: int, template_campaign_id: int, show: Show) -> None:
+    desired_name = _show_campaign_name(show)
+    template_webhooks = _get_smartlead_campaign_webhooks(template_campaign_id)
+    for webhook_summary in template_webhooks:
+        webhook_id = webhook_summary.get("id")
+        if webhook_id is None:
+            raise ValueError(f"Smartlead template campaign {template_campaign_id} returned a webhook without an id.")
+        webhook_detail = _get_smartlead_webhook(int(webhook_id))
+        webhook_url = str(webhook_detail.get("webhook_url", "")).strip()
+        if not webhook_url:
+            raise ValueError(f"Smartlead template webhook {webhook_id} is missing a webhook URL.")
+
+        event_type_map = _event_type_map_from_webhook(
+            webhook_detail.get("event_type_map") or webhook_detail.get("event_types")
+        )
+        if not event_type_map:
+            raise ValueError(f"Smartlead template webhook {webhook_id} is missing event types.")
+
+        payload: dict[str, object] = {
+            "name": desired_name,
+            "webhook_url": webhook_url,
+            "email_campaign_id": target_campaign_id,
+            "association_type": 3,
+            "event_type_map": event_type_map,
+            "force_create": True,
+        }
+
+        category_id_map = _category_id_map_from_webhook(
+            webhook_detail.get("category_id_map") or webhook_detail.get("categories")
+        )
+        if category_id_map:
+            payload["category_id_map"] = category_id_map
+
+        webhook_type = webhook_detail.get("webhook_type")
+        if isinstance(webhook_type, str) and webhook_type.strip():
+            payload["webhook_type"] = webhook_type
+
+        _smartlead_request("POST", "/webhook/create", payload=payload)
+
+
 def _extract_delay_in_days(sequence: dict[str, object]) -> int:
     if isinstance(sequence.get("seq_delay_details"), dict):
         details = sequence["seq_delay_details"]
@@ -915,6 +1001,7 @@ def _clone_template_settings(target_campaign_id: int, template_campaign_id: int,
         f"/campaigns/{target_campaign_id}/email-accounts",
         payload={"email_account_ids": account_ids},
     )
+    _clone_template_webhooks(target_campaign_id, template_campaign_id, show)
 
 
 def ensure_smartlead_campaign(show: Show, *, force_rebuild: bool = False) -> SmartleadSyncResult:
