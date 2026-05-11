@@ -839,6 +839,15 @@ def _apply_show_sequence_copy(value: str, show: Show, template_show_name: str) -
     return updated_value
 
 
+def _apply_show_sequence_subject(value: str, show: Show, template_show_name: str, *, seq_number: int) -> str:
+    updated_value = _apply_show_sequence_copy(value, show, template_show_name)
+    if seq_number != 1:
+        return updated_value
+    if template_show_name:
+        updated_value = updated_value.replace(show.name, show.name.lower())
+    return updated_value.replace("{{show_name}}", show.name.lower())
+
+
 def _clone_template_settings(target_campaign_id: int, template_campaign_id: int, show: Show) -> None:
     template = _get_smartlead_campaign(template_campaign_id)
     if not template:
@@ -879,7 +888,12 @@ def _clone_template_settings(target_campaign_id: int, template_campaign_id: int,
                 {
                     "id": None,
                     "seq_number": sequence.get("seq_number") or (index + 1),
-                    "subject": _apply_show_sequence_copy(str(sequence.get("subject", "")), show, template_show_name),
+                    "subject": _apply_show_sequence_subject(
+                        str(sequence.get("subject", "")),
+                        show,
+                        template_show_name,
+                        seq_number=int(sequence.get("seq_number") or (index + 1)),
+                    ),
                     "email_body": _apply_show_sequence_copy(str(sequence.get("email_body", "")), show, template_show_name),
                     "seq_delay_details": {"delay_in_days": _extract_delay_in_days(sequence)},
                 }
