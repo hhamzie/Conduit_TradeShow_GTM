@@ -730,6 +730,25 @@ def _run_direct_scrape(
                 workers=workers,
             )
         except Exception as exc:  # noqa: BLE001
+            if _is_layout_inference_failure(exc):
+                try:
+                    fallback_result = _run_openai_directory_csv_fallback(
+                        show_name=show_name,
+                        place=place,
+                        link=link,
+                        output_path=output_path,
+                    )
+                except Exception as fallback_exc:  # noqa: BLE001
+                    failure_messages.append(f"{attempt['label']}: {exc}")
+                    failure_messages.append(f"openai_csv_fallback: {fallback_exc}")
+                    break
+                if fallback_result.company_count > 0:
+                    return fallback_result
+                failure_messages.append(f"{attempt['label']}: {exc}")
+                failure_messages.append(
+                    f"openai_csv_fallback: only found {fallback_result.company_count} exhibitors"
+                )
+                break
             failure_messages.append(f"{attempt['label']}: {exc}")
             continue
         if best_result is None or result.company_count > best_result.company_count:
@@ -816,6 +835,16 @@ def _run_direct_scrape_once(
         failure_count=result.failures,
         conference_name=result.conference_name,
         conference_location=result.conference_location,
+    )
+
+
+def _is_layout_inference_failure(exc: Exception) -> bool:
+    message = str(exc).lower()
+    return (
+        "could not infer company/profile links" in message
+        or "could not validate a reliable listing strategy" in message
+        or "no company profile links were collected" in message
+        or "openai agent fallback did not recover any profile links" in message
     )
 
 

@@ -2310,6 +2310,37 @@ class AutomationTests(unittest.TestCase):
         self.assertEqual(result.company_count, 58)
         agent_fallback_mock.assert_called_once()
 
+    def test_run_direct_scrape_uses_openai_csv_fallback_immediately_for_layout_failures(self) -> None:
+        from app.services import _run_direct_scrape
+
+        with patch.dict(os.environ, {"MIN_SCRAPE_COMPANY_COUNT": "51"}):
+            get_settings.cache_clear()
+            try:
+                with (
+                    patch(
+                        "app.services._run_direct_scrape_once",
+                        side_effect=RuntimeError(
+                            "Could not infer company/profile links from the directory page."
+                        ),
+                    ) as scrape_once_mock,
+                    patch(
+                        "app.services._run_openai_directory_csv_fallback",
+                        return_value=DirectScrapeResult(Path("/tmp/agent.csv"), 73, 0, "Show", "Place"),
+                    ) as agent_fallback_mock,
+                ):
+                    result = _run_direct_scrape(
+                        show_name="Show",
+                        place="Place",
+                        link="https://example.com",
+                        output_path=Path("/tmp/output.csv"),
+                    )
+            finally:
+                get_settings.cache_clear()
+
+        self.assertEqual(result.company_count, 73)
+        self.assertEqual(scrape_once_mock.call_count, 1)
+        agent_fallback_mock.assert_called_once()
+
     def test_run_next_campaign_uses_quality_gate_and_marks_low_result_failed(self) -> None:
         with patch.dict(os.environ, {"MIN_SCRAPE_COMPANY_COUNT": "6"}):
             get_settings.cache_clear()

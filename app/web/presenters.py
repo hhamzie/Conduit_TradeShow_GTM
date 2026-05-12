@@ -75,9 +75,9 @@ def summarize_show_error(error_text: str) -> str:
         "could not infer company/profile links" in lowered
         and "browser fallback is unavailable" in lowered
     ):
-        return "This source failed before browser rendering was enabled. Retry now with browser support turned on."
+        return "Primary scraper stalled before it could map the exhibitor directory. OpenAI recovery still needs a usable pass."
     if "could not infer company/profile links" in lowered:
-        return "We reached the site, but the exhibitor layout still needs a source-specific extractor."
+        return "Primary scraper stalled before it could map the exhibitor directory. OpenAI recovery did not return a usable exhibitor list yet."
     if "browser fallback is unavailable" in lowered:
         return "This event site may require browser rendering. Retry now that browser support is installed."
     compact = " ".join(error_text.split())
