@@ -29,6 +29,7 @@ class WorkerTests(unittest.TestCase):
             patch("app.worker.SessionLocal", side_effect=lambda: _FakeSessionContext()),
             patch("app.worker.run_weekly_show_sync", side_effect=[RuntimeError("boom"), None]),
             patch("app.worker.queue_due_shows", return_value=0) as queue_mock,
+            patch("app.worker.backfill_queued_runs", return_value=0),
             patch("app.worker.run_next_campaign", return_value=None),
             patch("app.worker.sync_approved_shows", return_value=0),
             patch("app.worker.time.sleep", side_effect=fake_sleep),

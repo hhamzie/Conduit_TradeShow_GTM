@@ -20,7 +20,7 @@ from app.config import get_settings
 from app.database import Base
 from app.models import AutomationCheckpoint, CampaignRun, ClaySyncRow, RunStatus, Show, ShowGuideRow, ShowStatus
 from app.providers import ClayPollResult, ClayRecord, ProviderResult, SmartleadSyncResult, ensure_smartlead_campaign
-from app.services import _build_prepared_lead, BulkDirectScrapeResult, DirectScrapeResult, launch_show, list_shows, register_bulk_shows, remove_show_from_queue, run_bulk_direct_scrape, run_next_campaign, run_show_scrape, run_weekly_show_sync, start_outbound_campaign, sync_show_from_clay, upsert_show
+from app.services import _build_prepared_lead, backfill_queued_runs, BulkDirectScrapeResult, DirectScrapeResult, launch_show, list_shows, register_bulk_shows, remove_show_from_queue, run_bulk_direct_scrape, run_next_campaign, run_show_scrape, run_weekly_show_sync, start_outbound_campaign, sync_show_from_clay, upsert_show
 from app.trade_show_feeder import (
     TradeShowScanCandidate,
     TradeShowScanDebug,
@@ -406,6 +406,59 @@ class AutomationTests(unittest.TestCase):
             self.assertEqual(show.status, ShowStatus.queued.value)
             self.assertEqual(len(show.runs), 1)
             self.assertEqual(show.runs[0].status, RunStatus.queued.value)
+
+    def test_backfill_queued_runs_restores_missing_worker_job(self) -> None:
+        with self.Session() as session:
+            show = make_show(
+                name="Pack Expo",
+                event_date=date(2026, 6, 2),
+                status=ShowStatus.queued.value,
+                run_at=datetime(2026, 5, 19, 9, 0),
+                source_url="https://www.packexpo.com/show-directory",
+            )
+            session.add(show)
+            session.commit()
+
+            repaired = backfill_queued_runs(session, now=datetime(2026, 5, 11, 12, 0))
+            session.refresh(show)
+
+            self.assertEqual(repaired, 1)
+            self.assertEqual(show.run_at, datetime(2026, 5, 11, 12, 0))
+            self.assertEqual(len(show.runs), 1)
+            self.assertEqual(show.runs[0].status, RunStatus.queued.value)
+
+    def test_run_next_campaign_backfills_missing_queued_run_before_scraping(self) -> None:
+        with self.Session() as session, tempfile.TemporaryDirectory() as tmp_dir:
+            show = make_show(
+                name="Atlanta Market",
+                event_date=date(2026, 6, 9),
+                status=ShowStatus.queued.value,
+                run_at=datetime(2026, 5, 26, 9, 0),
+                source_url="https://www.atlantamarket.com/exhibitors",
+            )
+            session.add(show)
+            session.commit()
+
+            output_path = Path(tmp_dir) / "atlanta.csv"
+            output_path.write_text("company_name,website_url\nAcme,https://acme.com\n", encoding="utf-8")
+
+            with patch(
+                "app.services._run_direct_scrape",
+                return_value=DirectScrapeResult(
+                    output_path=output_path,
+                    company_count=12,
+                    failure_count=0,
+                    conference_name="Atlanta Market",
+                    conference_location="Atlanta, GA",
+                ),
+            ):
+                campaign_run = run_next_campaign(session)
+
+            assert campaign_run is not None
+            session.refresh(show)
+            self.assertEqual(campaign_run.status, RunStatus.success.value)
+            self.assertEqual(show.status, ShowStatus.ready_for_review.value)
+            self.assertEqual(show.company_count, 12)
 
     def test_upsert_show_reuses_existing_record_for_similar_name_within_five_day_window(self) -> None:
         with self.Session() as session:

@@ -5,7 +5,7 @@ import time
 
 from app.config import get_settings
 from app.database import SessionLocal, init_db
-from app.services import queue_due_shows, run_next_campaign, run_weekly_show_sync, sync_approved_shows
+from app.services import backfill_queued_runs, queue_due_shows, run_next_campaign, run_weekly_show_sync, sync_approved_shows
 
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -33,6 +33,10 @@ def run_worker_loop() -> None:
                 queued = queue_due_shows(db)
                 if queued:
                     logger.info("Queued %s due show(s).", queued)
+
+                repaired = backfill_queued_runs(db)
+                if repaired:
+                    logger.info("Backfilled %s queued show(s) that were missing a scrape run.", repaired)
 
                 campaign_run = run_next_campaign(db)
                 if campaign_run is not None:
