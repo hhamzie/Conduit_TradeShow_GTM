@@ -235,6 +235,18 @@ META_ATTR_RE = re.compile(
 HTML_TABLE_ROW_RE = re.compile(r"<tr\b[^>]*>(.*?)</tr>", re.IGNORECASE | re.DOTALL)
 HTML_TABLE_CELL_RE = re.compile(r"<t[dh]\b[^>]*>(.*?)</t[dh]>", re.IGNORECASE | re.DOTALL)
 HTML_HREF_RE = re.compile(r"""href=(["'])(.*?)\1""", re.IGNORECASE | re.DOTALL)
+DMC_EXHIBITOR_ITEM_RE = re.compile(
+    r'<li\b[^>]*class="[^"]*\bli__exhibitor\b[^"]*"[^>]*>(.*?)</li>',
+    re.IGNORECASE | re.DOTALL,
+)
+DMC_EXHIBITOR_NAME_RE = re.compile(
+    r'<h2\b[^>]*class="[^"]*\bh2__exhibitor\b[^"]*"[^>]*>\s*<a\b[^>]*href=(["\'])(?P<href>.*?)\1[^>]*>(?P<name>.*?)</a>',
+    re.IGNORECASE | re.DOTALL,
+)
+DMC_EXHIBITOR_ADDRESS_RE = re.compile(
+    r'<address\b[^>]*class="[^"]*\baddress__exhibitor\b[^"]*"[^>]*>(.*?)</address>',
+    re.IGNORECASE | re.DOTALL,
+)
 COMPANY_NAME_REGION_MARKERS = {
     "ca",
     "canada",
@@ -556,6 +568,10 @@ IFRAME_SRC_RE = re.compile(
     r"<iframe[^>]+\bsrc=[\"']([^\"']+)[\"']",
     re.IGNORECASE,
 )
+SCRIPTED_EVENTMAKER_IFRAME_URL_RE = re.compile(
+    r"https://[a-z0-9.-]+\.eventmaker\.io/[^\s\"']*(?:exhibitors|liste-exposants)[^\s\"']*",
+    re.IGNORECASE,
+)
 TRACKING_IFRAME_HOST_MARKERS = (
     "adnxs.com",
     "doubleclick.net",
@@ -741,6 +757,41 @@ OCR_URL_RE = re.compile(
     r"(?:https?://)?(?:www\.)?[a-z0-9][a-z0-9.-]+\.[a-z]{2,}(?:/[^\s]*)?",
     re.IGNORECASE,
 )
+ANDMORE_SITE_SLUGS = {
+    "atlantamarket.com": "atlanta-market",
+    "lasvegasmarket.com": "las-vegas-market",
+}
+ANDMORE_IMC_PAGE_SIZE = 100
+ANDMORE_IMC_DETAIL_BATCH_SIZE = 25
+ANDMORE_ITEM_ID_RE = re.compile(
+    r'"itemId"\s*:\s*"([0-9a-fA-F-]{36})"',
+    re.IGNORECASE,
+)
+ANDMORE_SITECORE_API_KEY_RE = re.compile(
+    r'sitecoreApiKey:"([0-9A-F-]{36})"',
+    re.IGNORECASE,
+)
+ANDMORE_SITE_NAME_RE = re.compile(
+    r'"site"\s*:\s*\{\s*"name"\s*:\s*"([^"]+)"',
+    re.IGNORECASE,
+)
+GATEWAY_CHILD_HOST_PREFERENCES: dict[str, tuple[str, ...]] = {
+    "luxepack.com": (
+        "luxepacknewyork.com",
+        "luxepackmonaco.com",
+        "luxepacklosangeles.com",
+        "luxepackshanghai.com",
+        "editionspeciale-luxepack.com",
+    ),
+    "packexpo.com": (
+        "packexpolasvegas.com",
+        "packexpointernational.com",
+        "packexposoutheast.com",
+        "packexpoeast.com",
+        "expopackmexico.com.mx",
+        "expopackguadalajara.com.mx",
+    ),
+}
 
 
 @dataclass(frozen=True)
@@ -878,6 +929,13 @@ class AjaxPaginatorConfig:
     total_results: int
     next_offset: int
     page_id: str = "openAjax"
+
+
+@dataclass(frozen=True)
+class AndmoreImcConfig:
+    site_slug: str
+    api_key: str
+    search_page_id: str
 
 
 @dataclass(frozen=True)
@@ -2457,6 +2515,12 @@ def score_directory_discovery_label(text: str) -> float:
     if "directory" in label:
         score += 40
     score += sum(25 for word in DISCOVERY_PARTICIPANT_WORDS if word in label)
+    if "listing" in label and any(word in label for word in DISCOVERY_PARTICIPANT_WORDS):
+        score += 25
+    if re.search(r"\b20\d{2}\b", label) and any(
+        word in label for word in ("exhibitor", "vendor", "directory", "brand")
+    ):
+        score += 45
     if "portal" in label:
         score -= 45
     if "floor plan" in label or "floorplan" in label:
@@ -2501,8 +2565,97 @@ def discover_related_directory_url(page: ParsedPage, seed_url: str) -> str | Non
     return best_url
 
 
+def iter_gateway_child_urls(seed_url: str, page: ParsedPage) -> list[str]:
+    seed_host = host_key(seed_url)
+    preferred_hosts = GATEWAY_CHILD_HOST_PREFERENCES.get(seed_host)
+    if not preferred_hosts:
+        return []
+
+    host_rank = {host: index for index, host in enumerate(preferred_hosts)}
+    candidates: list[tuple[int, int, str]] = []
+    seen_urls: set[str] = set()
+    for anchor in page.anchors:
+        absolute_url = normalize_http_url(anchor.absolute_url)
+        if not absolute_url or absolute_url in seen_urls:
+            continue
+        candidate_host = host_key(absolute_url)
+        if candidate_host not in host_rank:
+            continue
+        if candidate_host == seed_host:
+            continue
+
+        score = 1000 - host_rank[candidate_host] * 100
+        if anchor.in_main:
+            score += 80
+        if not anchor.in_nav:
+            score += 25
+        if not anchor.in_header:
+            score += 10
+        if any(word in anchor.display_text.lower() for word in ("exhibitor", "exhibitors", "community")):
+            score += 15
+
+        seen_urls.add(absolute_url)
+        candidates.append((score, anchor.order, absolute_url))
+
+    candidates.sort(key=lambda item: (-item[0], item[1], item[2]))
+    return [candidate_url for _score, _order, candidate_url in candidates]
+
+
+def find_gateway_show_directory_url(
+    seed_url: str,
+    page: ParsedPage,
+    page_loader: callable[[str], tuple[str, str, ParsedPage]],
+) -> str | None:
+    for candidate_url in iter_gateway_child_urls(seed_url, page):
+        try:
+            child_url, child_html, child_page = page_loader(candidate_url)
+        except Exception:
+            continue
+
+        if (
+            is_mapyourshow_directory(child_url, child_html)
+            or is_expofp_directory(child_url, child_html)
+            or is_andmore_imc_directory(child_url, child_html)
+            or is_bulletin_directory(child_url, child_html)
+        ):
+            return child_url
+
+        dallas_directory_url = find_dallas_market_center_directory_url(child_url, child_html)
+        if dallas_directory_url:
+            return dallas_directory_url
+
+        embedded_directory_url = find_embedded_directory_url(child_url, child_html)
+        if embedded_directory_url:
+            return embedded_directory_url
+
+        discovered_directory_url = discover_related_directory_url(child_page, child_url)
+        if discovered_directory_url:
+            return discovered_directory_url
+
+    return None
+
+
+def find_dallas_market_center_directory_url(seed_url: str, seed_html: str) -> str | None:
+    if host_key(seed_url) != "dallasmarketcenter.com":
+        return None
+
+    for _, raw_href in HTML_HREF_RE.findall(seed_html):
+        if "search-exhibitors-brands" not in raw_href.lower():
+            continue
+        normalized = normalize_http_url(urljoin(seed_url, html_unescape(raw_href)))
+        if normalized:
+            return normalized
+    return None
+
+
 def find_embedded_directory_url(seed_url: str, seed_html: str) -> str | None:
     candidates: list[tuple[int, str]] = []
+    preferred_language = ""
+    parsed_seed_path = (urlparse(seed_url).path or "").lower()
+    if "/en" in parsed_seed_path:
+        preferred_language = "/en/"
+    elif "/fr" in parsed_seed_path:
+        preferred_language = "/fr/"
 
     for match in IFRAME_SRC_RE.finditer(seed_html):
         normalized = normalize_http_url(urljoin(seed_url, match.group(1)))
@@ -2526,6 +2679,21 @@ def find_embedded_directory_url(seed_url: str, seed_html: str) -> str | None:
         if score > 0:
             candidates.append((score, normalized))
 
+    for match in SCRIPTED_EVENTMAKER_IFRAME_URL_RE.finditer(seed_html):
+        normalized = normalize_http_url(html_unescape(match.group(0)))
+        if not normalized:
+            continue
+        lowered = normalized.lower()
+        score = 0
+        if "eventmaker.io" in host_key(normalized):
+            score += 90
+        if any(marker in lowered for marker in ("exhibitor", "liste-exposants", "exhibitors-list")):
+            score += 60
+        if preferred_language and preferred_language in lowered:
+            score += 30
+        if score > 0:
+            candidates.append((score, normalized))
+
     if not candidates:
         return None
     candidates.sort(key=lambda item: item[0], reverse=True)
@@ -2545,8 +2713,45 @@ def resolve_seed_page(
         if (
             is_mapyourshow_directory(current_url, current_html)
             or is_expofp_directory(current_url, current_html)
+            or is_andmore_imc_directory(current_url, current_html)
         ):
             return current_url, current_html, current_page
+
+        gateway_directory_url = find_gateway_show_directory_url(
+            current_url,
+            current_page,
+            page_loader,
+        )
+        normalized_gateway_directory_url = (
+            normalize_url_ignoring_fragment(gateway_directory_url)
+            if gateway_directory_url
+            else None
+        )
+        if (
+            gateway_directory_url
+            and normalized_gateway_directory_url
+            and normalized_gateway_directory_url not in visited_seed_urls
+        ):
+            print(f"Following gateway child show directory: {gateway_directory_url}")
+            current_url, current_html, current_page = page_loader(gateway_directory_url)
+            visited_seed_urls.add(normalize_url_ignoring_fragment(current_url) or current_url)
+            continue
+
+        dallas_directory_url = find_dallas_market_center_directory_url(current_url, current_html)
+        normalized_dallas_directory_url = (
+            normalize_url_ignoring_fragment(dallas_directory_url)
+            if dallas_directory_url
+            else None
+        )
+        if (
+            dallas_directory_url
+            and normalized_dallas_directory_url
+            and normalized_dallas_directory_url not in visited_seed_urls
+        ):
+            print(f"Following Dallas Market Center directory link: {dallas_directory_url}")
+            current_url, current_html, current_page = page_loader(dallas_directory_url)
+            visited_seed_urls.add(normalize_url_ignoring_fragment(current_url) or current_url)
+            continue
 
         embedded_url = find_embedded_directory_url(current_url, current_html)
         normalized_embedded_url = (
@@ -2635,6 +2840,329 @@ def is_bulletin_directory(seed_url: str, seed_html: str) -> bool:
     if "exhibitor-directory" in path:
         return True
     return 'id="app"' in seed_html and "bulletin" in seed_html.lower()
+
+
+def is_andmore_imc_directory(seed_url: str, seed_html: str) -> bool:
+    host = host_key(seed_url)
+    if host not in ANDMORE_SITE_SLUGS:
+        return False
+    return (
+        "__JSS_STATE__" in seed_html
+        and "sitecoreApiKey" in seed_html
+    )
+
+
+def extract_andmore_imc_config(seed_url: str, seed_html: str) -> AndmoreImcConfig | None:
+    host = host_key(seed_url)
+    fallback_slug = ANDMORE_SITE_SLUGS.get(host)
+    if not fallback_slug:
+        return None
+
+    site_name_match = ANDMORE_SITE_NAME_RE.search(seed_html)
+    site_slug = normalize_text(site_name_match.group(1) if site_name_match else fallback_slug).lower()
+    api_key_match = ANDMORE_SITECORE_API_KEY_RE.search(seed_html)
+    item_id_match = ANDMORE_ITEM_ID_RE.search(seed_html)
+    if not api_key_match or not item_id_match:
+        return None
+
+    return AndmoreImcConfig(
+        site_slug=site_slug or fallback_slug,
+        api_key=api_key_match.group(1),
+        search_page_id=item_id_match.group(1).lower(),
+    )
+
+
+def fetch_json_data(url: str, extra_headers: dict[str, str] | None = None) -> object:
+    body = fetch_text(url, extra_headers=extra_headers)
+    try:
+        return json.loads(body)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"Expected JSON from {url}.") from exc
+
+
+def build_andmore_api_url(
+    seed_url: str,
+    path: str,
+    params: list[tuple[str, str]],
+) -> str:
+    return (
+        f"{urlparse(seed_url).scheme}://{urlparse(seed_url).netloc}{path}"
+        f"?{urlencode(params, doseq=True)}"
+    )
+
+
+def andmore_api_headers(config: AndmoreImcConfig) -> dict[str, str]:
+    return {
+        "Accept": "application/json, text/plain, */*",
+        "Channel": config.site_slug,
+    }
+
+
+def extract_andmore_showroom_display_name(
+    leases: object,
+    *,
+    site_slug: str,
+) -> str:
+    if not isinstance(leases, list):
+        return ""
+    for lease in leases:
+        if not isinstance(lease, dict):
+            continue
+        channel = lease.get("channel")
+        if not isinstance(channel, dict):
+            continue
+        lease_site_slug = normalize_text(str(channel.get("siteCode") or "")).lower()
+        if lease_site_slug and lease_site_slug != site_slug:
+            continue
+        showrooms = lease.get("showrooms")
+        if not isinstance(showrooms, list):
+            continue
+        for showroom in showrooms:
+            if not isinstance(showroom, dict):
+                continue
+            display_name = normalize_text(str(showroom.get("showroomDisplayName") or ""))
+            if display_name:
+                return display_name
+    return ""
+
+
+def extract_andmore_company_name(detail: object) -> str:
+    if not isinstance(detail, dict):
+        return ""
+    company_details = detail.get("companyDetails")
+    if isinstance(company_details, dict):
+        company_name = normalize_text(str(company_details.get("companyName") or ""))
+        if company_name:
+            return company_name
+    return normalize_text(str(detail.get("title") or ""))
+
+
+def extract_andmore_company_website(detail: object) -> str:
+    if not isinstance(detail, dict):
+        return ""
+    company_information = detail.get("companyInformation")
+    if not isinstance(company_information, dict):
+        return ""
+    return validated_company_website_url(
+        extract_andmore_company_name(detail),
+        str(company_information.get("companyWebsiteUrl") or ""),
+    )
+
+
+def detail_preference_rank(result_type: str) -> int:
+    normalized = normalize_text(result_type).lower()
+    if normalized == "exhibitor":
+        return 0
+    if normalized == "line":
+        return 1
+    return 2
+
+
+def display_title_from_site_slug(site_slug: str) -> str:
+    return " ".join(part.capitalize() for part in site_slug.split("-") if part)
+
+
+def collect_directory_entries_dallas_market_center(
+    seed_url: str,
+    seed_html: str,
+) -> tuple[list[DirectoryEntry], str] | None:
+    if host_key(seed_url) != "dallasmarketcenter.com":
+        return None
+    if "li__exhibitor" not in seed_html or "h2__exhibitor" not in seed_html:
+        return None
+
+    entries: list[DirectoryEntry] = []
+    seen_profiles: set[str] = set()
+    for item_html in DMC_EXHIBITOR_ITEM_RE.findall(seed_html):
+        name_match = DMC_EXHIBITOR_NAME_RE.search(item_html)
+        if not name_match:
+            continue
+        company_name = normalize_text(strip_tags(name_match.group("name")))
+        profile_url = normalize_http_url(urljoin(seed_url, html_unescape(name_match.group("href"))))
+        if not company_name or not profile_url or profile_url in seen_profiles:
+            continue
+
+        address_match = DMC_EXHIBITOR_ADDRESS_RE.search(item_html)
+        booth_number = ""
+        if address_match:
+            booth_number = normalize_text(strip_tags(address_match.group(1)))
+
+        seen_profiles.add(profile_url)
+        entries.append(
+            DirectoryEntry(
+                sort_index=len(entries),
+                directory_page=1,
+                company_name=company_name,
+                profile_url=profile_url,
+                booth_number=booth_number,
+            )
+        )
+
+    if not entries:
+        return None
+
+    print(
+        f"Collected {len(entries)} Dallas Market Center exhibitor entries from the rendered directory list."
+    )
+    return entries, "Dallas Market Center"
+
+
+def collect_directory_entries_andmore_imc(
+    seed_url: str,
+    seed_html: str,
+    *,
+    start_page: int | None,
+    end_page: int | None,
+    max_pages: int,
+    adapter_title: str,
+) -> tuple[list[DirectoryEntry], str] | None:
+    config = extract_andmore_imc_config(seed_url, seed_html)
+    if config is None:
+        return None
+
+    headers = andmore_api_headers(config)
+    clean_adapter_title = display_title_from_site_slug(config.site_slug) or adapter_title
+    count_url = build_andmore_api_url(
+        seed_url,
+        "/imc-api/v2/search/count",
+        [
+            ("sc_apiKey", config.api_key),
+            ("filterType", "exhibitor-directory"),
+            ("pageSize", "10"),
+            ("searchPage", config.search_page_id),
+        ],
+    )
+    count_payload = fetch_json_data(count_url, extra_headers=headers)
+    if not isinstance(count_payload, dict):
+        raise RuntimeError("ANDMORE directory count response was not a JSON object.")
+    total_results = int(count_payload.get("exhibitors") or 0)
+    if total_results <= 0:
+        raise RuntimeError("ANDMORE directory count response reported no exhibitors.")
+
+    total_pages = max(1, (total_results + ANDMORE_IMC_PAGE_SIZE - 1) // ANDMORE_IMC_PAGE_SIZE)
+    requested_start = max(start_page or 1, 1)
+    requested_end = min(end_page or total_pages, total_pages, requested_start + max_pages - 1)
+    if requested_start > requested_end:
+        raise ValueError("--start-page cannot be greater than --end-page.")
+
+    detail_by_exhibitor_id: dict[str, dict[str, object]] = {}
+    seen_exhibitor_ids: set[str] = set()
+    exhibitor_page_numbers: dict[str, int] = {}
+    ordered_exhibitor_ids: list[str] = []
+
+    for page_number in range(requested_start, requested_end + 1):
+        search_url = build_andmore_api_url(
+            seed_url,
+            "/imc-api/v2/exhibitors/search",
+            [
+                ("filterType", "exhibitor-directory"),
+                ("pageSize", str(ANDMORE_IMC_PAGE_SIZE)),
+                ("page", str(page_number)),
+                ("searchPage", config.search_page_id),
+                ("sc_apiKey", config.api_key),
+            ],
+        )
+        search_payload = fetch_json_data(search_url, extra_headers=headers)
+        if not isinstance(search_payload, dict):
+            raise RuntimeError(f"ANDMORE directory page {page_number} was not a JSON object.")
+        page_items = search_payload.get("data")
+        if not isinstance(page_items, list):
+            raise RuntimeError(f"ANDMORE directory page {page_number} did not include `data`.")
+
+        page_exhibitor_ids: list[str] = []
+        added = 0
+        for item in page_items:
+            if not isinstance(item, dict):
+                continue
+            exhibitor_id = normalize_text(str(item.get("exhibitorId") or ""))
+            if not exhibitor_id:
+                continue
+            if exhibitor_id in seen_exhibitor_ids:
+                existing = detail_by_exhibitor_id.get(exhibitor_id)
+                if (
+                    existing is not None
+                    and detail_preference_rank(str(item.get("type") or ""))
+                    < detail_preference_rank(str(existing.get("type") or ""))
+                ):
+                    detail_by_exhibitor_id[exhibitor_id] = item
+                continue
+            seen_exhibitor_ids.add(exhibitor_id)
+            exhibitor_page_numbers[exhibitor_id] = page_number
+            detail_by_exhibitor_id[exhibitor_id] = item
+            page_exhibitor_ids.append(exhibitor_id)
+            ordered_exhibitor_ids.append(exhibitor_id)
+            added += 1
+
+        for batch_start in range(0, len(page_exhibitor_ids), ANDMORE_IMC_DETAIL_BATCH_SIZE):
+            batch_ids = page_exhibitor_ids[batch_start:batch_start + ANDMORE_IMC_DETAIL_BATCH_SIZE]
+            detail_url = build_andmore_api_url(
+                seed_url,
+                "/imc-api/v2/exhibitors/OpenDetails",
+                [
+                    ("sc_apikey", config.api_key),
+                    ("pageId", config.search_page_id),
+                    *[("exhibitorIds", exhibitor_id) for exhibitor_id in batch_ids],
+                ],
+            )
+            detail_payload = fetch_json_data(detail_url, extra_headers=headers)
+            if not isinstance(detail_payload, dict):
+                raise RuntimeError("ANDMORE exhibitor details response was not a JSON object.")
+            detail_items = detail_payload.get("data")
+            if not isinstance(detail_items, list):
+                continue
+            for detail_index, detail in enumerate(detail_items):
+                if not isinstance(detail, dict):
+                    continue
+                directory_contact_info = detail.get("directoryContactInfo")
+                directory_contact_exhibitor_id = ""
+                if isinstance(directory_contact_info, dict):
+                    directory_contact_exhibitor_id = normalize_text(
+                        str(directory_contact_info.get("exhibitorId") or "")
+                    )
+                detail_exhibitor_id = normalize_text(
+                    str(detail.get("exhibitorId") or directory_contact_exhibitor_id or "")
+                )
+                if not detail_exhibitor_id and detail_index < len(batch_ids):
+                    detail_exhibitor_id = batch_ids[detail_index]
+                if not detail_exhibitor_id:
+                    continue
+                merged = dict(detail_by_exhibitor_id.get(detail_exhibitor_id) or {})
+                merged.update(detail)
+                detail_by_exhibitor_id[detail_exhibitor_id] = merged
+
+        print(
+            f"Collected ANDMORE directory page {page_number}/{requested_end} "
+            f"({len(page_items)} results, {len(seen_exhibitor_ids)} unique exhibitors, {added} new)."
+        )
+
+    entries: list[DirectoryEntry] = []
+    for exhibitor_id in ordered_exhibitor_ids:
+        detail = detail_by_exhibitor_id[exhibitor_id]
+        company_name = extract_andmore_company_name(detail)
+        if not company_name:
+            continue
+        company_details = detail.get("companyDetails")
+        leases = company_details.get("activeLeases") if isinstance(company_details, dict) else None
+        booth_number = extract_andmore_showroom_display_name(
+            leases,
+            site_slug=config.site_slug,
+        )
+        website_url_hint = extract_andmore_company_website(detail)
+        entries.append(
+            DirectoryEntry(
+                sort_index=len(entries),
+                directory_page=exhibitor_page_numbers.get(exhibitor_id, 1),
+                company_name=company_name,
+                profile_url="",
+                website_url_hint=website_url_hint,
+                booth_number=booth_number,
+            )
+        )
+
+    print(
+        f"Collected {len(entries)} unique ANDMORE exhibitor entries from the public directory API."
+    )
+    return entries, clean_adapter_title
 
 
 def mapyourshow_root_prefix(seed_url: str) -> str:
@@ -3900,6 +4428,8 @@ def collect_direct_landing_entries(
     seed_html: str,
     seed_page: ParsedPage,
 ) -> tuple[list[DirectoryEntry], str] | None:
+    if host_key(seed_url) in GATEWAY_CHILD_HOST_PREFERENCES:
+        return None
     wix_entries = collect_wix_gallery_entries(seed_url, seed_html)
     if wix_entries is not None:
         return wix_entries
@@ -3917,6 +4447,43 @@ def extract_table_row_entries(
     html_text: str,
     directory_page: int,
 ) -> list[DirectoryEntry]:
+    def is_descriptor_text(value: str) -> bool:
+        normalized = canonical_label(value)
+        return normalized in {
+            "new exhibitor",
+            "returning exhibitor",
+            "featured exhibitor",
+            "exhibitor",
+            "sponsor",
+        }
+
+    def infer_company_name(cell_texts: list[str]) -> str:
+        best_name = ""
+        best_score = float("-inf")
+        for index, raw_value in enumerate(cell_texts):
+            candidate_name = normalize_seed_company_name(raw_value)
+            if not candidate_name:
+                continue
+            if normalize_booth_number_candidate(candidate_name):
+                continue
+            if is_descriptor_text(candidate_name):
+                continue
+            if not is_companyish_text(candidate_name):
+                continue
+
+            score = float(len(candidate_name))
+            if index == 0:
+                score += 15
+            if "&" in candidate_name:
+                score += 5
+            if re.search(r"\bexhibitor\b", candidate_name, flags=re.IGNORECASE):
+                score -= 25
+
+            if score > best_score:
+                best_score = score
+                best_name = candidate_name
+        return best_name
+
     entries: list[DirectoryEntry] = []
     seen_profiles: set[str] = set()
     table_html = SCRIPT_STYLE_RE.sub(" ", html_text or "")
@@ -3930,11 +4497,17 @@ def extract_table_row_entries(
             continue
 
         cell_texts = [strip_tags(fragment) for fragment in cell_fragments]
-        company_name = normalize_seed_company_name(cell_texts[1])
+        company_name = infer_company_name(cell_texts)
         if not company_name or not is_companyish_text(company_name):
             continue
 
-        booth_code = normalize_text(cell_texts[0]) if cell_texts else ""
+        booth_code = ""
+        for raw_value in cell_texts:
+            booth_candidate = normalize_booth_number_candidate(raw_value)
+            if booth_candidate:
+                booth_code = booth_candidate
+                break
+
         profile_url = ""
         for _quote, raw_href in reversed(HTML_HREF_RE.findall(row_html)):
             normalized = normalize_http_url(urljoin(seed_url, raw_href))
@@ -6674,6 +7247,26 @@ def collect_entries_from_seed(
         )
         if bulletin_entries is not None:
             return bulletin_entries
+
+    if is_andmore_imc_directory(seed_url, seed_html):
+        print("Detected ANDMORE market directory. Using direct exhibitor API adapter.")
+        andmore_entries = collect_directory_entries_andmore_imc(
+            seed_url=seed_url,
+            seed_html=seed_html,
+            start_page=start_page,
+            end_page=end_page,
+            max_pages=max_pages,
+            adapter_title=seed_page.title,
+        )
+        if andmore_entries is not None:
+            return andmore_entries
+
+    dallas_entries = collect_directory_entries_dallas_market_center(
+        seed_url=seed_url,
+        seed_html=seed_html,
+    )
+    if dallas_entries is not None:
+        return dallas_entries
 
     landing_entries = collect_direct_landing_entries(
         seed_url=seed_url,
