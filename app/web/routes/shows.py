@@ -729,22 +729,43 @@ def confirm_scanned_trade_shows_route(
 
     db.commit()
     should_scrape = str(scrape_after_add).strip().lower() in {"1", "true", "yes"}
+    request_headers = getattr(request, "headers", {})
+    prefer_local_scrape = request_headers.get("x-prefer-local-scrape") == "1"
     job_id = ""
-    if should_scrape and queued_shows:
+    local_scrape_targets: list[dict[str, object]] = []
+    if should_scrape and queued_shows and not prefer_local_scrape:
         job_id = bulk_scrape_jobs.start_job(
             b"",
             run_offset_days=get_settings().default_run_offset_days,
             queued_shows=queued_shows,
         )
+    elif should_scrape and queued_shows and prefer_local_scrape:
+        local_scrape_targets = [
+            {
+                "show_id": queued_show.show_id,
+                "show_name": queued_show.show_name,
+                "event_date_raw": queued_show.event_date_raw,
+                "place": queued_show.place,
+                "link": queued_show.link,
+            }
+            for queued_show in queued_shows
+        ]
     request.session["flash_message"] = {
         "tone": "success",
         "title": "Trade show scan applied.",
         "detail": (
             f"Added {created}, updated {updated}, skipped {skipped}. "
-            f"{'Started scrape for selected shows.' if should_scrape and queued_shows else ''}"
+            f"{'Started scrape for selected shows.' if should_scrape and queued_shows and not prefer_local_scrape else ''}"
         ).strip(),
     }
-    return JSONResponse({"ok": True, "redirect": "/shows/dashboard", "job_id": job_id})
+    return JSONResponse(
+        {
+            "ok": True,
+            "redirect": "/shows/dashboard",
+            "job_id": job_id,
+            "local_scrape_targets": local_scrape_targets,
+        }
+    )
 
 
 @router.post("/shows/{show_id}/run-now")

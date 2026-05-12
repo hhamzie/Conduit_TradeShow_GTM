@@ -982,16 +982,39 @@ async function handleScanConfirm(event) {
   event.preventDefault();
   const form = event.currentTarget;
   const submitter = event.submitter instanceof HTMLElement ? event.submitter : null;
+  const wantsLocalScrape = submitter instanceof HTMLButtonElement && submitter.dataset.scanConfirmScrape !== undefined;
   setFormBusyState(form, true, "Adding...");
   try {
+    const formData = submitter ? new FormData(form, submitter) : new FormData(form);
+    const headers = {};
+    if (wantsLocalScrape) {
+      try {
+        await checkLocalScrapeHelper();
+        headers["X-Prefer-Local-Scrape"] = "1";
+      } catch (_error) {
+        // Fall back to server-side scraping when the helper is not available.
+      }
+    }
     const response = await fetch(form.action, {
       method: "POST",
-      body: submitter ? new FormData(form, submitter) : new FormData(form),
+      body: formData,
       credentials: "same-origin",
+      headers,
     });
     const payload = await response.json();
     if (!response.ok || !payload.ok) {
       throw new Error(payload.detail || payload.message || `Add failed (${response.status}).`);
+    }
+    if (wantsLocalScrape && Array.isArray(payload.local_scrape_targets) && payload.local_scrape_targets.length > 0) {
+      await tryRunLocalScrapeBatch(
+        payload.local_scrape_targets.map((target) => ({
+          showId: Number.parseInt(String(target.show_id || ""), 10),
+          showName: String(target.show_name || ""),
+          place: String(target.place || ""),
+          link: String(target.link || ""),
+          eventDateRaw: String(target.event_date_raw || ""),
+        })),
+      );
     }
     window.location.href = payload.redirect || "/shows/dashboard";
   } catch (error) {
@@ -1642,6 +1665,36 @@ async function uploadLocalScrapeResult(show, blob, failureCount) {
   return response.json();
 }
 
+async function runLocalScrapeForShow(show, onProgress = null) {
+  if (typeof onProgress === "function") {
+    onProgress(`Starting local scrape for ${show.showName}`);
+  }
+  const started = await startLocalScrapeJob(show);
+  if (typeof onProgress === "function") {
+    onProgress(`Scraping ${show.showName} locally`);
+  }
+  const finished = await pollLocalScrapeJob(started.job_id);
+  const blob = await fetchLocalScrapeFile(started.job_id);
+  if (typeof onProgress === "function") {
+    onProgress(`Uploading ${show.showName}`);
+  }
+  return uploadLocalScrapeResult(show, blob, finished.failure_count || 0);
+}
+
+async function tryRunLocalScrapeBatch(shows, options = {}) {
+  const onProgress = typeof options.onProgress === "function" ? options.onProgress : null;
+  await checkLocalScrapeHelper();
+  for (let index = 0; index < shows.length; index += 1) {
+    const show = shows[index];
+    const prefix = `${index + 1} of ${shows.length}`;
+    await runLocalScrapeForShow(show, (message) => {
+      if (onProgress) {
+        onProgress(`${prefix}: ${message}`);
+      }
+    });
+  }
+}
+
 async function handleDashboardBulkScrapeSubmit(event) {
   const form = event.currentTarget;
   if (!(form instanceof HTMLFormElement)) {
@@ -1664,17 +1717,13 @@ async function handleDashboardBulkScrapeSubmit(event) {
   setFormBusyState(form, true, "Scraping locally...");
 
   try {
-    await checkLocalScrapeHelper();
-    for (let index = 0; index < selectedShows.length; index += 1) {
-      const show = selectedShows[index];
-      if (countTarget instanceof HTMLElement) {
-        countTarget.textContent = `Scraping ${index + 1} of ${selectedShows.length}: ${show.showName}`;
-      }
-      const started = await startLocalScrapeJob(show);
-      const finished = await pollLocalScrapeJob(started.job_id);
-      const blob = await fetchLocalScrapeFile(started.job_id);
-      await uploadLocalScrapeResult(show, blob, finished.failure_count || 0);
-    }
+    await tryRunLocalScrapeBatch(selectedShows, {
+      onProgress(message) {
+        if (countTarget instanceof HTMLElement) {
+          countTarget.textContent = message;
+        }
+      },
+    });
     window.location.reload();
   } catch (error) {
     if (countTarget instanceof HTMLElement) {
@@ -1689,6 +1738,45 @@ async function handleDashboardBulkScrapeSubmit(event) {
     setFormBusyState(form, false, "Scraping locally...");
     if (countTarget instanceof HTMLElement) {
       countTarget.textContent = originalCountText || countTarget.textContent;
+    }
+  }
+}
+
+async function handleLocalShowScrapeFormSubmit(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  if (!(form instanceof HTMLFormElement)) {
+    return;
+  }
+
+  const show = {
+    showId: Number.parseInt(form.dataset.showId || "", 10),
+    showName: form.dataset.showName || "",
+    place: form.dataset.showPlace || "",
+    link: form.dataset.showLink || "",
+    eventDateRaw: form.dataset.showDate || "",
+  };
+  if (!Number.isInteger(show.showId) || !show.showName || !show.place || !show.link) {
+    form.requestSubmit();
+    return;
+  }
+
+  const submitButton = form.querySelector('button[type="submit"]');
+  const originalLabel = submitButton instanceof HTMLButtonElement ? submitButton.textContent : "";
+  if (submitButton instanceof HTMLButtonElement) {
+    submitButton.disabled = true;
+    submitButton.textContent = "Scraping locally...";
+  }
+
+  try {
+    await tryRunLocalScrapeBatch([show]);
+    window.location.href = `/shows/${show.showId}`;
+  } catch (_error) {
+    form.requestSubmit();
+  } finally {
+    if (submitButton instanceof HTMLButtonElement) {
+      submitButton.disabled = false;
+      submitButton.textContent = originalLabel;
     }
   }
 }
@@ -1838,6 +1926,13 @@ document.addEventListener("DOMContentLoaded", () => {
     });
     form.addEventListener("submit", (event) => {
       void handleDashboardBulkDeleteSubmit(event);
+    });
+  });
+
+  const localShowScrapeForms = document.querySelectorAll("[data-local-show-scrape-form]");
+  localShowScrapeForms.forEach((form) => {
+    form.addEventListener("submit", (event) => {
+      void handleLocalShowScrapeFormSubmit(event);
     });
   });
 });

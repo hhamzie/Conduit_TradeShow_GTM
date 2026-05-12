@@ -34,7 +34,7 @@
             <button class="action-menu-link action-menu-button" type="submit">Start email campaign</button>
           </form>
           {% elif can_manage and show.status in ["waiting", "failed", "live"] %}
-          <form action="/shows/{{ show.id }}/run-now" method="post" data-confirm-form data-confirm-title="Refresh exhibitor list?" data-confirm-copy="Confirm you want to rerun scraping for {{ show.name }}." data-confirm-button="Refresh list">
+          <form action="/shows/{{ show.id }}/run-now" method="post" data-local-show-scrape-form data-confirm-form data-confirm-title="Refresh exhibitor list?" data-confirm-copy="Confirm you want to rerun scraping for {{ show.name }}." data-confirm-button="Refresh list" data-show-id="{{ show.id }}" data-show-name="{{ show.name }}" data-show-place="{{ show.place }}" data-show-link="{{ show.source_url }}" data-show-date="{{ show.event_date.isoformat() }}">
             <button class="action-menu-link action-menu-button" type="submit">Refresh exhibitor list</button>
           </form>
           {% endif %}
