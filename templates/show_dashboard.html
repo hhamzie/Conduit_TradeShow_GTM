@@ -37,6 +37,7 @@
   </div>
 </section>
 
+{% if analyses or finished_analyses %}
 {% if analyses %}
 <section class="panel">
   {% if can_manage %}
@@ -187,6 +188,136 @@
     </table>
   </div>
 </section>
+{% endif %}
+
+{% if finished_analyses %}
+<section class="panel">
+  <div class="panel-head">
+    <div>
+      <h2>Finished Shows</h2>
+      <p class="muted">Past events stay here at the bottom once their show date has passed.</p>
+    </div>
+  </div>
+  <div class="table-wrap">
+    <table class="dashboard-table">
+      <thead>
+        <tr>
+          <th>Show</th>
+          <th>Relevant Companies</th>
+          <th>Complexity</th>
+          <th class="actions-col">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for analysis in finished_analyses %}
+        {% set outbound_plan = outbound_plans.get(analysis.show.id) %}
+        <tr class="dashboard-row-link{% if analysis.has_running_campaign %} dashboard-row-live{% else %} dashboard-row-past{% endif %}" data-row-href="/shows/{{ analysis.show.id }}" data-show-row-id="{{ analysis.show.id }}" title="Open show profile">
+          <td>
+            <div class="dashboard-show-cell">
+              <strong>{{ analysis.show.name }}</strong>
+              <span class="muted">{{ analysis.show.event_date }} · {{ analysis.exhibitor_count }} exhibitors{% if analysis.show.status %} · {{ show_status_label_for(analysis.show.status, queue_positions.get(analysis.show.id)) }}{% endif %}</span>
+            </div>
+          </td>
+          <td>
+            <div class="dashboard-stat-cell" data-tooltip="Guide companies with 10+ combined sales and support reps">
+              <strong class="dashboard-stat-value">{{ analysis.relevant_company_count }}</strong>
+            </div>
+          </td>
+          <td>
+            <div class="dashboard-stat-cell" data-tooltip="Guide complexity. 5 is the most complex.">
+              <strong class="dashboard-stat-value">{{ "%.1f"|format(analysis.average_complexity_score) if analysis.average_complexity_score else "0.0" }} / 5</strong>
+            </div>
+          </td>
+          <td class="actions-col">
+            <div class="dashboard-icon-rail">
+              {% if can_manage %}
+              <button
+                class="icon-button smartlead-icon{% if analysis.show.smartlead_campaign_id %}{% if analysis.has_running_campaign %} smartlead-icon-live{% endif %}{% else %} smartlead-icon-missing{% endif %}"
+                type="button"
+                data-tooltip="{% if analysis.show.smartlead_campaign_id %}Smartlead campaign options{% else %}Create Smartlead campaign{% endif %}"
+                data-outbound-trigger
+                data-show-id="{{ analysis.show.id }}"
+                data-show-name="{{ analysis.show.name }}"
+                data-has-campaign="{{ 'true' if analysis.show.smartlead_campaign_id else 'false' }}"
+                data-campaign-name="{{ analysis.show.smartlead_campaign_name or '' }}"
+                data-campaign-active="{{ 'true' if analysis.has_running_campaign else 'false' }}"
+              >
+                <img src="/static/smartlead-logo.svg" alt="" class="smartlead-mark-image" />
+              </button>
+              {% else %}
+              <span class="icon-button smartlead-icon smartlead-icon-missing" data-tooltip="No outbound campaign">
+                <img src="/static/smartlead-logo.svg" alt="" class="smartlead-mark-image" />
+              </span>
+              {% endif %}
+
+              {% if analysis.guide_company_count > 0 %}
+              <a class="icon-button guide-icon guide-icon-ready" href="/shows/{{ analysis.show.id }}/guide" data-tooltip="Open guide" aria-label="Open guide">
+                <svg viewBox="0 0 24 24" aria-hidden="true" class="icon-mark">
+                  <path d="M4.75 5.25A2.25 2.25 0 0 1 7 3h10.25A2.75 2.75 0 0 1 20 5.75v12.5A1.75 1.75 0 0 1 18.25 20H8.75A3.75 3.75 0 0 0 5 23V5.25Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+                  <path d="M5 5.25A2.25 2.25 0 0 1 7.25 3H8v17.5H7.75A2.75 2.75 0 0 0 5 23.25" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+                  <path d="M11 7.25h5.5M11 10.75h5.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                </svg>
+              </a>
+              {% elif can_manage %}
+              <details class="action-menu">
+                <summary class="icon-button guide-icon guide-icon-missing" data-tooltip="No guide yet. Click for options." aria-label="Guide options">
+                  <svg viewBox="0 0 24 24" aria-hidden="true" class="icon-mark">
+                    <path d="M4.75 5.25A2.25 2.25 0 0 1 7 3h10.25A2.75 2.75 0 0 1 20 5.75v12.5A1.75 1.75 0 0 1 18.25 20H8.75A3.75 3.75 0 0 0 5 23V5.25Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+                    <path d="M5 5.25A2.25 2.25 0 0 1 7.25 3H8v17.5H7.75A2.75 2.75 0 0 0 5 23.25" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+                    <path d="M11 7.25h5.5M11 10.75h5.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                  </svg>
+                </summary>
+                <div class="action-menu-panel">
+                  <form class="workbook-upload-form" action="/shows/{{ analysis.show.id }}/guide/upload" method="post" enctype="multipart/form-data" data-auto-submit-file-form>
+                    <input class="visually-hidden-file" id="guide-upload-finished-{{ analysis.show.id }}" type="file" name="workbook" accept=".xlsx,.xlsm" required />
+                    <label class="action-menu-link" for="guide-upload-finished-{{ analysis.show.id }}">Upload workbook</label>
+                  </form>
+                  <a class="action-menu-link" href="/shows/{{ analysis.show.id }}/guide">Open sheet</a>
+                </div>
+              </details>
+              {% else %}
+              <a class="icon-button guide-icon guide-icon-missing" href="/shows/{{ analysis.show.id }}/guide" data-tooltip="Guide not built yet" aria-label="Open guide">
+                <svg viewBox="0 0 24 24" aria-hidden="true" class="icon-mark">
+                  <path d="M4.75 5.25A2.25 2.25 0 0 1 7 3h10.25A2.75 2.75 0 0 1 20 5.75v12.5A1.75 1.75 0 0 1 18.25 20H8.75A3.75 3.75 0 0 0 5 23V5.25Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+                  <path d="M5 5.25A2.25 2.25 0 0 1 7.25 3H8v17.5H7.75A2.75 2.75 0 0 0 5 23.25" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+                  <path d="M11 7.25h5.5M11 10.75h5.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                </svg>
+              </a>
+              {% endif %}
+
+              {% if can_manage %}
+              <details class="action-menu">
+                <summary class="more-actions-trigger" data-tooltip="More actions" aria-label="More actions">
+                  <svg viewBox="0 0 24 24" aria-hidden="true" class="icon-mark">
+                    <circle cx="12" cy="5" r="1.8" fill="currentColor"/>
+                    <circle cx="12" cy="12" r="1.8" fill="currentColor"/>
+                    <circle cx="12" cy="19" r="1.8" fill="currentColor"/>
+                  </svg>
+                </summary>
+                <div class="action-menu-panel">
+                  <form action="/shows/{{ analysis.show.id }}/delete" method="post" data-dashboard-delete-form data-confirm-form data-confirm-title="Delete {{ analysis.show.name }}?" data-confirm-copy="Confirm you want to delete {{ analysis.show.name }} and all of its saved data." data-confirm-button="Delete" data-confirm-tone="danger">
+                    <button class="action-menu-link action-menu-button danger-link" type="submit">Delete show</button>
+                  </form>
+                </div>
+              </details>
+              {% else %}
+              <span class="more-actions-trigger" data-tooltip="Open row for profile">
+                <svg viewBox="0 0 24 24" aria-hidden="true" class="icon-mark">
+                  <circle cx="12" cy="5" r="1.8" fill="currentColor"/>
+                  <circle cx="12" cy="12" r="1.8" fill="currentColor"/>
+                  <circle cx="12" cy="19" r="1.8" fill="currentColor"/>
+                </svg>
+              </span>
+              {% endif %}
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
 {% if can_manage %}
 <div class="confirm-modal-backdrop" data-outbound-modal hidden>
   <section class="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="outbound-modal-title">

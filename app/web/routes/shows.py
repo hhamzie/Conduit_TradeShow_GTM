@@ -144,8 +144,14 @@ def _serialize_scan_debug(debug) -> dict[str, object]:
 def show_dashboard(request: Request, db: Session = Depends(get_db)):
     shows = list_shows(db)
     queue_positions, queue_total = build_scrape_queue_positions(shows)
-    analyses = build_show_analyses(shows, today=datetime.now().date(), company_limit=8)
-    outbound_plans = {analysis.show.id: build_outbound_plan(db, analysis.show) for analysis in analyses}
+    all_analyses = build_show_analyses(shows, today=datetime.now().date(), company_limit=8)
+    analyses = [analysis for analysis in all_analyses if not analysis.is_past_event]
+    finished_analyses = sorted(
+        [analysis for analysis in all_analyses if analysis.is_past_event],
+        key=lambda analysis: (analysis.show.event_date, analysis.show.name.lower()),
+        reverse=True,
+    )
+    outbound_plans = {analysis.show.id: build_outbound_plan(db, analysis.show) for analysis in all_analyses}
     return templates.TemplateResponse(
         "show_dashboard.html",
         template_context(
@@ -154,16 +160,18 @@ def show_dashboard(request: Request, db: Session = Depends(get_db)):
             can_manage=can_manage(request),
             title="Show Dashboard",
             analyses=analyses,
+            finished_analyses=finished_analyses,
             outbound_plans=outbound_plans,
             queue_positions=queue_positions,
             queue_total=queue_total,
             show_status_label_for=get_show_status_label,
-            tracked_count=len(analyses),
-            upcoming_count=sum(1 for analysis in analyses if analysis.days_until_event >= 0),
-            smartlead_campaign_count=sum(1 for analysis in analyses if analysis.show.smartlead_campaign_id),
-            running_campaign_count=sum(1 for analysis in analyses if analysis.has_running_campaign),
-            guide_ready_count=sum(1 for analysis in analyses if analysis.guide_company_count > 0),
-            total_exhibitors=sum(analysis.exhibitor_count for analysis in analyses),
+            tracked_count=len(all_analyses),
+            upcoming_count=len(analyses),
+            finished_count=len(finished_analyses),
+            smartlead_campaign_count=sum(1 for analysis in all_analyses if analysis.show.smartlead_campaign_id),
+            running_campaign_count=sum(1 for analysis in all_analyses if analysis.has_running_campaign),
+            guide_ready_count=sum(1 for analysis in all_analyses if analysis.guide_company_count > 0),
+            total_exhibitors=sum(analysis.exhibitor_count for analysis in all_analyses),
         ),
     )
 

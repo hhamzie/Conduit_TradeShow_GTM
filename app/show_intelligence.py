@@ -182,11 +182,8 @@ def build_show_analyses(
     return sorted(
         analyses,
         key=lambda analysis: (
-            -analysis.relevant_company_count,
-            -analysis.average_complexity_score,
-            -analysis.guide_average_people_per_company,
             analysis.days_until_event < 0,
-            abs(analysis.days_until_event),
+            analysis.show.event_date,
             analysis.show.name.lower(),
         ),
     )

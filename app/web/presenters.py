@@ -222,7 +222,7 @@ def format_scrape_elapsed_label(show: Show, now: datetime) -> str:
 
 
 def build_scrape_queue_positions(shows: list[Show]) -> tuple[dict[int, int], int]:
-    queue_items: list[tuple[datetime, int]] = []
+    queue_items: list[tuple[datetime, datetime, int]] = []
     for show in shows:
         if show.status != "queued":
             continue
@@ -238,10 +238,10 @@ def build_scrape_queue_positions(shows: list[Show]) -> tuple[dict[int, int], int
             )
         else:
             sort_at = show.run_at or datetime.max
-        queue_items.append((sort_at, show.id))
+        queue_items.append((datetime.combine(show.event_date, datetime.min.time()), sort_at, show.id))
 
-    queue_items.sort(key=lambda item: (item[0], item[1]))
-    positions = {show_id: index for index, (_sort_at, show_id) in enumerate(queue_items, start=1)}
+    queue_items.sort(key=lambda item: (item[0], item[1], item[2]))
+    positions = {show_id: index for index, (_event_at, _sort_at, show_id) in enumerate(queue_items, start=1)}
     return positions, len(queue_items)
 
 
@@ -371,7 +371,12 @@ def build_workflow_dashboard_view(shows: list[Show], now: datetime) -> WorkflowD
     scheduled_later: list[ShowCard] = []
     active = sorted(
         [item for item in show_cards if item.section in {"ready_now", "in_progress"}],
-        key=lambda item: (item.show.run_at or datetime.max, item.show.event_date, item.show.id),
+        key=lambda item: (
+            0 if item.show.status == "scraping" else 1,
+            item.show.event_date,
+            item.show.run_at or datetime.max,
+            item.show.id,
+        ),
     )
     completed = sorted(
         [item for item in show_cards if item.section == "completed"],
