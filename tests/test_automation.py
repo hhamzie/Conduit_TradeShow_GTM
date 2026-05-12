@@ -2063,6 +2063,38 @@ class AutomationTests(unittest.TestCase):
             self.assertIn("Started scrape", request.session["flash_message"]["detail"])
             self.assertEqual(start_job_mock.call_count, 1)
 
+    def test_confirm_scanned_trade_shows_route_returns_local_targets_when_preferred(self) -> None:
+        from app.main import confirm_scanned_trade_shows_route
+
+        request = type("Req", (), {"session": {}, "headers": {"x-prefer-local-scrape": "1"}})()
+        payload = json.dumps(
+            [
+                {
+                    "show_name": "Las Vegas Market",
+                    "event_date_raw": "2026-07-26",
+                    "place": "Las Vegas, NV",
+                    "link": "https://www.lasvegasmarket.com/en/exhibitor/exhibitor-directory",
+                    "summary": "Wholesale market.",
+                }
+            ]
+        )
+        with self.Session() as session:
+            with (
+                patch("app.web.routes.shows.require_authenticated"),
+                patch("app.web.routes.shows.bulk_scrape_jobs.start_job") as start_job_mock,
+            ):
+                response = confirm_scanned_trade_shows_route(
+                    request=request,
+                    candidates_json=payload,
+                    scrape_after_add="true",
+                    db=session,
+                )
+
+            self.assertEqual(response.status_code, 200)
+            self.assertIn(b'"local_scrape_targets":[', response.body)
+            self.assertIn(b'"show_name":"Las Vegas Market"', response.body)
+            start_job_mock.assert_not_called()
+
     def test_scrape_pending_shows_route_only_queues_unpopulated_shows(self) -> None:
         from app.main import scrape_pending_shows_route
 
