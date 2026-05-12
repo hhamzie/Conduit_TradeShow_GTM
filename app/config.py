@@ -95,7 +95,7 @@ def get_settings() -> Settings:
         export_dir=export_dir,
         default_run_offset_days=int(os.getenv("DEFAULT_RUN_OFFSET_DAYS", "14")),
         worker_poll_seconds=int(os.getenv("WORKER_POLL_SECONDS", "30")),
-        default_scraper_workers=int(os.getenv("DEFAULT_SCRAPER_WORKERS", "2")),
+        default_scraper_workers=int(os.getenv("DEFAULT_SCRAPER_WORKERS", "1")),
         bulk_scraper_workers=int(os.getenv("BULK_SCRAPER_WORKERS", "1")),
         default_max_pages=int(os.getenv("DEFAULT_MAX_PAGES", "250")),
         default_sample_size=int(os.getenv("DEFAULT_SAMPLE_SIZE", "3")),
