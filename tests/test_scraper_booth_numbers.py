@@ -28,6 +28,7 @@ from scraper import (
     normalize_booth_number_candidate,
     parse_page,
     should_browser_resolve_company_record,
+    stream_company_records_to_csv,
     write_csv,
 )
 
@@ -210,6 +211,47 @@ class BoothNumberTests(unittest.TestCase):
         self.assertEqual(len(records), 1)
         self.assertEqual(records[0].website_url, "https://acme.com")
         scrape_mock.assert_called_once_with("https://example.com/acme")
+
+    def test_stream_company_records_to_csv_writes_serially_without_large_record_buffer(self) -> None:
+        entries = [
+            DirectoryEntry(
+                sort_index=0,
+                directory_page=1,
+                company_name="Acme Packaging",
+                profile_url="https://example.com/acme",
+                website_url_hint="",
+                booth_number="C21",
+            ),
+            DirectoryEntry(
+                sort_index=1,
+                directory_page=1,
+                company_name="Beta Labs",
+                profile_url="https://example.com/beta",
+                website_url_hint="",
+                booth_number="D14",
+            ),
+        ]
+
+        def fake_scrape(url: str) -> tuple[str, str]:
+            if "acme" in url:
+                return "https://acme.com", "C21"
+            return "", "D14"
+
+        with tempfile.TemporaryDirectory() as tmp_dir, patch("scraper.scrape_profile_details", side_effect=fake_scrape):
+            output_path = Path(tmp_dir) / "export.csv"
+            count, failures = stream_company_records_to_csv(
+                entries=entries,
+                output_path=output_path,
+                conference_name="Pack Expo",
+                conference_location="Las Vegas, NV",
+                require_website=True,
+            )
+            text = output_path.read_text(encoding="utf-8")
+
+        self.assertEqual(failures, 0)
+        self.assertEqual(count, 1)
+        self.assertIn("Acme Packaging", text)
+        self.assertNotIn("Beta Labs", text)
 
     def test_extract_booth_number_from_profile_looks_for_labeled_value(self) -> None:
         html = """
