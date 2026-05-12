@@ -28,6 +28,7 @@ from app.show_guides import build_guide_sheet_views, get_guide_sheet
 from app.show_intelligence import build_show_analysis, build_show_analyses
 from app.services import (
     approve_show,
+    apply_uploaded_scrape_result,
     build_pending_scrape_queue,
     build_outbound_plan,
     delete_show_export_rows,
@@ -752,6 +753,38 @@ def run_show_now(show_id: int, request: Request, db: Session = Depends(get_db)):
     show = _get_show_or_404(db, show_id)
     queue_show_now(db, show)
     return RedirectResponse(f"/shows/{show_id}", status_code=status.HTTP_303_SEE_OTHER)
+
+
+@router.post("/shows/{show_id}/local-scrape-upload")
+async def upload_local_scrape_result_route(
+    show_id: int,
+    request: Request,
+    export_file: UploadFile = File(...),
+    failure_count: int = Form(0),
+    db: Session = Depends(get_db),
+):
+    require_authenticated(request)
+    show = _get_show_or_404(db, show_id)
+    payload = await export_file.read()
+    try:
+        result = apply_uploaded_scrape_result(
+            db,
+            show,
+            payload=payload,
+            failure_count=failure_count,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return JSONResponse(
+        {
+            "ok": True,
+            "show_id": show.id,
+            "company_count": result.company_count,
+            "output_path": str(result.output_path),
+            "status": show.status,
+        }
+    )
 
 
 @router.get("/shows/{show_id}/export")

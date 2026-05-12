@@ -1177,6 +1177,55 @@ class AutomationTests(unittest.TestCase):
             self.assertEqual(show.smartlead_campaign_name, "Luxe Pack - May 6th 2026")
             self.assertEqual(request.session["flash_message"]["title"], "Smartlead campaign ready.")
 
+    def test_upload_local_scrape_result_route_applies_csv_to_show(self) -> None:
+        async def run_test() -> None:
+            from fastapi import UploadFile
+            from app.main import upload_local_scrape_result_route
+
+            payload = (
+                "company_name,booth_number,website_url,Location,Conference\n"
+                "Acme Packaging,C21,https://acme.com,Las Vegas,Pack Expo\n"
+                "Beta Labs,D14,https://beta.com,Las Vegas,Pack Expo\n"
+            ).encode("utf-8")
+            upload = UploadFile(filename="export.csv", file=io.BytesIO(payload))
+            request = type("Req", (), {"session": {}})()
+
+            with self.Session() as session:
+                show = make_show(
+                    name="Pack Expo",
+                    place="Las Vegas, NV",
+                    source_url="https://www.packexpolasvegas.com/",
+                    status=ShowStatus.queued.value,
+                )
+                session.add(show)
+                session.commit()
+
+                with patch("app.web.routes.shows.require_authenticated"):
+                    response = await upload_local_scrape_result_route(
+                        show_id=show.id,
+                        request=request,
+                        export_file=upload,
+                        failure_count=2,
+                        db=session,
+                    )
+
+                session.refresh(show)
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(show.status, ShowStatus.ready_for_review.value)
+                self.assertEqual(show.company_count, 2)
+                self.assertEqual(show.failure_count, 2)
+                self.assertTrue(show.latest_export_path.endswith("pack-expo_2026-05-06.csv"))
+                saved_rows = Path(show.latest_export_path).read_text(encoding="utf-8")
+                self.assertIn("Acme Packaging", saved_rows)
+                self.assertEqual(
+                    session.scalar(select(CampaignRun.status).where(CampaignRun.show_id == show.id)),
+                    RunStatus.success.value,
+                )
+
+        import asyncio
+
+        asyncio.run(run_test())
+
     def test_rebuild_smartlead_campaign_route_forces_rebuild(self) -> None:
         from app.main import rebuild_smartlead_campaign_route
 
