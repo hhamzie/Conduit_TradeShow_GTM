@@ -553,8 +553,7 @@ def parse_show_date(raw_value: str, today: date | None = None) -> date:
 
 
 def compute_run_at(event_date: date, run_offset_days: int) -> datetime:
-    target_day = event_date - timedelta(days=run_offset_days)
-    return datetime.combine(target_day, time(hour=9, minute=0))
+    return datetime.now()
 
 
 def _queue_show_if_due(db: Session, show: Show, *, now: datetime | None = None) -> bool:
