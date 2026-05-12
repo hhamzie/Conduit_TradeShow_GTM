@@ -4,7 +4,7 @@ from datetime import date, datetime, timedelta
 import unittest
 
 from app.models import CampaignRun, RunStatus, Show, ShowStatus
-from app.web.presenters import build_show_card, build_workflow_dashboard_view, summarize_show_error
+from app.web.presenters import build_scrape_queue_positions, build_show_card, build_workflow_dashboard_view, summarize_show_error
 
 
 def make_show(**overrides) -> Show:
@@ -68,6 +68,28 @@ class WorkflowPresenterTests(unittest.TestCase):
         self.assertEqual(card.status_label, "#2 in line")
         self.assertEqual(card.step_label, "Queue position 2 of 4")
         self.assertEqual(card.run_timing, "2 of 4 in scrape queue")
+
+    def test_build_scrape_queue_positions_prefers_earlier_event_date(self) -> None:
+        earlier_show = make_show(
+            id=101,
+            name="Earlier Show",
+            event_date=date(2026, 5, 16),
+            status=ShowStatus.queued.value,
+            runs=[CampaignRun(status=RunStatus.queued.value, created_at=datetime(2026, 5, 12, 9, 30))],
+        )
+        later_show = make_show(
+            id=202,
+            name="Later Show",
+            event_date=date(2026, 6, 2),
+            status=ShowStatus.queued.value,
+            runs=[CampaignRun(status=RunStatus.queued.value, created_at=datetime(2026, 5, 12, 8, 0))],
+        )
+
+        positions, total = build_scrape_queue_positions([later_show, earlier_show])
+
+        self.assertEqual(total, 2)
+        self.assertEqual(positions[earlier_show.id], 1)
+        self.assertEqual(positions[later_show.id], 2)
 
     def test_build_show_card_shows_elapsed_time_for_scraping_shows(self) -> None:
         now = datetime(2026, 5, 8, 12, 0)

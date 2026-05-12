@@ -813,7 +813,7 @@ def _run_direct_scrape_once(
     workers: int | None = None,
 ) -> DirectScrapeResult:
     settings = get_settings()
-    direct_scrape_workers = workers or min(settings.default_scraper_workers, 4)
+    direct_scrape_workers = max(1, min(workers or settings.default_scraper_workers, 2))
     result = run_scrape(
         ScrapeOptions(
             directory_url=link.strip(),
@@ -906,6 +906,8 @@ def run_single_show_scrape(
 
 
 def run_show_scrape(db: Session, show: Show, *, workers: int | None = None) -> DirectScrapeResult:
+    settings = get_settings()
+    scrape_workers = max(1, min(workers or settings.default_scraper_workers, 2))
     campaign_run = next(
         (
             run
@@ -937,7 +939,7 @@ def run_show_scrape(db: Session, show: Show, *, workers: int | None = None) -> D
             output_path=export_path_for_show(show),
             require_website=True,
             browser_mode="auto",
-            workers=workers,
+            workers=scrape_workers,
         )
     except Exception as exc:  # noqa: BLE001
         campaign_run.status = RunStatus.failed.value
@@ -2156,9 +2158,10 @@ def run_next_campaign(db: Session) -> CampaignRun | None:
 
     campaign_run = db.scalar(
         select(CampaignRun)
+        .join(CampaignRun.show)
         .options(selectinload(CampaignRun.show))
         .where(CampaignRun.status == RunStatus.queued.value)
-        .order_by(CampaignRun.created_at.asc())
+        .order_by(Show.event_date.asc(), CampaignRun.created_at.asc(), CampaignRun.id.asc())
     )
     if campaign_run is None:
         return None
@@ -2178,7 +2181,7 @@ def run_next_campaign(db: Session) -> CampaignRun | None:
             output_path=export_path_for_show(show),
             require_website=True,
             browser_mode=get_settings().default_browser_mode,
-            workers=get_settings().default_scraper_workers,
+            workers=1,
         )
     except Exception as exc:  # noqa: BLE001
         campaign_run.status = RunStatus.failed.value

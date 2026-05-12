@@ -488,6 +488,44 @@ class AutomationTests(unittest.TestCase):
             queued_runs = [run for run in second.runs if run.status == RunStatus.queued.value]
             self.assertEqual(len(queued_runs), 1)
 
+    def test_run_next_campaign_prioritizes_earlier_show_date_over_queue_timestamp(self) -> None:
+        with self.Session() as session, tempfile.TemporaryDirectory() as tmp_dir:
+            later_show = make_show(
+                name="Later Show",
+                event_date=date(2026, 6, 9),
+                status=ShowStatus.queued.value,
+                source_url="https://example.com/later",
+            )
+            earlier_show = make_show(
+                name="Earlier Show",
+                event_date=date(2026, 5, 16),
+                status=ShowStatus.queued.value,
+                source_url="https://example.com/earlier",
+            )
+            session.add_all([later_show, earlier_show])
+            session.flush()
+            session.add(CampaignRun(show=later_show, status=RunStatus.queued.value, created_at=datetime(2026, 5, 12, 8, 0)))
+            session.add(CampaignRun(show=earlier_show, status=RunStatus.queued.value, created_at=datetime(2026, 5, 12, 9, 30)))
+            session.commit()
+
+            output_path = Path(tmp_dir) / "earlier.csv"
+            output_path.write_text("company_name,website_url\nAcme,https://acme.com\n", encoding="utf-8")
+
+            with patch(
+                "app.services._run_direct_scrape",
+                return_value=DirectScrapeResult(
+                    output_path=output_path,
+                    company_count=12,
+                    failure_count=0,
+                    conference_name="Earlier Show",
+                    conference_location="Chicago, IL",
+                ),
+            ) as scrape_mock:
+                campaign_run = run_next_campaign(session)
+
+            assert campaign_run is not None
+            self.assertEqual(scrape_mock.call_args.kwargs["show_name"], "Earlier Show")
+
     def test_upsert_show_reuses_existing_record_for_similar_name_within_five_day_window(self) -> None:
         with self.Session() as session:
             first_show, first_created = upsert_show(
