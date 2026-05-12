@@ -1732,7 +1732,7 @@ async function handleDashboardBulkScrapeSubmit(event) {
     const message =
       error instanceof Error && error.message
         ? error.message
-        : "Local scraping could not start. Run `./.venv/bin/python scripts/local_scrape_agent.py` on this machine first.";
+        : "Local scraping could not start. Install the local helper on this machine with `sh scripts/install_local_scrape_agent.sh`.";
     window.alert(message);
   } finally {
     setFormBusyState(form, false, "Scraping locally...");
