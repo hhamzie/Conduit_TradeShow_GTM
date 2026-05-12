@@ -70,6 +70,27 @@ class ShowIntelligenceTests(unittest.TestCase):
         self.assertTrue(any("No exhibitor export" in risk for risk in analysis.risks))
         self.assertEqual(analysis.guide_score_label, "Bad")
 
+    def test_build_show_analysis_filters_implausible_export_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            export_path = Path(tmp_dir) / "bad.csv"
+            export_path.write_text(
+                "\n".join(
+                    [
+                        "company_name,website_url,booth_number",
+                        "Aoe <* Sng Cs leee,,",
+                        "Acme Packaging,https://acme.com,A12",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            show = make_show(str(export_path), company_count=2)
+
+            analysis = build_show_analysis(show, today=date(2026, 5, 1))
+
+        self.assertEqual(analysis.export_company_count, 1)
+        self.assertEqual(len(analysis.company_profiles), 1)
+        self.assertEqual(analysis.company_profiles[0].name, "Acme Packaging")
+
     def test_build_show_analysis_scores_guide_quality_from_team_sizes(self) -> None:
         show = make_show("", company_count=4)
         show.guide_rows = [

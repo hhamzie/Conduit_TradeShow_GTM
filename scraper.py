@@ -6978,6 +6978,7 @@ def run_agent_directory_csv_fallback(options: ScrapeOptions) -> ScrapeResult:
             for entry in entries
             if entry.company_name
         ]
+        records = filter_plausible_company_records(records)
         records.sort(key=lambda record: record.sort_index)
 
         output_path = resolve_output_path(
@@ -7204,6 +7205,57 @@ def write_csv(
                     "Conference": conference_name,
                 }
             )
+
+
+def is_plausible_company_record(record: CompanyRecord) -> bool:
+    company_name = normalize_seed_company_name(record.company_name)
+    if not company_name:
+        return False
+    if not is_companyish_text(company_name):
+        return False
+    if looks_low_confidence_company_name(company_name):
+        return False
+    if re.search(r"[<>|\\{}[\]^~`*]", company_name):
+        return False
+
+    words = re.findall(r"[A-Za-z0-9&+'/-]+", company_name)
+    if not words:
+        return False
+
+    short_alpha_words = [
+        word
+        for word in words
+        if len(word) <= 2 and any(character.isalpha() for character in word)
+    ]
+    if len(words) >= 4 and len(short_alpha_words) >= max(3, len(words) // 2):
+        return False
+
+    has_signal = bool(record.website_url or record.booth_number or record.profile_url)
+    if not has_signal and len(words) >= 5:
+        return False
+    return True
+
+
+def filter_plausible_company_records(records: list[CompanyRecord]) -> list[CompanyRecord]:
+    kept_records: list[CompanyRecord] = []
+    dropped_count = 0
+    for record in records:
+        cleaned_name = normalize_seed_company_name(record.company_name)
+        normalized_record = CompanyRecord(
+            sort_index=record.sort_index,
+            directory_page=record.directory_page,
+            company_name=cleaned_name,
+            profile_url=record.profile_url,
+            website_url=record.website_url,
+            booth_number=record.booth_number,
+        )
+        if not is_plausible_company_record(normalized_record):
+            dropped_count += 1
+            continue
+        kept_records.append(normalized_record)
+    if dropped_count:
+        print(f"Dropped {dropped_count} implausible company record(s).")
+    return kept_records
 
 
 def filter_records_with_websites(records: list[CompanyRecord]) -> list[CompanyRecord]:
@@ -7532,6 +7584,7 @@ def run_scrape(options: ScrapeOptions) -> ScrapeResult:
             browser_renderer=browser_renderer if used_browser_fallback else None,
             require_website=options.require_website,
         )
+        records = filter_plausible_company_records(records)
         if options.require_website:
             records = apply_website_requirement(records)
         output_path = resolve_output_path(
