@@ -12,8 +12,10 @@ from scraper import (
     collect_directory_entries_andmore_imc,
     collect_directory_entries_dallas_market_center,
     collect_direct_landing_entries,
+    collect_company_records,
     collect_table_directory_entries,
     CompanyRecord,
+    DirectoryEntry,
     extract_directory_entry_candidates,
     filter_plausible_company_records,
     find_gateway_show_directory_url,
@@ -185,6 +187,29 @@ class BoothNumberTests(unittest.TestCase):
         self.assertEqual(len(filtered), 1)
         self.assertEqual(filtered[0].company_name, "Acme Packaging")
         self.assertEqual(filtered[0].booth_number, "C21")
+
+    def test_collect_company_records_uses_serial_path_when_workers_is_one(self) -> None:
+        entries = [
+            DirectoryEntry(
+                sort_index=0,
+                directory_page=1,
+                company_name="Acme Packaging",
+                profile_url="https://example.com/acme",
+                website_url_hint="",
+                booth_number="C21",
+            )
+        ]
+
+        with (
+            patch("scraper.scrape_profile_details", return_value=("https://acme.com", "C21")) as scrape_mock,
+            patch("scraper.ThreadPoolExecutor", side_effect=AssertionError("thread pool should not be used")),
+        ):
+            records, failures = collect_company_records(entries, workers=1)
+
+        self.assertEqual(failures, 0)
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0].website_url, "https://acme.com")
+        scrape_mock.assert_called_once_with("https://example.com/acme")
 
     def test_extract_booth_number_from_profile_looks_for_labeled_value(self) -> None:
         html = """
