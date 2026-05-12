@@ -9,10 +9,14 @@ from scraper import (
     apply_website_requirement,
     build_listing_candidates,
     build_mapyourshow_search_url,
+    collect_directory_entries_andmore_imc,
+    collect_directory_entries_dallas_market_center,
+    collect_direct_landing_entries,
     collect_table_directory_entries,
     CompanyRecord,
     extract_directory_entry_candidates,
     filter_plausible_company_records,
+    find_gateway_show_directory_url,
     find_embedded_directory_url,
     is_mapyourshow_directory,
     is_bulletin_directory,
@@ -107,6 +111,29 @@ class BoothNumberTests(unittest.TestCase):
         self.assertEqual(len(entries), 1)
         self.assertEqual(entries[0].company_name, "Acme Packaging")
         self.assertEqual(entries[0].booth_number, "C21")
+
+    def test_extract_table_row_entries_handles_company_booth_descriptor_layout(self) -> None:
+        html = """
+        <table>
+          <tr>
+            <td>(RE)SET</td>
+            <td><img src="brand.png" alt=""></td>
+            <td>GA25</td>
+            <td>New Exhibitor</td>
+            <td><a href="/en/exposants-lp/685bec4085932a38dbbda38e">View</a></td>
+          </tr>
+        </table>
+        """
+
+        entries = extract_table_row_entries(
+            seed_url="https://lpmc25.eventmaker.io/en/exhibitors-list",
+            html_text=html,
+            directory_page=1,
+        )
+
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0].company_name, "(RE)SET")
+        self.assertEqual(entries[0].booth_number, "GA25")
 
     def test_write_csv_outputs_booth_number_column(self) -> None:
         records = [
@@ -518,6 +545,273 @@ class BoothNumberTests(unittest.TestCase):
         self.assertEqual(entries[0].company_name, "Acme Packaging")
         self.assertEqual(entries[0].booth_number, "C21, C22")
 
+    @patch("scraper.fetch_json_data")
+    def test_collect_directory_entries_andmore_imc_uses_direct_api_and_dedupes_exhibitors(
+        self,
+        mocked_fetch,
+    ) -> None:
+        seed_html = """
+        <script id="__JSS_STATE__">
+        {"sitecore":{"context":{"site":{"name":"las-vegas-market"}}},"route":{"itemId":"cfa5a5c2-9bd7-4309-b356-1acdef98a65f"}}
+        </script>
+        <script>
+        window.app={sitecoreApiKey:"391D75C6-01EE-463C-8B51-47B2748F8ACD"};
+        </script>
+        """
+
+        def fake_fetch(url: str, extra_headers=None):
+            self.assertEqual(extra_headers, {
+                "Accept": "application/json, text/plain, */*",
+                "Channel": "las-vegas-market",
+            })
+            if "/search/count" in url:
+                return {"exhibitors": 3}
+            if "/exhibitors/search" in url:
+                return {
+                    "count": 3,
+                    "data": [
+                        {
+                            "exhibitorId": "30774",
+                            "type": "Line",
+                            "title": "Thompson's Candle Co.",
+                            "companyDetails": {
+                                "companyName": "Thompson's Candle Co.",
+                                "activeLeases": [
+                                    {
+                                        "channel": {"siteCode": "las-vegas-market"},
+                                        "showrooms": [{"showroomDisplayName": "C738"}],
+                                    }
+                                ],
+                            },
+                        },
+                        {
+                            "exhibitorId": "30774",
+                            "type": "Exhibitor",
+                            "title": "Thompson's Candle Co.",
+                            "companyDetails": {
+                                "companyName": "Thompson's Candle Co.",
+                                "activeLeases": [
+                                    {
+                                        "channel": {"siteCode": "las-vegas-market"},
+                                        "showrooms": [{"showroomDisplayName": "C738"}],
+                                    }
+                                ],
+                            },
+                        },
+                        {
+                            "exhibitorId": "65921",
+                            "type": "Exhibitor",
+                            "title": "HiEnd Accents",
+                            "companyDetails": {
+                                "companyName": "HiEnd Accents",
+                                "activeLeases": [
+                                    {
+                                        "channel": {"siteCode": "las-vegas-market"},
+                                        "showrooms": [{"showroomDisplayName": "B105"}],
+                                    }
+                                ],
+                            },
+                        },
+                    ],
+                }
+            if "/OpenDetails" in url:
+                return {
+                    "count": 2,
+                    "data": [
+                        {
+                            "exhibitorId": "30774",
+                            "companyDetails": {
+                                "companyName": "Thompson's Candle Co.",
+                                "activeLeases": [
+                                    {
+                                        "channel": {"siteCode": "las-vegas-market"},
+                                        "showrooms": [{"showroomDisplayName": "C738"}],
+                                    }
+                                ],
+                            },
+                            "companyInformation": {
+                                "companyWebsiteUrl": "http://www.thompsonscandle.com"
+                            },
+                        },
+                        {
+                            "exhibitorId": "65921",
+                            "companyDetails": {
+                                "companyName": "HiEnd Accents",
+                                "activeLeases": [
+                                    {
+                                        "channel": {"siteCode": "las-vegas-market"},
+                                        "showrooms": [{"showroomDisplayName": "B105"}],
+                                    }
+                                ],
+                            },
+                            "companyInformation": {
+                                "companyWebsiteUrl": "https://www.hiendaccents.com"
+                            },
+                        },
+                    ],
+                }
+            raise AssertionError(f"Unexpected URL {url}")
+
+        mocked_fetch.side_effect = fake_fetch
+
+        entries, adapter_title = collect_directory_entries_andmore_imc(
+            seed_url="https://www.lasvegasmarket.com/en/exhibitor/exhibitor-directory",
+            seed_html=seed_html,
+            start_page=1,
+            end_page=1,
+            max_pages=3,
+            adapter_title="Las Vegas Market",
+        )
+
+        self.assertEqual(adapter_title, "Las Vegas Market")
+        self.assertEqual(len(entries), 2)
+        self.assertEqual(entries[0].company_name, "Thompson's Candle Co.")
+        self.assertEqual(entries[0].booth_number, "C738")
+        self.assertEqual(entries[0].website_url_hint, "http://www.thompsonscandle.com")
+        self.assertEqual(entries[1].company_name, "HiEnd Accents")
+        self.assertEqual(entries[1].booth_number, "B105")
+        self.assertEqual(entries[1].website_url_hint, "https://www.hiendaccents.com")
+
+    def test_collect_directory_entries_dallas_market_center_reads_rendered_exhibitor_cards(self) -> None:
+        html = """
+        <ul id="paginated-list" data-current-page="1">
+          <li class="li__exhibitor" data-exhibitor-id="23735">
+            <section class="section__heading">
+              <header class="header__headingTop">
+                <h2 class="h2__exhibitor">
+                  <a class="a__exhibitor" href="/exhibitors/a-b-home/">A &amp; B Home</a>
+                </h2>
+              </header>
+              <div class="block__headingBottom">
+                <address class="address__exhibitor">tm 1 - 425</address>
+              </div>
+            </section>
+            <div class="block__exhibitorProfile">
+              <a class="a__exhibitor" href="/exhibitors/a-b-home/" aria-label="A &amp; B Home Profile">Show More</a>
+            </div>
+          </li>
+          <li class="li__exhibitor" data-exhibitor-id="15391">
+            <section class="section__heading">
+              <header class="header__headingTop">
+                <h2 class="h2__exhibitor">
+                  <a class="a__exhibitor" href="/exhibitors/merci/">&amp; Merci</a>
+                </h2>
+              </header>
+              <div class="block__headingBottom">
+                <address class="address__exhibitor">wtc 12-1404 (temp)</address>
+              </div>
+            </section>
+          </li>
+        </ul>
+        """
+
+        entries, adapter_title = collect_directory_entries_dallas_market_center(
+            seed_url="https://www.dallasmarketcenter.com/become-an-attendee/plan-your-visit/search-exhibitors-brands/",
+            seed_html=html,
+        )
+
+        self.assertEqual(adapter_title, "Dallas Market Center")
+        self.assertEqual(len(entries), 2)
+        self.assertEqual(entries[0].company_name, "A & B Home")
+        self.assertEqual(entries[0].profile_url, "https://www.dallasmarketcenter.com/exhibitors/a-b-home/")
+        self.assertEqual(entries[0].booth_number, "tm 1 - 425")
+        self.assertEqual(entries[1].company_name, "& Merci")
+
+    def test_find_gateway_show_directory_url_prefers_luxepack_child_with_real_exhibitors(self) -> None:
+        root_html = """
+        <main>
+          <a href="https://www.luxepacklosangeles.com/">Los Angeles</a>
+          <a href="https://www.luxepacknewyork.com/">New York</a>
+        </main>
+        """
+        los_angeles_html = """
+        <html><body><main><a href="/why-exhibit">Why Exhibit</a></main></body></html>
+        """
+        new_york_html = """
+        <html><body><main><a href="/exhibitors-lp">Exhibitors Listing</a></main></body></html>
+        """
+        root_page = parse_page("https://www.luxepack.com/", root_html)
+
+        def fake_loader(url: str):
+            pages = {
+                "https://www.luxepacklosangeles.com/": (
+                    "https://www.luxepacklosangeles.com/",
+                    los_angeles_html,
+                    parse_page("https://www.luxepacklosangeles.com/", los_angeles_html),
+                ),
+                "https://www.luxepacknewyork.com/": (
+                    "https://www.luxepacknewyork.com/",
+                    new_york_html,
+                    parse_page("https://www.luxepacknewyork.com/", new_york_html),
+                ),
+            }
+            return pages[url]
+
+        resolved_url = find_gateway_show_directory_url(
+            "https://www.luxepack.com/",
+            root_page,
+            fake_loader,
+        )
+
+        self.assertEqual(resolved_url, "https://www.luxepacknewyork.com/exhibitors-lp")
+
+    def test_find_gateway_show_directory_url_uses_first_packexpo_child_with_directory_signal(self) -> None:
+        root_html = """
+        <main>
+          <a href="https://www.packexpointernational.com/" class="card-link">Chicago</a>
+          <a href="https://www.packexpolasvegas.com/" class="card-link">Las Vegas</a>
+        </main>
+        """
+        chicago_html = """
+        <html><body><main><a href="/attend">Attend</a></main></body></html>
+        """
+        vegas_html = """
+        <html><body><main><a href="https://packexpo25.mapyourshow.com/8_0/">2025 Exhibitors</a></main></body></html>
+        """
+        root_page = parse_page("https://www.packexpo.com/", root_html)
+
+        def fake_loader(url: str):
+            pages = {
+                "https://www.packexpointernational.com/": (
+                    "https://www.packexpointernational.com/",
+                    chicago_html,
+                    parse_page("https://www.packexpointernational.com/", chicago_html),
+                ),
+                "https://www.packexpolasvegas.com/": (
+                    "https://www.packexpolasvegas.com/",
+                    vegas_html,
+                    parse_page("https://www.packexpolasvegas.com/", vegas_html),
+                ),
+            }
+            return pages[url]
+
+        resolved_url = find_gateway_show_directory_url(
+            "https://www.packexpo.com/",
+            root_page,
+            fake_loader,
+        )
+
+        self.assertEqual(resolved_url, "https://packexpo25.mapyourshow.com/8_0/")
+
+    def test_collect_direct_landing_entries_skips_gateway_hubs(self) -> None:
+        seed_html = """
+        <html>
+          <body>
+            <p>REGISTER NOW</p>
+            <p>Listen to Experts' Dialogs</p>
+          </body>
+        </html>
+        """
+        seed_page = parse_page("https://www.luxepack.com/", seed_html)
+
+        entries = collect_direct_landing_entries(
+            seed_url="https://www.luxepack.com/",
+            seed_html=seed_html,
+            seed_page=seed_page,
+        )
+
+        self.assertIsNone(entries)
+
     def test_find_embedded_directory_url_ignores_tracking_iframes(self) -> None:
         html = """
         <html>
@@ -534,6 +828,30 @@ class BoothNumberTests(unittest.TestCase):
         )
 
         self.assertEqual(embedded, "https://example.com/embed/exhibitor-directory")
+
+    def test_find_embedded_directory_url_extracts_scripted_eventmaker_iframe_url(self) -> None:
+        html = """
+        <html>
+          <body>
+            <iframe id="mobicheckin-form"></iframe>
+            <script>
+              var urls = {
+                fr: "https://lpmc25.eventmaker.io/fr/liste-exposants",
+                en: "https://lpmc25.eventmaker.io/en/exhibitors-list"
+              };
+              var iframeUrl = urls.en || urls.fr;
+              document.getElementById('mobicheckin-form').src = iframeUrl;
+            </script>
+          </body>
+        </html>
+        """
+
+        embedded = find_embedded_directory_url(
+            "https://www.luxepackmonaco.com/en/exhibitors-list",
+            html,
+        )
+
+        self.assertEqual(embedded, "https://lpmc25.eventmaker.io/en/exhibitors-list")
 
 
 if __name__ == "__main__":
