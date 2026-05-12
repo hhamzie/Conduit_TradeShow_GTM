@@ -43,7 +43,6 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
             request,
             current_page="workflow",
             can_manage=True,
-            default_offset=settings.default_run_offset_days,
             single_scrape_error=request.session.pop("single_scrape_error", ""),
             bulk_scrape_error=request.session.pop("bulk_scrape_error", ""),
             automation_error=request.session.pop("automation_error", ""),
@@ -68,7 +67,6 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
 async def import_shows(
     request: Request,
     file: UploadFile = File(...),
-    run_offset_days: int = Form(...),
     db: Session = Depends(get_db),
 ):
     require_authenticated(request)
@@ -76,7 +74,7 @@ async def import_shows(
     if not payload:
         raise HTTPException(status_code=400, detail="The uploaded CSV was empty.")
     try:
-        summary = import_shows_from_csv(db, payload, run_offset_days)
+        summary = import_shows_from_csv(db, payload, settings.default_run_offset_days)
     except ValueError as exc:
         request.session["automation_error"] = str(exc)
         return RedirectResponse("/workflow", status_code=status.HTTP_303_SEE_OTHER)
@@ -96,7 +94,6 @@ def add_single_show(
     event_date: str = Form(...),
     place: str = Form(...),
     link: str = Form(...),
-    run_offset_days: int = Form(...),
     db: Session = Depends(get_db),
 ):
     require_authenticated(request)
@@ -107,7 +104,7 @@ def add_single_show(
             event_date_raw=event_date,
             place=place,
             link=link,
-            run_offset_days=run_offset_days,
+            run_offset_days=settings.default_run_offset_days,
         )
     except ValueError as exc:
         request.session["automation_error"] = str(exc)

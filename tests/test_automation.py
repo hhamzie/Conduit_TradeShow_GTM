@@ -390,6 +390,23 @@ class AutomationTests(unittest.TestCase):
             self.assertEqual(len(show.runs), 1)
             self.assertEqual(show.runs[0].status, RunStatus.queued.value)
 
+    def test_upsert_show_immediately_queues_future_show(self) -> None:
+        with self.Session() as session:
+            show, created = upsert_show(
+                session,
+                show_name="Future Show",
+                event_date_raw="2026-08-11",
+                place="Atlanta, GA",
+                link="https://example.com/future",
+                run_offset_days=14,
+            )
+            session.commit()
+            session.refresh(show)
+            self.assertTrue(created)
+            self.assertEqual(show.status, ShowStatus.queued.value)
+            self.assertEqual(len(show.runs), 1)
+            self.assertEqual(show.runs[0].status, RunStatus.queued.value)
+
     def test_upsert_show_reuses_existing_record_for_similar_name_within_five_day_window(self) -> None:
         with self.Session() as session:
             first_show, first_created = upsert_show(
@@ -907,7 +924,6 @@ class AutomationTests(unittest.TestCase):
                     event_date="2026-05-17",
                     place="New York, NY",
                     link="https://example.com/icff",
-                    run_offset_days=14,
                     db=session,
                 )
 
@@ -933,7 +949,6 @@ class AutomationTests(unittest.TestCase):
                     response = await import_shows(
                         request=request,
                         file=upload,
-                        run_offset_days=14,
                         db=session,
                     )
 

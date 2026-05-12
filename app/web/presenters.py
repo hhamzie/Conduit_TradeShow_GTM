@@ -180,27 +180,14 @@ def build_show_notice(show: Show, now: datetime) -> ShowNotice | None:
 def format_run_at_label(show: Show, now: datetime) -> str:
     run_at = show.run_at
     if run_at is None:
-        return "No run time set"
+        return "No queue time set"
 
-    delta = run_at - now
-    total_seconds = int(delta.total_seconds())
-    total_hours = abs(total_seconds) // 3600
-    days = total_hours // 24
-    hours = total_hours % 24
-
-    when_label = run_at.strftime("%b %d, %Y at %-I:%M %p")
-    if total_seconds <= 0:
-        if days > 0:
-            return f"Should have queued {days} day(s) ago · target was {when_label}"
-        if hours > 0:
-            return f"Should have queued {hours} hour(s) ago · target was {when_label}"
-        return f"Should queue now · target was {when_label}"
-
-    if days > 0:
-        return f"Queues in {days} day(s) · target {when_label}"
-    if hours > 0:
-        return f"Queues in {hours} hour(s) · target {when_label}"
-    return f"Queues in under an hour · target {when_label}"
+    queued_label = run_at.strftime("%b %d, %Y at %-I:%M %p")
+    if show.status == "waiting":
+        return f"Queued on {queued_label}"
+    if show.status == "failed":
+        return f"Last queued on {queued_label}"
+    return f"Added on {queued_label}"
 
 
 def _active_scrape_started_at(show: Show) -> datetime | None:
@@ -279,16 +266,10 @@ def provider_status_summary(show: Show) -> str:
 
 def describe_show_flow(show: Show, now: datetime, *, queue_position: int | None = None, queue_total: int = 0) -> dict[str, str]:
     if show.status == "waiting":
-        if show.run_at and show.run_at <= now:
-            return {
-                "section": "ready_now",
-                "step": "Queued for scrape",
-                "next_action": "The worker should pick this up soon and move it into an active scrape.",
-            }
         return {
-            "section": "scheduled_later",
-            "step": "Queued for later",
-            "next_action": "No action needed yet. It will move into the scrape line at its target time.",
+            "section": "in_progress",
+            "step": "Queued for scrape",
+            "next_action": "The worker should pick this up soon and move it into an active scrape.",
         }
 
     if show.status == "queued":
@@ -390,10 +371,7 @@ def build_workflow_dashboard_view(shows: list[Show], now: datetime) -> WorkflowD
         build_show_card(show, now, queue_position=queue_positions.get(show.id), queue_total=queue_total)
         for show in shows
     ]
-    scheduled_later = sorted(
-        [item for item in show_cards if item.section == "scheduled_later"],
-        key=lambda item: (item.show.run_at or datetime.max, item.show.event_date, item.show.id),
-    )
+    scheduled_later: list[ShowCard] = []
     active = sorted(
         [item for item in show_cards if item.section in {"ready_now", "in_progress"}],
         key=lambda item: (item.show.run_at or datetime.max, item.show.event_date, item.show.id),
