@@ -7689,16 +7689,10 @@ def collect_company_records(
     if completed_count and (completed_count == len(entries) or completed_count % 25 == 0):
         print(f"Scraped {completed_count}/{len(entries)} company profiles...")
 
-    with ThreadPoolExecutor(max_workers=workers) as executor:
-        future_to_entry = {
-            executor.submit(scrape_profile_details, entry.profile_url): entry
-            for entry in pending_entries
-        }
-
-        for future in as_completed(future_to_entry):
-            entry = future_to_entry[future]
+    if workers <= 1:
+        for entry in pending_entries:
             try:
-                website_url, scraped_booth_number = future.result()
+                website_url, scraped_booth_number = scrape_profile_details(entry.profile_url)
             except Exception as exc:  # noqa: BLE001
                 failures += 1
                 website_url = ""
@@ -7723,6 +7717,41 @@ def collect_company_records(
             completed_count += 1
             if completed_count == len(entries) or completed_count % 25 == 0:
                 print(f"Scraped {completed_count}/{len(entries)} company profiles...")
+    else:
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            future_to_entry = {
+                executor.submit(scrape_profile_details, entry.profile_url): entry
+                for entry in pending_entries
+            }
+
+            for future in as_completed(future_to_entry):
+                entry = future_to_entry[future]
+                try:
+                    website_url, scraped_booth_number = future.result()
+                except Exception as exc:  # noqa: BLE001
+                    failures += 1
+                    website_url = ""
+                    scraped_booth_number = ""
+                    print(
+                        f"Profile scrape failed for {entry.profile_url}: {exc}",
+                        file=sys.stderr,
+                    )
+                website_url = validated_company_website_url(entry.company_name, website_url)
+
+                records.append(
+                    CompanyRecord(
+                        sort_index=entry.sort_index,
+                        directory_page=entry.directory_page,
+                        company_name=entry.company_name,
+                        profile_url=entry.profile_url,
+                        website_url=website_url,
+                        booth_number=entry.booth_number or scraped_booth_number,
+                    )
+                )
+
+                completed_count += 1
+                if completed_count == len(entries) or completed_count % 25 == 0:
+                    print(f"Scraped {completed_count}/{len(entries)} company profiles...")
 
     if browser_renderer is not None:
         pending_browser_indices = [
