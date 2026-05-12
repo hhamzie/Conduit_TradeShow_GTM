@@ -813,7 +813,7 @@ def _run_direct_scrape_once(
     workers: int | None = None,
 ) -> DirectScrapeResult:
     settings = get_settings()
-    direct_scrape_workers = max(1, min(workers or settings.default_scraper_workers, 2))
+    direct_scrape_workers = 1
     result = run_scrape(
         ScrapeOptions(
             directory_url=link.strip(),
@@ -862,7 +862,7 @@ def _run_openai_directory_csv_fallback(
             workers=1,
             max_pages=get_settings().default_max_pages,
             sample_size=get_settings().default_sample_size,
-            browser_mode="prefer",
+            browser_mode="off",
             browser_timeout_ms=get_settings().default_browser_timeout_ms,
             agent_mode="always",
             agent_model="gpt-5",
@@ -907,7 +907,7 @@ def run_single_show_scrape(
 
 def run_show_scrape(db: Session, show: Show, *, workers: int | None = None) -> DirectScrapeResult:
     settings = get_settings()
-    scrape_workers = max(1, min(workers or settings.default_scraper_workers, 2))
+    scrape_workers = 1
     campaign_run = next(
         (
             run
