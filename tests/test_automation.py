@@ -288,7 +288,7 @@ class AutomationTests(unittest.TestCase):
 
             self.assertTrue(created)
             self.assertIsNotNone(show.id)
-            self.assertEqual(show.status, ShowStatus.waiting.value)
+            self.assertEqual(show.status, ShowStatus.queued.value)
 
             output_path = Path(tmp_dir) / "icff.csv"
             output_path.write_text("company_name,website_url\nAcme,https://acme.com\n", encoding="utf-8")
@@ -371,7 +371,24 @@ class AutomationTests(unittest.TestCase):
             session.commit()
 
             self.assertTrue(created)
-            self.assertEqual(show.name, "Pack Expo")
+        self.assertEqual(show.name, "Pack Expo")
+
+    def test_upsert_show_immediately_queues_due_show(self) -> None:
+        with self.Session() as session:
+            show, created = upsert_show(
+                session,
+                show_name="Immediate Show",
+                event_date_raw="2026-05-11",
+                place="Chicago, IL",
+                link="https://example.com/immediate",
+                run_offset_days=14,
+            )
+            session.commit()
+            session.refresh(show)
+            self.assertTrue(created)
+            self.assertEqual(show.status, ShowStatus.queued.value)
+            self.assertEqual(len(show.runs), 1)
+            self.assertEqual(show.runs[0].status, RunStatus.queued.value)
 
     def test_upsert_show_reuses_existing_record_for_similar_name_within_five_day_window(self) -> None:
         with self.Session() as session:

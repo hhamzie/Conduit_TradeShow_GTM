@@ -502,6 +502,7 @@ def upsert_show(
         )
         db.add(show)
         db.flush()
+        _queue_show_if_due(db, show)
         return show, True
 
     existing.name = normalized_name
@@ -510,6 +511,7 @@ def upsert_show(
     existing.run_offset_days = run_offset_days
     existing.run_at = run_at
     db.flush()
+    _queue_show_if_due(db, existing)
     return existing, False
 
 
@@ -553,6 +555,19 @@ def parse_show_date(raw_value: str, today: date | None = None) -> date:
 def compute_run_at(event_date: date, run_offset_days: int) -> datetime:
     target_day = event_date - timedelta(days=run_offset_days)
     return datetime.combine(target_day, time(hour=9, minute=0))
+
+
+def _queue_show_if_due(db: Session, show: Show, *, now: datetime | None = None) -> bool:
+    now = now or datetime.now()
+    if show.status != ShowStatus.waiting.value:
+        return False
+    if show.run_at is None or show.run_at > now:
+        return False
+    if any(run.status in {RunStatus.queued.value, RunStatus.running.value} for run in show.runs):
+        return False
+    show.status = ShowStatus.queued.value
+    db.add(CampaignRun(show=show, status=RunStatus.queued.value))
+    return True
 
 
 def export_path_for_show(show: Show) -> Path:
@@ -863,11 +878,24 @@ def run_single_show_scrape(
 
 
 def run_show_scrape(db: Session, show: Show, *, workers: int | None = None) -> DirectScrapeResult:
-    campaign_run = CampaignRun(
-        show=show,
-        status=RunStatus.running.value,
-        started_at=datetime.now(),
+    campaign_run = next(
+        (
+            run
+            for run in sorted(show.runs, key=lambda item: item.created_at or datetime.min)
+            if run.status == RunStatus.queued.value
+        ),
+        None,
     )
+    if campaign_run is None:
+        campaign_run = CampaignRun(
+            show=show,
+            status=RunStatus.running.value,
+            started_at=datetime.now(),
+        )
+    else:
+        campaign_run.status = RunStatus.running.value
+        campaign_run.started_at = datetime.now()
+
     show.status = ShowStatus.scraping.value
     show.last_error = ""
     db.add(campaign_run)
