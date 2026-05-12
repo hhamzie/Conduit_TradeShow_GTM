@@ -7829,6 +7829,132 @@ def write_csv(
             )
 
 
+def _write_csv_header(writer: csv.DictWriter) -> None:
+    writer.writeheader()
+
+
+def _write_company_record_row(
+    writer: csv.DictWriter,
+    record: CompanyRecord,
+    *,
+    conference_name: str,
+    conference_location: str,
+) -> None:
+    writer.writerow(
+        {
+            "company_name": record.company_name,
+            "booth_number": record.booth_number,
+            "website_url": record.website_url,
+            "Location": conference_location,
+            "Conference": conference_name,
+        }
+    )
+
+
+def stream_company_records_to_csv(
+    *,
+    entries: list[DirectoryEntry],
+    output_path: Path,
+    conference_name: str,
+    conference_location: str,
+    require_website: bool,
+) -> tuple[int, int]:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    fieldnames = [
+        "company_name",
+        "booth_number",
+        "website_url",
+        "Location",
+        "Conference",
+    ]
+    all_path = output_path.with_suffix(output_path.suffix + ".all.tmp")
+    website_path = output_path.with_suffix(output_path.suffix + ".websites.tmp")
+    failures = 0
+    all_count = 0
+    website_count = 0
+
+    with (
+        all_path.open("w", newline="", encoding="utf-8") as all_file,
+        website_path.open("w", newline="", encoding="utf-8") as website_file,
+    ):
+        all_writer = csv.DictWriter(all_file, fieldnames=fieldnames)
+        website_writer = csv.DictWriter(website_file, fieldnames=fieldnames)
+        _write_csv_header(all_writer)
+        _write_csv_header(website_writer)
+
+        completed_count = 0
+        for entry in entries:
+            parsed_profile = urlparse(entry.profile_url) if entry.profile_url else None
+            has_fragment_only_reference = bool(parsed_profile and parsed_profile.fragment)
+            website_url = validated_company_website_url(
+                entry.company_name,
+                entry.website_url_hint,
+            )
+            booth_number = entry.booth_number
+
+            if not (website_url or not entry.profile_url or has_fragment_only_reference):
+                try:
+                    website_url, scraped_booth_number = scrape_profile_details(entry.profile_url)
+                except Exception as exc:  # noqa: BLE001
+                    failures += 1
+                    website_url = ""
+                    scraped_booth_number = ""
+                    print(
+                        f"Profile scrape failed for {entry.profile_url}: {exc}",
+                        file=sys.stderr,
+                    )
+                website_url = validated_company_website_url(entry.company_name, website_url)
+                booth_number = booth_number or scraped_booth_number
+
+            company_name = maybe_enrich_company_name(entry.company_name, website_url)
+            record = CompanyRecord(
+                sort_index=entry.sort_index,
+                directory_page=entry.directory_page,
+                company_name=company_name,
+                profile_url=entry.profile_url,
+                website_url=website_url,
+                booth_number=booth_number,
+            )
+            filtered_records = filter_plausible_company_records([record])
+            if not filtered_records:
+                completed_count += 1
+                if completed_count == len(entries) or completed_count % 25 == 0:
+                    print(f"Scraped {completed_count}/{len(entries)} company profiles...")
+                continue
+
+            kept_record = filtered_records[0]
+            _write_company_record_row(
+                all_writer,
+                kept_record,
+                conference_name=conference_name,
+                conference_location=conference_location,
+            )
+            all_count += 1
+            if kept_record.website_url:
+                _write_company_record_row(
+                    website_writer,
+                    kept_record,
+                    conference_name=conference_name,
+                    conference_location=conference_location,
+                )
+                website_count += 1
+
+            completed_count += 1
+            if completed_count == len(entries) or completed_count % 25 == 0:
+                print(f"Scraped {completed_count}/{len(entries)} company profiles...")
+
+    chosen_path = website_path if require_website and website_count > 0 else all_path
+    if require_website and all_count and website_count == 0:
+        print(
+            "No records had a website/domain. Keeping all records because company names were still collected."
+        )
+    chosen_path.replace(output_path)
+    for extra_path in (all_path, website_path):
+        if extra_path.exists():
+            extra_path.unlink()
+    return (website_count if require_website and website_count > 0 else all_count), failures
+
+
 def is_plausible_company_record(record: CompanyRecord) -> bool:
     company_name = normalize_seed_company_name(record.company_name)
     if not company_name:
@@ -8200,20 +8326,6 @@ def run_scrape(options: ScrapeOptions) -> ScrapeResult:
         if used_agent_fallback:
             print("OpenAI agent fallback recovered directory links.")
 
-        records, failures = collect_company_records(
-            entries,
-            options.workers,
-            browser_renderer=browser_renderer if used_browser_fallback else None,
-            require_website=options.require_website,
-        )
-        records = filter_plausible_company_records(records)
-        if options.require_website:
-            records = apply_website_requirement(records)
-        output_path = resolve_output_path(
-            str(options.output_path) if options.output_path is not None else None,
-            seed_url,
-            seed_page,
-        )
         conference_name = normalize_conference_label(options.conference_name)
         if not conference_name:
             conference_name = normalize_conference_label(
@@ -8226,6 +8338,42 @@ def run_scrape(options: ScrapeOptions) -> ScrapeResult:
                 seed_html,
                 conference_name=conference_name,
             )
+        output_path = resolve_output_path(
+            str(options.output_path) if options.output_path is not None else None,
+            seed_url,
+            seed_page,
+        )
+
+        if options.workers <= 1 and browser_renderer is None:
+            company_count, failures = stream_company_records_to_csv(
+                entries=entries,
+                output_path=output_path,
+                conference_name=conference_name,
+                conference_location=conference_location,
+                require_website=options.require_website,
+            )
+            result = ScrapeResult(
+                output_path=output_path,
+                company_count=company_count,
+                failures=failures,
+                conference_name=conference_name,
+                conference_location=conference_location,
+            )
+            print(
+                f"Saved {result.company_count} companies to {result.output_path} "
+                f"({result.failures} profile failures)."
+            )
+            return result
+
+        records, failures = collect_company_records(
+            entries,
+            options.workers,
+            browser_renderer=browser_renderer if used_browser_fallback else None,
+            require_website=options.require_website,
+        )
+        records = filter_plausible_company_records(records)
+        if options.require_website:
+            records = apply_website_requirement(records)
         write_csv(
             output_path,
             records,
