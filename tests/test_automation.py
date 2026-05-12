@@ -2379,6 +2379,38 @@ class AutomationTests(unittest.TestCase):
         self.assertEqual(scrape_once_mock.call_count, 1)
         agent_fallback_mock.assert_called_once()
 
+    def test_run_direct_scrape_keeps_browser_disabled_across_retries_when_off(self) -> None:
+        from app.services import _run_direct_scrape
+
+        attempts: list[str] = []
+
+        def fake_once(**kwargs):
+            attempts.append(str(kwargs["browser_mode"]))
+            raise RuntimeError("scrape exploded")
+
+        with patch.dict(os.environ, {"MIN_SCRAPE_COMPANY_COUNT": "6"}):
+            get_settings.cache_clear()
+            try:
+                with (
+                    patch("app.services._run_direct_scrape_once", side_effect=fake_once),
+                    patch(
+                        "app.services._run_openai_directory_csv_fallback",
+                        return_value=DirectScrapeResult(Path("/tmp/agent.csv"), 8, 0, "Show", "Place"),
+                    ),
+                ):
+                    result = _run_direct_scrape(
+                        show_name="Show",
+                        place="Place",
+                        link="https://example.com",
+                        output_path=Path("/tmp/output.csv"),
+                        browser_mode="off",
+                    )
+            finally:
+                get_settings.cache_clear()
+
+        self.assertEqual(result.company_count, 8)
+        self.assertEqual(attempts, ["off", "off", "off"])
+
     def test_run_next_campaign_uses_quality_gate_and_marks_low_result_failed(self) -> None:
         with patch.dict(os.environ, {"MIN_SCRAPE_COMPANY_COUNT": "6"}):
             get_settings.cache_clear()
