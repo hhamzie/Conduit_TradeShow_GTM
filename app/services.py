@@ -680,6 +680,7 @@ def _run_direct_scrape(
 ) -> DirectScrapeResult:
     settings = get_settings()
     minimum_company_count = settings.min_scrape_company_count
+    browser_retry_mode = "off" if browser_mode == "off" else "prefer"
     attempt_specs = (
         {
             "browser_mode": browser_mode,
@@ -688,19 +689,19 @@ def _run_direct_scrape(
             "label": "default",
         },
         {
-            "browser_mode": "prefer",
+            "browser_mode": browser_retry_mode,
             "agent_mode": "fallback",
             "require_website": True,
             "label": "browser_retry",
         },
         {
-            "browser_mode": "prefer",
+            "browser_mode": browser_retry_mode,
             "agent_mode": "always",
             "require_website": True,
             "label": "agent_retry",
         },
         {
-            "browser_mode": "prefer",
+            "browser_mode": browser_retry_mode,
             "agent_mode": "always",
             "require_website": False,
             "label": "agent_retry_relaxed",
@@ -901,7 +902,7 @@ def run_single_show_scrape(
         link=normalized_link,
         output_path=output_path,
         require_website=True,
-        browser_mode="auto",
+        browser_mode="off",
     )
 
 
@@ -938,7 +939,7 @@ def run_show_scrape(db: Session, show: Show, *, workers: int | None = None) -> D
             link=show.source_url,
             output_path=export_path_for_show(show),
             require_website=True,
-            browser_mode="auto",
+            browser_mode="off",
             workers=scrape_workers,
         )
     except Exception as exc:  # noqa: BLE001
@@ -1052,8 +1053,8 @@ def _run_bulk_direct_scrape_rows(
                     link=link,
                     output_path=output_path,
                     require_website=True,
-                    browser_mode="auto",
-                    workers=max(1, min(settings.bulk_scraper_workers, 2)),
+                    browser_mode="off",
+                    workers=1,
                 )
                 relative_name = output_path.name
                 archive.write(result.output_path, arcname=relative_name)
@@ -2180,7 +2181,7 @@ def run_next_campaign(db: Session) -> CampaignRun | None:
             link=show.source_url,
             output_path=export_path_for_show(show),
             require_website=True,
-            browser_mode=get_settings().default_browser_mode,
+            browser_mode="off",
             workers=1,
         )
     except Exception as exc:  # noqa: BLE001
