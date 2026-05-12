@@ -51,6 +51,7 @@ class WorkflowPresenterTests(unittest.TestCase):
         self.assertEqual(view.active[0].status_label, "#1 in line")
         self.assertEqual(view.active[0].run_timing, "1 of 1 in scrape queue")
         self.assertEqual(view.completed[0].status_label, "Populated")
+        self.assertEqual(view.scheduled_later[0].status_label, "Queued")
 
     def test_build_show_card_uses_queue_position_for_queued_shows(self) -> None:
         now = datetime(2026, 5, 8, 12, 0)

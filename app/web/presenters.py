@@ -9,7 +9,7 @@ from app.models import RunStatus, Show
 WORKFLOW_SECTIONS = {"active", "scheduled_later", "completed"}
 RECENT_COMPLETION_WINDOW = timedelta(minutes=20)
 SHOW_STATUS_LABELS = {
-    "waiting": "Scheduled",
+    "waiting": "Queued",
     "queued": "Queued",
     "scraping": "Scraping",
     "ready_for_review": "Populated",
@@ -191,16 +191,16 @@ def format_run_at_label(show: Show, now: datetime) -> str:
     when_label = run_at.strftime("%b %d, %Y at %-I:%M %p")
     if total_seconds <= 0:
         if days > 0:
-            return f"Should have queued {days} day(s) ago · scheduled for {when_label}"
+            return f"Should have queued {days} day(s) ago · target was {when_label}"
         if hours > 0:
-            return f"Should have queued {hours} hour(s) ago · scheduled for {when_label}"
-        return f"Should queue now · scheduled for {when_label}"
+            return f"Should have queued {hours} hour(s) ago · target was {when_label}"
+        return f"Should queue now · target was {when_label}"
 
     if days > 0:
-        return f"Queues in {days} day(s) · scheduled for {when_label}"
+        return f"Queues in {days} day(s) · target {when_label}"
     if hours > 0:
-        return f"Queues in {hours} hour(s) · scheduled for {when_label}"
-    return f"Queues in under an hour · scheduled for {when_label}"
+        return f"Queues in {hours} hour(s) · target {when_label}"
+    return f"Queues in under an hour · target {when_label}"
 
 
 def _active_scrape_started_at(show: Show) -> datetime | None:
@@ -282,13 +282,13 @@ def describe_show_flow(show: Show, now: datetime, *, queue_position: int | None 
         if show.run_at and show.run_at <= now:
             return {
                 "section": "ready_now",
-                "step": "Inside the run window",
-                "next_action": "The worker should run this soon. Use Run Immediately only if you want to force it now.",
+                "step": "Queued for scrape",
+                "next_action": "The worker should pick this up soon and move it into an active scrape.",
             }
         return {
             "section": "scheduled_later",
-            "step": "Waiting for trigger window",
-            "next_action": "No action needed yet. The worker should queue it at the scheduled time.",
+            "step": "Queued for later",
+            "next_action": "No action needed yet. It will move into the scrape line at its target time.",
         }
 
     if show.status == "queued":
