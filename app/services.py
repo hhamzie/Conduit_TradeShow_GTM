@@ -602,6 +602,74 @@ def direct_bulk_archive_path() -> Path:
     return settings.export_dir / "bulk" / f"trade_show_scrapes_{timestamp}.zip"
 
 
+def _count_export_rows_from_bytes(payload: bytes) -> int:
+    text = payload.decode("utf-8-sig")
+    reader = csv.DictReader(io.StringIO(text))
+    if not reader.fieldnames:
+        raise ValueError("Uploaded CSV is missing headers.")
+    normalized_headers = {header.strip().lower() for header in reader.fieldnames if header}
+    if "company_name" not in normalized_headers:
+        raise ValueError("Uploaded CSV must include a company_name column.")
+
+    row_count = 0
+    for row in reader:
+        if any(str(value or "").strip() for value in row.values()):
+            row_count += 1
+    if row_count <= 0:
+        raise ValueError("Uploaded CSV does not contain any exhibitor rows.")
+    return row_count
+
+
+def apply_uploaded_scrape_result(
+    db: Session,
+    show: Show,
+    *,
+    payload: bytes,
+    failure_count: int = 0,
+) -> DirectScrapeResult:
+    output_path = export_path_for_show(show)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_bytes(payload)
+    company_count = _count_export_rows_from_bytes(payload)
+    now = datetime.now()
+
+    active_runs = [
+        run
+        for run in sorted(show.runs, key=lambda item: (item.created_at or datetime.min, item.id or 0))
+        if run.status in {RunStatus.queued.value, RunStatus.running.value}
+    ]
+    if active_runs:
+        campaign_run = active_runs[0]
+        for extra_run in active_runs[1:]:
+            db.delete(extra_run)
+    else:
+        campaign_run = CampaignRun(show=show)
+        db.add(campaign_run)
+
+    campaign_run.status = RunStatus.success.value
+    campaign_run.output_path = str(output_path)
+    campaign_run.company_count = company_count
+    campaign_run.failure_count = max(int(failure_count or 0), 0)
+    campaign_run.error_message = ""
+    campaign_run.started_at = campaign_run.started_at or now
+    campaign_run.finished_at = now
+
+    show.latest_export_path = str(output_path)
+    show.company_count = company_count
+    show.failure_count = max(int(failure_count or 0), 0)
+    show.status = ShowStatus.ready_for_review.value
+    show.last_error = ""
+    db.commit()
+
+    return DirectScrapeResult(
+        output_path=output_path,
+        company_count=company_count,
+        failure_count=show.failure_count,
+        conference_name=show.name,
+        conference_location=show.place,
+    )
+
+
 def normalize_headers(fieldnames: list[str] | None) -> dict[str, str]:
     normalized: dict[str, str] = {}
     for name in fieldnames or []:

@@ -1536,6 +1536,163 @@ function removeDashboardShowRows(showIds) {
   });
 }
 
+const LOCAL_SCRAPE_HELPER_ORIGIN = "http://127.0.0.1:8765";
+
+function getSelectedDashboardShows(form) {
+  return Array.from(document.querySelectorAll(`[form="${CSS.escape(form.id)}"][data-select-item]`))
+    .filter((item) => item instanceof HTMLInputElement && item.checked)
+    .map((item) => ({
+      showId: Number.parseInt(item.value || "", 10),
+      showName: item.dataset.showName || "",
+      place: item.dataset.showPlace || "",
+      link: item.dataset.showLink || "",
+      eventDateRaw: item.dataset.showDate || "",
+    }))
+    .filter((show) => Number.isInteger(show.showId) && show.showId > 0 && show.showName && show.place && show.link);
+}
+
+async function checkLocalScrapeHelper() {
+  const response = await fetch(`${LOCAL_SCRAPE_HELPER_ORIGIN}/healthz`, {
+    credentials: "omit",
+    mode: "cors",
+  });
+  if (!response.ok) {
+    throw new Error("The local scrape helper is not responding.");
+  }
+}
+
+async function startLocalScrapeJob(show) {
+  const response = await fetch(`${LOCAL_SCRAPE_HELPER_ORIGIN}/jobs`, {
+    method: "POST",
+    credentials: "omit",
+    mode: "cors",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      show_name: show.showName,
+      place: show.place,
+      link: show.link,
+      event_date_raw: show.eventDateRaw,
+    }),
+  });
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    throw new Error(payload.detail || `Could not start the local scrape helper (${response.status}).`);
+  }
+  return response.json();
+}
+
+async function pollLocalScrapeJob(jobId) {
+  while (true) {
+    const response = await fetch(`${LOCAL_SCRAPE_HELPER_ORIGIN}/jobs/${encodeURIComponent(jobId)}`, {
+      credentials: "omit",
+      mode: "cors",
+    });
+    if (!response.ok) {
+      throw new Error(`Could not read local scrape status (${response.status}).`);
+    }
+    const payload = await response.json();
+    if (payload.status === "completed") {
+      return payload;
+    }
+    if (payload.status === "failed") {
+      throw new Error(payload.error || "The local scrape failed.");
+    }
+    await new Promise((resolve) => window.setTimeout(resolve, 1200));
+  }
+}
+
+async function fetchLocalScrapeFile(jobId) {
+  const response = await fetch(`${LOCAL_SCRAPE_HELPER_ORIGIN}/jobs/${encodeURIComponent(jobId)}/file`, {
+    credentials: "omit",
+    mode: "cors",
+  });
+  if (!response.ok) {
+    throw new Error(`Could not download the local scrape CSV (${response.status}).`);
+  }
+  return response.blob();
+}
+
+async function uploadLocalScrapeResult(show, blob, failureCount) {
+  const formData = new FormData();
+  formData.append(
+    "export_file",
+    new File([blob], `${show.showName.replace(/[^a-z0-9]+/gi, "-").toLowerCase() || "show"}.csv`, {
+      type: "text/csv",
+    }),
+  );
+  formData.append("failure_count", String(Math.max(Number.parseInt(String(failureCount || 0), 10) || 0, 0)));
+
+  const response = await fetch(`/shows/${show.showId}/local-scrape-upload`, {
+    method: "POST",
+    body: formData,
+    credentials: "same-origin",
+  });
+  if (!response.ok) {
+    let detail = "";
+    try {
+      const payload = await response.json();
+      detail = payload.detail || payload.message || "";
+    } catch (_error) {
+      detail = "";
+    }
+    throw new Error(detail || `Could not upload the local scrape result (${response.status}).`);
+  }
+  return response.json();
+}
+
+async function handleDashboardBulkScrapeSubmit(event) {
+  const form = event.currentTarget;
+  if (!(form instanceof HTMLFormElement)) {
+    return;
+  }
+  const submitter = event.submitter instanceof HTMLElement ? event.submitter : null;
+  const action = submitter?.getAttribute("formaction") || form.action;
+  if (!action.includes("/show-bulk/scrape")) {
+    return;
+  }
+
+  event.preventDefault();
+  const selectedShows = getSelectedDashboardShows(form);
+  if (!selectedShows.length) {
+    return;
+  }
+
+  const countTarget = form.querySelector("[data-select-count]");
+  const originalCountText = countTarget instanceof HTMLElement ? countTarget.textContent : "";
+  setFormBusyState(form, true, "Scraping locally...");
+
+  try {
+    await checkLocalScrapeHelper();
+    for (let index = 0; index < selectedShows.length; index += 1) {
+      const show = selectedShows[index];
+      if (countTarget instanceof HTMLElement) {
+        countTarget.textContent = `Scraping ${index + 1} of ${selectedShows.length}: ${show.showName}`;
+      }
+      const started = await startLocalScrapeJob(show);
+      const finished = await pollLocalScrapeJob(started.job_id);
+      const blob = await fetchLocalScrapeFile(started.job_id);
+      await uploadLocalScrapeResult(show, blob, finished.failure_count || 0);
+    }
+    window.location.reload();
+  } catch (error) {
+    if (countTarget instanceof HTMLElement) {
+      countTarget.textContent = originalCountText || "0 selected";
+    }
+    const message =
+      error instanceof Error && error.message
+        ? error.message
+        : "Local scraping could not start. Run `./.venv/bin/python scripts/local_scrape_agent.py` on this machine first.";
+    window.alert(message);
+  } finally {
+    setFormBusyState(form, false, "Scraping locally...");
+    if (countTarget instanceof HTMLElement) {
+      countTarget.textContent = originalCountText || countTarget.textContent;
+    }
+  }
+}
+
 async function handleDashboardDeleteSubmit(event) {
   event.preventDefault();
   const form = event.currentTarget;
@@ -1676,6 +1833,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
   const dashboardBulkForms = document.querySelectorAll("[data-dashboard-bulk-form]");
   dashboardBulkForms.forEach((form) => {
+    form.addEventListener("submit", (event) => {
+      void handleDashboardBulkScrapeSubmit(event);
+    });
     form.addEventListener("submit", (event) => {
       void handleDashboardBulkDeleteSubmit(event);
     });

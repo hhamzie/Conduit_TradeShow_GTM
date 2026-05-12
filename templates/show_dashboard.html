@@ -78,7 +78,7 @@
           {% if can_manage %}
           <td class="selection-col">
             <label class="selector-control" aria-label="Select {{ analysis.show.name }}">
-              <input type="checkbox" name="show_ids" value="{{ analysis.show.id }}" form="bulk-form-dashboard" data-select-item />
+              <input type="checkbox" name="show_ids" value="{{ analysis.show.id }}" form="bulk-form-dashboard" data-select-item data-show-name="{{ analysis.show.name }}" data-show-place="{{ analysis.show.place }}" data-show-link="{{ analysis.show.source_url }}" data-show-date="{{ analysis.show.event_date.isoformat() }}" />
               <span></span>
             </label>
           </td>
