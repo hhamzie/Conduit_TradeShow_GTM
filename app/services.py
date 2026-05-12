@@ -2117,6 +2117,14 @@ def _shows_for_background_sync(db: Session) -> list[Show]:
 
 def run_next_campaign(db: Session) -> CampaignRun | None:
     backfill_queued_runs(db)
+    existing_running = db.scalar(
+        select(CampaignRun.id)
+        .where(CampaignRun.status == RunStatus.running.value)
+        .limit(1)
+    )
+    if existing_running is not None:
+        return None
+
     campaign_run = db.scalar(
         select(CampaignRun)
         .options(selectinload(CampaignRun.show))

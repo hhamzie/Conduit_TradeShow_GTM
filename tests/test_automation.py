@@ -460,6 +460,34 @@ class AutomationTests(unittest.TestCase):
             self.assertEqual(show.status, ShowStatus.ready_for_review.value)
             self.assertEqual(show.company_count, 12)
 
+    def test_run_next_campaign_does_not_start_second_scrape_while_one_is_running(self) -> None:
+        with self.Session() as session:
+            first = make_show(
+                name="Pack Expo",
+                event_date=date(2026, 6, 2),
+                status=ShowStatus.scraping.value,
+                source_url="https://www.packexpo.com/show-directory",
+            )
+            second = make_show(
+                name="Atlanta Market",
+                event_date=date(2026, 6, 9),
+                status=ShowStatus.queued.value,
+                source_url="https://www.atlantamarket.com/exhibitors",
+            )
+            session.add_all([first, second])
+            session.flush()
+            session.add(CampaignRun(show=first, status=RunStatus.running.value))
+            session.add(CampaignRun(show=second, status=RunStatus.queued.value))
+            session.commit()
+
+            result = run_next_campaign(session)
+
+            self.assertIsNone(result)
+            session.refresh(second)
+            self.assertEqual(second.status, ShowStatus.queued.value)
+            queued_runs = [run for run in second.runs if run.status == RunStatus.queued.value]
+            self.assertEqual(len(queued_runs), 1)
+
     def test_upsert_show_reuses_existing_record_for_similar_name_within_five_day_window(self) -> None:
         with self.Session() as session:
             first_show, first_created = upsert_show(
