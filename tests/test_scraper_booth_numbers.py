@@ -12,6 +12,7 @@ from scraper import (
     collect_table_directory_entries,
     CompanyRecord,
     extract_directory_entry_candidates,
+    filter_plausible_company_records,
     find_embedded_directory_url,
     is_mapyourshow_directory,
     is_bulletin_directory,
@@ -131,7 +132,32 @@ class BoothNumberTests(unittest.TestCase):
             text = output_path.read_text(encoding="utf-8")
 
         self.assertIn("booth_number", text)
-        self.assertIn("C21", text)
+
+    def test_filter_plausible_company_records_keeps_real_companies_and_drops_gibberish(self) -> None:
+        records = [
+            CompanyRecord(
+                sort_index=0,
+                directory_page=1,
+                company_name="Acme Packaging",
+                profile_url="https://example.com/acme",
+                website_url="https://acme.com",
+                booth_number="C21",
+            ),
+            CompanyRecord(
+                sort_index=1,
+                directory_page=1,
+                company_name="Aoe <* Sng Cs leee",
+                profile_url="",
+                website_url="",
+                booth_number="",
+            ),
+        ]
+
+        filtered = filter_plausible_company_records(records)
+
+        self.assertEqual(len(filtered), 1)
+        self.assertEqual(filtered[0].company_name, "Acme Packaging")
+        self.assertEqual(filtered[0].booth_number, "C21")
 
     def test_extract_booth_number_from_profile_looks_for_labeled_value(self) -> None:
         html = """

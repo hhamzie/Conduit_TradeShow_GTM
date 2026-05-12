@@ -617,16 +617,22 @@ def _load_company_rows(raw_path: str) -> list[dict[str, str]]:
             company_name = _first_value(normalized, "company_name", "company", "company_table_data")
             if not company_name:
                 continue
+            company_name = company_name.strip()
+            if not _looks_plausible_company_name(company_name):
+                continue
             website_url = _normalize_website(
                 _first_value(normalized, "website_url", "website", "company_url", "company_domain", "domain")
             )
+            booth_number = _first_value(normalized, "booth_number", "booth", "booth_")
+            if not (website_url or booth_number) and len(company_name.split()) >= 5:
+                continue
             rows.append(
                 {
                     "row_key": _company_row_key(normalized),
                     "company_name": company_name,
                     "website_url": website_url,
                     "domain": _extract_domain(website_url),
-                    "booth_number": _first_value(normalized, "booth_number", "booth", "booth_"),
+                    "booth_number": booth_number,
                 }
             )
     return rows
@@ -665,6 +671,33 @@ def _extract_domain(website_url: str) -> str:
     if host.startswith("www."):
         host = host[4:]
     return host
+
+
+def _looks_plausible_company_name(company_name: str) -> bool:
+    normalized = re.sub(r"\s+", " ", company_name.strip())
+    if len(normalized) < 2 or len(normalized) > 140:
+        return False
+    if re.search(r"[<>|\\{}[\]^~`*]", normalized):
+        return False
+    if not re.search(r"[A-Za-z]", normalized):
+        return False
+
+    words = re.findall(r"[A-Za-z0-9&+'/-]+", normalized)
+    if not words:
+        return False
+    if all(len(word) <= 2 for word in words):
+        return False
+    short_alpha_words = [
+        word
+        for word in words
+        if len(word) <= 2 and any(character.isalpha() for character in word)
+    ]
+    if len(words) >= 4 and len(short_alpha_words) >= max(3, len(words) // 2):
+        return False
+    compact = normalized.replace(" ", "")
+    if sum(character.isdigit() for character in compact) >= 6 and len(compact) >= 12:
+        return False
+    return True
 
 
 def _safe_percent(part: int, whole: int) -> int:

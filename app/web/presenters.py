@@ -222,28 +222,26 @@ def format_scrape_elapsed_label(show: Show, now: datetime) -> str:
 
 
 def build_scrape_queue_positions(shows: list[Show]) -> tuple[dict[int, int], int]:
-    queue_items: list[tuple[int, datetime, int]] = []
+    queue_items: list[tuple[datetime, int]] = []
     for show in shows:
-        if show.status not in {"queued", "scraping"}:
+        if show.status != "queued":
             continue
-        queued_or_running_runs = [run for run in show.runs if run.status in {RunStatus.queued.value, RunStatus.running.value}]
-        if queued_or_running_runs:
+        queued_runs = [run for run in show.runs if run.status == RunStatus.queued.value]
+        if queued_runs:
             sort_at = min(
                 (
-                    run.started_at
-                    or run.created_at
+                    run.created_at
                     or show.run_at
                     or datetime.max
                 )
-                for run in queued_or_running_runs
+                for run in queued_runs
             )
         else:
             sort_at = show.run_at or datetime.max
-        priority = 0 if show.status == "scraping" else 1
-        queue_items.append((priority, sort_at, show.id))
+        queue_items.append((sort_at, show.id))
 
-    queue_items.sort(key=lambda item: (item[0], item[1], item[2]))
-    positions = {show_id: index for index, (_priority, _sort_at, show_id) in enumerate(queue_items, start=1)}
+    queue_items.sort(key=lambda item: (item[0], item[1]))
+    positions = {show_id: index for index, (_sort_at, show_id) in enumerate(queue_items, start=1)}
     return positions, len(queue_items)
 
 
@@ -281,10 +279,9 @@ def describe_show_flow(show: Show, now: datetime, *, queue_position: int | None 
         }
 
     if show.status == "scraping":
-        position_label = f"Scraping now · queue position {queue_position} of {queue_total}" if queue_position else "Scrape is running"
         return {
             "section": "in_progress",
-            "step": position_label,
+            "step": "Scraping now",
             "next_action": "Wait for the export and Clay handoff to finish.",
         }
 
