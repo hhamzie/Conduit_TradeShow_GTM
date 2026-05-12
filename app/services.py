@@ -1715,6 +1715,31 @@ def queue_due_shows(db: Session, now: datetime | None = None) -> int:
     return len(due_shows)
 
 
+def backfill_queued_runs(db: Session, now: datetime | None = None) -> int:
+    now = now or datetime.now()
+    queued_shows = list(
+        db.scalars(
+            select(Show)
+            .options(selectinload(Show.runs))
+            .where(Show.status == ShowStatus.queued.value)
+        )
+    )
+
+    repaired = 0
+    for show in queued_shows:
+        has_live_run = any(run.status in {RunStatus.queued.value, RunStatus.running.value} for run in show.runs)
+        if has_live_run:
+            continue
+        if show.run_at is None or show.run_at > now:
+            show.run_at = now
+        db.add(CampaignRun(show=show, status=RunStatus.queued.value))
+        repaired += 1
+
+    if repaired:
+        db.commit()
+    return repaired
+
+
 def queue_show_now(db: Session, show: Show) -> None:
     if show.status in {ShowStatus.queued.value, ShowStatus.scraping.value}:
         return
@@ -2091,6 +2116,7 @@ def _shows_for_background_sync(db: Session) -> list[Show]:
 
 
 def run_next_campaign(db: Session) -> CampaignRun | None:
+    backfill_queued_runs(db)
     campaign_run = db.scalar(
         select(CampaignRun)
         .options(selectinload(CampaignRun.show))
