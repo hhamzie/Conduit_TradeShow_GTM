@@ -1297,6 +1297,40 @@ button.button.subtle {
   border-radius: 22px;
 }
 
+.helper-install-modal {
+  width: min(100%, 608px);
+}
+
+.helper-command-stack {
+  display: grid;
+  gap: 12px;
+}
+
+.helper-command-block {
+  display: grid;
+  gap: 6px;
+  padding: 14px 16px;
+  border: 1px solid rgba(56, 92, 170, 0.16);
+  border-radius: 18px;
+  background: #f7f9ff;
+}
+
+.helper-command-label {
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.helper-command-code {
+  font-size: 0.98rem;
+  line-height: 1.45;
+  color: var(--text);
+  white-space: break-spaces;
+  word-break: break-word;
+}
+
 .scan-modal {
   width: min(100%, 760px);
 }

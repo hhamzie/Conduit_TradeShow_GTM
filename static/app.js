@@ -504,6 +504,24 @@ function closeFlashModal() {
   flashModal.remove();
 }
 
+function openLocalHelperModal() {
+  const modal = document.querySelector("[data-local-helper-modal]");
+  if (!(modal instanceof HTMLElement)) {
+    return;
+  }
+  modal.hidden = false;
+  document.body.dataset.modalOpen = "true";
+}
+
+function closeLocalHelperModal() {
+  const modal = document.querySelector("[data-local-helper-modal]");
+  if (!(modal instanceof HTMLElement)) {
+    return;
+  }
+  modal.hidden = true;
+  delete document.body.dataset.modalOpen;
+}
+
 function handleFlashModalClick(event) {
   if (event.target.matches("[data-flash-close]") || event.target.matches("[data-flash-modal]")) {
     closeFlashModal();
@@ -988,12 +1006,8 @@ async function handleScanConfirm(event) {
     const formData = submitter ? new FormData(form, submitter) : new FormData(form);
     const headers = {};
     if (wantsLocalScrape) {
-      try {
-        await checkLocalScrapeHelper();
-        headers["X-Prefer-Local-Scrape"] = "1";
-      } catch (_error) {
-        // Fall back to server-side scraping when the helper is not available.
-      }
+      await checkLocalScrapeHelper();
+      headers["X-Prefer-Local-Scrape"] = "1";
     }
     const response = await fetch(form.action, {
       method: "POST",
@@ -1020,6 +1034,9 @@ async function handleScanConfirm(event) {
   } catch (error) {
     const modal = form.closest("[data-scan-modal]");
     const empty = modal ? modal.querySelector("[data-scan-empty]") : null;
+    if (wantsLocalScrape) {
+      openLocalHelperModal();
+    }
     if (empty instanceof HTMLElement) {
       empty.hidden = false;
       empty.textContent = error instanceof Error && error.message ? error.message : "Could not add scanned shows.";
@@ -1729,11 +1746,7 @@ async function handleDashboardBulkScrapeSubmit(event) {
     if (countTarget instanceof HTMLElement) {
       countTarget.textContent = originalCountText || "0 selected";
     }
-    const message =
-      error instanceof Error && error.message
-        ? error.message
-        : "Local scraping could not start. Install the local helper on this machine with `sh scripts/install_local_scrape_agent.sh`.";
-    window.alert(message);
+    openLocalHelperModal();
   } finally {
     setFormBusyState(form, false, "Scraping locally...");
     if (countTarget instanceof HTMLElement) {
@@ -1743,9 +1756,12 @@ async function handleDashboardBulkScrapeSubmit(event) {
 }
 
 async function handleLocalShowScrapeFormSubmit(event) {
-  event.preventDefault();
   const form = event.currentTarget;
   if (!(form instanceof HTMLFormElement)) {
+    return;
+  }
+  if (form.dataset.localScrapeBypass === "true") {
+    delete form.dataset.localScrapeBypass;
     return;
   }
 
@@ -1757,9 +1773,9 @@ async function handleLocalShowScrapeFormSubmit(event) {
     eventDateRaw: form.dataset.showDate || "",
   };
   if (!Number.isInteger(show.showId) || !show.showName || !show.place || !show.link) {
-    form.requestSubmit();
     return;
   }
+  event.preventDefault();
 
   const submitButton = form.querySelector('button[type="submit"]');
   const originalLabel = submitButton instanceof HTMLButtonElement ? submitButton.textContent : "";
@@ -1772,7 +1788,7 @@ async function handleLocalShowScrapeFormSubmit(event) {
     await tryRunLocalScrapeBatch([show]);
     window.location.href = `/shows/${show.showId}`;
   } catch (_error) {
-    form.requestSubmit();
+    openLocalHelperModal();
   } finally {
     if (submitButton instanceof HTMLButtonElement) {
       submitButton.disabled = false;
@@ -1895,6 +1911,15 @@ document.addEventListener("DOMContentLoaded", () => {
   if (flashModal) {
     flashModal.addEventListener("click", handleFlashModalClick);
     document.addEventListener("keydown", handleFlashModalKeydown);
+  }
+
+  const localHelperModal = document.querySelector("[data-local-helper-modal]");
+  if (localHelperModal) {
+    localHelperModal.addEventListener("click", (event) => {
+      if (event.target === localHelperModal || event.target.matches("[data-local-helper-close]")) {
+        closeLocalHelperModal();
+      }
+    });
   }
 
   const guideAutosaveInputs = document.querySelectorAll("[data-guide-autosave-input]");
