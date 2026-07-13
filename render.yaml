@@ -77,6 +77,8 @@ services:
         value: America/New_York
       - key: WEEKLY_SHOW_SYNC_LOOKAHEAD_DAYS
         value: "100"
+      - key: WEEKLY_SHOW_SYNC_REQUIRE_NOTION
+        value: "true"
       - key: NOTION_API_TOKEN
         sync: false
       - key: NOTION_DATABASE_ID

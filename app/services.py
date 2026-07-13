@@ -1741,6 +1741,8 @@ def run_weekly_show_sync(db: Session, now: datetime | None = None) -> WeeklyShow
     end_date = start_date + timedelta(days=settings.weekly_show_sync_lookahead_days)
 
     source_label = ""
+    if settings.weekly_show_sync_require_notion and not settings.notion_api_token:
+        return None
     if settings.notion_api_token and settings.notion_database_id:
         notion_candidates = fetch_notion_trade_shows(
             token=settings.notion_api_token,

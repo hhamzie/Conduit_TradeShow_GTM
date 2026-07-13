@@ -89,6 +89,7 @@ class Settings:
     weekly_show_sync_hour: int
     weekly_show_sync_timezone: str
     weekly_show_sync_lookahead_days: int
+    weekly_show_sync_require_notion: bool
     notion_api_token: str
     notion_database_id: str
     notion_data_source_id: str
@@ -193,6 +194,8 @@ def get_settings() -> Settings:
         weekly_show_sync_hour=int(os.getenv("WEEKLY_SHOW_SYNC_HOUR", "10")),
         weekly_show_sync_timezone=os.getenv("WEEKLY_SHOW_SYNC_TIMEZONE", "America/New_York").strip() or "America/New_York",
         weekly_show_sync_lookahead_days=max(1, int(os.getenv("WEEKLY_SHOW_SYNC_LOOKAHEAD_DAYS", "100"))),
+        weekly_show_sync_require_notion=os.getenv("WEEKLY_SHOW_SYNC_REQUIRE_NOTION", "false").lower()
+        in {"1", "true", "yes"},
         notion_api_token=os.getenv("NOTION_API_TOKEN", "").strip(),
         notion_database_id=os.getenv(
             "NOTION_DATABASE_ID",
