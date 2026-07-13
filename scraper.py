@@ -8128,7 +8128,11 @@ def run_agent_directory_csv_fallback(options: ScrapeOptions) -> ScrapeResult:
             CompanyRecord(
                 sort_index=entry.sort_index,
                 directory_page=entry.directory_page,
-                company_name=maybe_enrich_company_name(entry.company_name, entry.website_url_hint),
+                company_name=(
+                    entry.company_name
+                    if not entry.profile_url
+                    else maybe_enrich_company_name(entry.company_name, entry.website_url_hint)
+                ),
                 profile_url=entry.profile_url,
                 website_url=validated_company_website_url(entry.company_name, entry.website_url_hint),
                 booth_number=entry.booth_number,
@@ -8244,9 +8248,10 @@ def collect_company_records(
         )
 
         if website_url_hint or not entry.profile_url or has_fragment_only_reference:
-            final_company_name = maybe_enrich_company_name(
-                entry.company_name,
-                website_url_hint,
+            final_company_name = (
+                entry.company_name
+                if not entry.profile_url
+                else maybe_enrich_company_name(entry.company_name, website_url_hint)
             )
             records.append(
                 CompanyRecord(
@@ -8624,7 +8629,11 @@ def stream_company_records_to_csv(
                 general_contact = select_general_contact(contacts)
                 primary_contact = select_primary_person_contact(contacts)
 
-            company_name = maybe_enrich_company_name(entry.company_name, website_url)
+            company_name = (
+                entry.company_name
+                if not entry.profile_url
+                else maybe_enrich_company_name(entry.company_name, website_url)
+            )
             record = CompanyRecord(
                 sort_index=entry.sort_index,
                 directory_page=entry.directory_page,
