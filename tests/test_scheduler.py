@@ -113,6 +113,43 @@ class SchedulerTests(unittest.TestCase):
             alert_mock.assert_called_once()
             airtable_mock.assert_called_once_with(show)
 
+    def test_failed_empty_local_show_is_requeued_when_due(self) -> None:
+        with self.Session() as db, patch.dict(os.environ, {"SCRAPE_EXECUTION_MODE": "local"}):
+            get_settings.cache_clear()
+            failed_show = Show(
+                name="Las Vegas Market",
+                event_date=date(2026, 7, 26),
+                place="Las Vegas, NV",
+                source_url="https://www.lasvegasmarket.com/en/exhibitor/exhibitor-directory",
+                run_offset_days=14,
+                run_at=datetime(2026, 7, 12),
+                status=ShowStatus.failed.value,
+                scrape_execution_mode="local",
+                company_count=0,
+            )
+            db.add(failed_show)
+            db.commit()
+
+            with patch(
+                "app.services.notify_scrape_due",
+                return_value=ProviderResult("notification", "success", "Alerted."),
+            ) as alert_mock:
+                show, created = upsert_show(
+                    db,
+                    show_name="Las Vegas Market",
+                    event_date_raw="2026-07-26",
+                    place="Las Vegas, NV",
+                    link="https://www.lasvegasmarket.com/en/exhibitor/exhibitor-directory",
+                    run_offset_days=14,
+                    scrape_execution_mode="local",
+                )
+                db.commit()
+
+            self.assertFalse(created)
+            self.assertEqual(show.status, ShowStatus.queued.value)
+            self.assertEqual(db.scalars(select(CampaignRun)).all(), [])
+            alert_mock.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()

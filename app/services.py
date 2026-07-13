@@ -685,7 +685,9 @@ def compute_run_at(event_date: date, run_offset_days: int) -> datetime:
 
 def _queue_show_if_due(db: Session, show: Show, *, now: datetime | None = None) -> bool:
     now = now or datetime.now()
-    if show.status != ShowStatus.waiting.value:
+    if show.status not in {ShowStatus.waiting.value, ShowStatus.failed.value}:
+        return False
+    if show.status == ShowStatus.failed.value and show.company_count > 0 and show.latest_export_path.strip():
         return False
     if show.run_at is None or show.run_at > now:
         return False
