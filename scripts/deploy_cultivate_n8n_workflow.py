@@ -3053,7 +3053,7 @@ def build_workflow(credentials_by_name: dict[str, dict[str, str]]) -> dict[str, 
                 '"company_name": $json.normalizedName || $json.companyName, "custom_fields": { '
                 '"persona": $json.persona, "show_name": $json.conference, "source_lead_record_id": $json.sourceLeadRecordId, '
                 '"airtable_contact_record_id": $json.airtableContactRecordId } }], '
-                '"settings": { "ignore_duplicate_leads_in_other_campaign": true, '
+                '"settings": { "ignore_duplicate_leads_in_other_campaign": false, '
                 '"ignore_global_block_list": false, "ignore_unsubscribe_list": false, '
                 '"ignore_community_bounce_list": false, "return_lead_ids": true } } }}'
             ),

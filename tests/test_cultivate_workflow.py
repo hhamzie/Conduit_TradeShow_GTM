@@ -27,7 +27,7 @@ class CultivateWorkflowTests(unittest.TestCase):
         self.assertIn("airtableContactBody", contact_write["jsonBody"])
 
         smartlead_body = nodes["Add Lead to Smartlead"]["parameters"]["jsonBody"]
-        self.assertIn('"ignore_duplicate_leads_in_other_campaign": true', smartlead_body)
+        self.assertIn('"ignore_duplicate_leads_in_other_campaign": false', smartlead_body)
         self.assertIn('"ignore_unsubscribe_list": false', smartlead_body)
         self.assertNotIn("allow_duplicate_leads_in_another_campaign", smartlead_body)
 
