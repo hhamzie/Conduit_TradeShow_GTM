@@ -222,11 +222,18 @@ ${JSON.stringify(compact({
 Tasks:
 1. Find the official root company domain. Return root domain only, no protocol and no www.
 2. Normalize the company name.
-3. Find current leaders for exactly these personas. For each persona, search broadly enough to return up to three candidates before selecting the best one:
+3. Before contact research, qualify the company against Conduit Commerce's proven ICP. Conduit is an AI co-pilot layered on a wholesale distributor or supplier's existing ERP, CRM, and email systems. It parses incoming POs and inquiries, retrieves accurate pricing/inventory, and drafts responses for reps to review. Estimate:
+   - SKU/catalog breadth: low, medium, or high, with reasoning. Strong evidence includes hundreds or thousands of variants across finishes, sizes, patterns, or materials.
+   - Sales-rep count or range. Fewer than 5 reps is a red flag.
+   - Downstream retailer, restaurant, or dealer account count or range. Thousands of repeat-ordering accounts is strongest.
+   - Ordering pattern: repeat/high-frequency or one-time/seasonal, with reasoning.
+   - Red flags: fewer than 5 sales reps; small single-location owner-operated business; low SKU count; infrequent ordering; or no overlap with Conduit's proven verticals of home goods, tableware/glassware, restaurant supply, cabinetry, carpets, and furniture.
+   Score fit as exactly STRONG FIT, MODERATE FIT, WEAK FIT, or PASS. Return one-sentence pursue/deprioritize/pass recommendation and concise evidence URLs/reasoning. Do not turn a weak proxy into a fact; label estimates clearly.
+4. Only when ICP fit is STRONG FIT or MODERATE FIT, find current leaders for exactly these personas. For WEAK FIT or PASS, return Not Found persona objects without spending additional searches on contacts. For each qualified-company persona, search broadly enough to return up to three candidates before selecting the best one:
    - sales: current sales/revenue/commercial leader. Title must directly contain sales, revenue, commercial, growth, business development, partnerships, account executive, account management, CRO, or chief revenue. Do not use founder/CEO/president unless the title also clearly says sales/revenue/commercial.
    - cs: current customer support/customer success/customer service/client success/client services/customer advocacy leader. Title must directly contain customer support, customer service, customer success, client services, support, service, or customer care. Reject sales, operations, HR, founder, CEO, president, office/admin, generic contact, and directory-only matches unless the title clearly has one of those customer/support phrases.
    - ops: current operations/supply-chain/logistics/manufacturing/production leader. Prefer COO, operations VP/director/head/manager, supply chain, logistics, production, procurement, fulfillment, warehouse, or manufacturing. Do not use sales/support/CEO/president-only matches.
-4. For each persona, return selected fullName, jobTitle, sourceUrl, confidence, linkedinUrl, linkedinActive, linkedinActivitySummary, and candidates.
+5. For each persona, return selected fullName, jobTitle, sourceUrl, confidence, linkedinUrl, linkedinActive, linkedinActivitySummary, and candidates.
 5. confidence must be High, Medium, Low, or Not Found.
 6. Use High only when the source clearly supports the person's exact full name, current company, and current persona-specific title.
 7. Do not use Wiza, Apollo, ZoomInfo, RocketReach, SignalHire, Lusha, ContactOut, or similar people-directory/sales-intelligence pages as sourceUrl. Prefer the official company site, company press/news pages, a real LinkedIn public profile, or a credible industry/news page.
@@ -245,6 +252,7 @@ JSON shape:
 {
   "officialCompanyDomain": "",
   "normalizedCompanyName": "",
+  "icpQualification": {"skuEstimate":"","salesRepEstimate":"","accountBaseEstimate":"","orderingPattern":"","redFlags":[],"fitScore":"","recommendation":"","reasoning":"","evidenceUrls":[]},
   "sales": {"firstName":"","fullName":"","jobTitle":"","sourceUrl":"","confidence":"","linkedinUrl":"","linkedinActive":"NO","linkedinActivitySummary":"","evidence":"","candidates":[{"fullName":"","jobTitle":"","sourceUrl":"","confidence":"","linkedinUrl":"","evidence":"","rejectionReason":""}]},
   "cs": {"firstName":"","fullName":"","jobTitle":"","sourceUrl":"","confidence":"","linkedinUrl":"","linkedinActive":"NO","linkedinActivitySummary":"","evidence":"","candidates":[{"fullName":"","jobTitle":"","sourceUrl":"","confidence":"","linkedinUrl":"","evidence":"","rejectionReason":""}]},
   "ops": {"firstName":"","fullName":"","jobTitle":"","sourceUrl":"","confidence":"","linkedinUrl":"","linkedinActive":"NO","linkedinActivitySummary":"","evidence":"","candidates":[{"fullName":"","jobTitle":"","sourceUrl":"","confidence":"","linkedinUrl":"","evidence":"","rejectionReason":""}]}
@@ -545,9 +553,25 @@ const sales = normalizePersonForPersona(parsed.sales, 'sales', domain);
 const cs = normalizePersonForPersona(parsed.cs, 'cs', domain);
 const ops = normalizePersonForPersona(parsed.ops, 'ops', domain);
 const normalizedName = String(parsed.normalizedCompanyName || original.normalizedName || original.brand_name || '').trim();
+const rawIcp = parsed.icpQualification && typeof parsed.icpQualification === 'object' ? parsed.icpQualification : {};
+const fitText = String(rawIcp.fitScore || rawIcp.fit || '').trim().toUpperCase();
+const icpFitScore = ['STRONG FIT', 'MODERATE FIT', 'WEAK FIT', 'PASS'].includes(fitText) ? fitText : 'PASS';
+const icpQualified = icpFitScore === 'STRONG FIT' || icpFitScore === 'MODERATE FIT';
+const icpQualification = {
+  skuEstimate: String(rawIcp.skuEstimate || '').trim(),
+  salesRepEstimate: String(rawIcp.salesRepEstimate || '').trim(),
+  accountBaseEstimate: String(rawIcp.accountBaseEstimate || '').trim(),
+  orderingPattern: String(rawIcp.orderingPattern || '').trim(),
+  redFlags: Array.isArray(rawIcp.redFlags) ? rawIcp.redFlags.map((value) => String(value).trim()).filter(Boolean) : [],
+  fitScore: icpFitScore,
+  recommendation: String(rawIcp.recommendation || '').trim(),
+  reasoning: String(rawIcp.reasoning || '').trim(),
+  evidenceUrls: Array.isArray(rawIcp.evidenceUrls) ? rawIcp.evidenceUrls.map((value) => String(value).trim()).filter(Boolean) : [],
+};
 
 function isQualified(contact) {
   return Boolean(
+    icpQualified &&
     domain &&
     contact.fullName &&
     contact.jobTitle &&
@@ -596,6 +620,15 @@ const leadFields = {
   'Source Row ID': original.sourceRecordId,
   'Enable Smartlead': original.enableSmartlead ? 'true' : 'false',
   'Smartlead Campaign ID': original.smartleadCampaignId,
+  'ICP SKU Estimate': icpQualification.skuEstimate,
+  'ICP Sales Rep Estimate': icpQualification.salesRepEstimate,
+  'ICP Account Base Estimate': icpQualification.accountBaseEstimate,
+  'ICP Ordering Pattern': icpQualification.orderingPattern,
+  'ICP Red Flags': icpQualification.redFlags.join('\n'),
+  'ICP Fit Score': icpFitScore,
+  'ICP Recommendation': icpQualification.recommendation,
+  'ICP Reasoning': icpQualification.reasoning,
+  'ICP Evidence URLs': icpQualification.evidenceUrls.join('\n'),
   'Sales. ': isQualified(sales) ? 'queued' : 'skipped',
   'Ops.': isQualified(ops) ? 'queued' : 'skipped',
   'CS. ': isQualified(cs) ? 'queued' : 'skipped',
@@ -613,6 +646,9 @@ return {
     sales,
     cs,
     ops,
+    icpQualification,
+    icpFitScore,
+    icpQualified,
     qualified: {
       sales: isQualified(sales),
       cs: isQualified(cs),
@@ -677,9 +713,12 @@ function contactItem(row, personaKey, clayPersona, tableId, person) {
     suppliedEmail: person.email || '',
     suppliedPhone: person.phone || '',
     contactSourceType: person.contactSourceType || 'researched_persona',
+    icpFitScore: row.icpFitScore || 'PASS',
+    icpRecommendation: row.icpQualification?.recommendation || '',
+    icpQualified: row.icpQualified === true,
     smartleadCampaignId: row.smartleadCampaignId || '',
     cadenceEnrollmentDate: row.cadenceEnrollmentDate || new Date().toISOString().slice(0, 10),
-    enableSmartlead: row.enableSmartlead === true,
+    enableSmartlead: row.enableSmartlead === true && row.icpQualified === true,
   };
   base.contactDedupeKey = [
     identityPart(base.suppliedEmail || base.linkedinUrl || base.fullName),
@@ -714,6 +753,8 @@ function contactItem(row, personaKey, clayPersona, tableId, person) {
       'Contact Email': base.suppliedEmail,
       'Contact Phone': base.suppliedPhone,
       'Contact Source Type': base.contactSourceType,
+      'ICP Fit Score': base.icpFitScore,
+      'ICP Recommendation': base.icpRecommendation,
     };
   } else if (personaKey === 'Ops') {
     fields = {
@@ -739,6 +780,8 @@ function contactItem(row, personaKey, clayPersona, tableId, person) {
       'Contact Email': base.suppliedEmail,
       'Contact Phone': base.suppliedPhone,
       'Contact Source Type': base.contactSourceType,
+      'ICP Fit Score': base.icpFitScore,
+      'ICP Recommendation': base.icpRecommendation,
     };
   } else {
     fields = {
@@ -768,6 +811,8 @@ function contactItem(row, personaKey, clayPersona, tableId, person) {
       'Contact Email': base.suppliedEmail,
       'Contact Phone': base.suppliedPhone,
       'Contact Source Type': base.contactSourceType,
+      'ICP Fit Score': base.icpFitScore,
+      'ICP Recommendation': base.icpRecommendation,
     };
   }
 
@@ -922,7 +967,10 @@ return {
     suppliedEmail: clean(fields['Contact Email']),
     suppliedPhone: clean(fields['Contact Phone']),
     contactSourceType: clean(fields['Contact Source Type']),
-    enableSmartlead: materialized.enableSmartlead === true,
+    icpFitScore: clean(fields['ICP Fit Score'] || materialized.icpFitScore || 'PASS'),
+    icpRecommendation: clean(fields['ICP Recommendation'] || materialized.icpRecommendation),
+    icpQualified: materialized.icpQualified === true,
+    enableSmartlead: materialized.enableSmartlead === true && materialized.icpQualified === true,
     smartleadCampaignId: materialized.smartleadCampaignId || '',
     cadenceEnrollmentDate: materialized.cadenceEnrollmentDate || new Date().toISOString().slice(0, 10),
     airtableContactRecordId: response.id || response.recordId || '',
@@ -2073,12 +2121,19 @@ const reps = [
 const rep = reps[assignmentIndex % reps.length];
 const invalidPerson = isBadPlaceholder(fullName) || isBadPlaceholder(row.jobTitle);
 const hasReachableChannel = Boolean(finalWorkEmail || finalPhone || linkedinUrl);
-const shouldSyncPipedrive = Boolean(fullName && companyName && hasReachableChannel && !invalidPerson);
+const shouldSyncPipedrive = Boolean(
+  fullName
+  && companyName
+  && hasReachableChannel
+  && !invalidPerson
+  && row.icpQualified === true
+);
 
 let skipReason = '';
 if (!shouldSyncPipedrive) {
   if (!fullName) skipReason = 'Missing completed contact name.';
   else if (!companyName) skipReason = 'Missing completed company name.';
+  else if (row.icpQualified !== true) skipReason = `ICP gate excluded ${row.icpFitScore || 'unscored'} company.`;
   else if (isBadPlaceholder(fullName) || isBadPlaceholder(row.jobTitle)) skipReason = 'Contact contains unresolved placeholder text.';
   else if (!hasReachableChannel) skipReason = 'Missing a valid final email, phone, or LinkedIn profile.';
   else skipReason = 'Contact is not complete enough for Pipedrive.';

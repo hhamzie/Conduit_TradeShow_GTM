@@ -39,6 +39,17 @@ class CultivateWorkflowTests(unittest.TestCase):
         self.assertIn("performUpsert", contact_code)
         self.assertIn("scraped_trade_show_contact", contact_code)
         self.assertIn("row.scrapedContacts", contact_code)
+        self.assertIn("row.enableSmartlead === true && row.icpQualified === true", contact_code)
+
+        research_prompt = nodes["Build Lead Research Request"]["parameters"]["jsCode"]
+        self.assertIn("Conduit Commerce's proven ICP", research_prompt)
+        self.assertIn("STRONG FIT", research_prompt)
+        self.assertIn("MODERATE FIT", research_prompt)
+        self.assertIn("Only when ICP fit", research_prompt)
+        parse_research = nodes["Parse Research Result"]["parameters"]["jsCode"]
+        self.assertIn("'ICP SKU Estimate'", parse_research)
+        self.assertIn("'ICP Fit Score'", parse_research)
+        self.assertIn("icpQualified", parse_research)
 
         final_dedupe = nodes["Dedupe Final Contacts"]
         self.assertEqual(final_dedupe["parameters"]["mode"], "runOnceForAllItems")
@@ -95,6 +106,8 @@ class CultivateWorkflowTests(unittest.TestCase):
         pipedrive_code = nodes["Build Pipedrive Sync"]["parameters"]["jsCode"]
         self.assertIn("finalWorkEmail || finalPhone || linkedinUrl", pipedrive_code)
         self.assertIn("Missing a valid final email, phone, or LinkedIn profile", pipedrive_code)
+        self.assertIn("row.icpQualified === true", pipedrive_code)
+        self.assertIn("ICP gate excluded", pipedrive_code)
         self.assertNotIn("linkedinUrl && clean(row.linkedinActive) === 'YES'", pipedrive_code)
 
         create_person_body = nodes["Pipedrive Create Person"]["parameters"]["jsonBody"]
