@@ -41,18 +41,20 @@ class CultivateWorkflowTests(unittest.TestCase):
         self.assertIn("scraped_trade_show_contact", contact_code)
         self.assertIn("row.scrapedContacts", contact_code)
         self.assertIn("row.enableSmartlead === true && Boolean(first)", contact_code)
-        self.assertIn("Pipedrive remains", contact_code)
+        self.assertIn("Pipedrive\n    // remains restricted", contact_code)
 
         research_prompt = nodes["Build Lead Research Request"]["parameters"]["jsCode"]
         self.assertIn("Conduit Commerce's proven ICP", research_prompt)
         self.assertIn("STRONG FIT", research_prompt)
         self.assertIn("MODERATE FIT", research_prompt)
-        self.assertIn("When ICP fit is STRONG FIT, MODERATE FIT, or WEAK FIT", research_prompt)
+        self.assertIn("Regardless of ICP fit, find current leaders", research_prompt)
+        self.assertIn("PASS controls Pipedrive routing only", research_prompt)
         parse_research = nodes["Parse Research Result"]["parameters"]["jsCode"]
         self.assertIn("'ICP SKU Estimate'", parse_research)
         self.assertIn("'ICP Fit Score'", parse_research)
         self.assertIn("icpQualified", parse_research)
         self.assertIn("'WEAK FIT'", parse_research)
+        self.assertNotIn("icpQualified &&\n    domain", parse_research)
 
         final_dedupe = nodes["Dedupe Final Contacts"]
         self.assertEqual(final_dedupe["parameters"]["mode"], "runOnceForAllItems")
