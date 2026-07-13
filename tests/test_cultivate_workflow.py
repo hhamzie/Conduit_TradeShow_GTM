@@ -34,6 +34,7 @@ class CultivateWorkflowTests(unittest.TestCase):
         normalize_code = nodes["Normalize Incoming Leads"]["parameters"]["jsCode"]
         self.assertIn("general_contact_email", normalize_code)
         self.assertIn("scrapedContact", normalize_code)
+        self.assertIn("fields['Source Row ID']", normalize_code)
 
         contact_code = nodes["Materialize Contact Rows"]["parameters"]["jsCode"]
         self.assertIn("performUpsert", contact_code)

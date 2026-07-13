@@ -131,7 +131,15 @@ for (const item of items) {
     const website = firstValue(fields, ['website', 'Website', 'website_url', 'Website URL']);
     const suppliedDomain = firstValue(fields, ['Official Company Domain (2)', 'Official Company Domain', 'domain', 'Domain']);
     const domain = domainFromUrl(suppliedDomain || website || exhibitorUrl);
-    const sourceRecordId = row.id || row.recordId || fields.record_id || fields.source_row_id || `incoming-${Date.now()}-${index + 1}`;
+    // Airtable webhook rows carry their Airtable record id in `row.id`, but the
+    // durable dedupe key is the original exhibitor/source-row id. Prefer it so a
+    // reconciliation updates the existing lead rather than creating a duplicate.
+    const sourceRecordId = fields.source_row_id
+      || fields['Source Row ID']
+      || fields.record_id
+      || row.recordId
+      || row.id
+      || `incoming-${Date.now()}-${index + 1}`;
     const attachedContacts = Array.isArray(fields.scraped_contacts) ? fields.scraped_contacts : [];
 
     output.push({
