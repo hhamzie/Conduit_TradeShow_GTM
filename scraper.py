@@ -8604,6 +8604,7 @@ def stream_company_records_to_csv(
             )
             booth_number = entry.booth_number
 
+            contacts = entry.contacts
             if not (website_url or not entry.profile_url or has_fragment_only_reference):
                 try:
                     scraped = scrape_profile_insights(entry.profile_url)
@@ -8616,11 +8617,12 @@ def stream_company_records_to_csv(
                     )
                 website_url = validated_company_website_url(entry.company_name, scraped.website_url)
                 booth_number = booth_number or scraped.booth_number
-                general_contact = select_general_contact(scraped.contacts)
-                primary_contact = select_primary_person_contact(scraped.contacts)
+                contacts = tuple([*entry.contacts, *scraped.contacts])
+                general_contact = select_general_contact(contacts)
+                primary_contact = select_primary_person_contact(contacts)
             else:
-                general_contact = None
-                primary_contact = None
+                general_contact = select_general_contact(contacts)
+                primary_contact = select_primary_person_contact(contacts)
 
             company_name = maybe_enrich_company_name(entry.company_name, website_url)
             record = CompanyRecord(
@@ -8630,13 +8632,13 @@ def stream_company_records_to_csv(
                 profile_url=entry.profile_url,
                 website_url=website_url,
                 booth_number=booth_number,
-                general_contact_email=general_contact.email if general_contact else "",
-                general_contact_phone=general_contact.phone if general_contact else "",
-                contact_name=primary_contact.person_name if primary_contact else "",
-                contact_title=primary_contact.job_title if primary_contact else "",
-                contact_email=primary_contact.email if primary_contact else "",
-                contact_phone=primary_contact.phone if primary_contact else "",
-                contacts=scraped.contacts if not (website_url or not entry.profile_url or has_fragment_only_reference) else (),
+                general_contact_email=entry.general_contact_email or (general_contact.email if general_contact else ""),
+                general_contact_phone=entry.general_contact_phone or (general_contact.phone if general_contact else ""),
+                contact_name=entry.contact_name or (primary_contact.person_name if primary_contact else ""),
+                contact_title=entry.contact_title or (primary_contact.job_title if primary_contact else ""),
+                contact_email=entry.contact_email or (primary_contact.email if primary_contact else ""),
+                contact_phone=entry.contact_phone or (primary_contact.phone if primary_contact else ""),
+                contacts=contacts,
             )
             filtered_records = filter_plausible_company_records([record])
             if not filtered_records:
@@ -8653,7 +8655,7 @@ def stream_company_records_to_csv(
                 conference_location=conference_location,
             )
             all_count += 1
-            if kept_record.website_url:
+            if kept_record.website_url or record_has_direct_contact(kept_record):
                 _write_company_record_row(
                     website_writer,
                     kept_record,
@@ -8744,8 +8746,25 @@ def filter_plausible_company_records(records: list[CompanyRecord]) -> list[Compa
     return kept_records
 
 
+def record_has_direct_contact(record: CompanyRecord) -> bool:
+    return any(
+        (
+            record.general_contact_email,
+            record.general_contact_phone,
+            record.contact_email,
+            record.contact_phone,
+            record.contact_name,
+            record.contacts,
+        )
+    )
+
+
 def filter_records_with_websites(records: list[CompanyRecord]) -> list[CompanyRecord]:
-    return [record for record in records if record.website_url]
+    return [
+        record
+        for record in records
+        if record.website_url or record_has_direct_contact(record)
+    ]
 
 
 def apply_website_requirement(records: list[CompanyRecord]) -> list[CompanyRecord]:
@@ -8753,7 +8772,7 @@ def apply_website_requirement(records: list[CompanyRecord]) -> list[CompanyRecor
     if kept_records:
         dropped_records = len(records) - len(kept_records)
         if dropped_records:
-            print(f"Dropped {dropped_records} company record(s) without a website/domain.")
+            print(f"Dropped {dropped_records} company record(s) without a website/domain or direct contact.")
         return kept_records
 
     if records:
