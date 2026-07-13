@@ -35,6 +35,7 @@ class WorkerTests(unittest.TestCase):
             patch("app.worker.time.sleep", side_effect=fake_sleep),
         ):
             settings_mock.return_value.worker_poll_seconds = 1
+            settings_mock.return_value.scrape_execution_mode = "local"
             with self.assertRaises(StopIteration):
                 run_worker_loop()
 

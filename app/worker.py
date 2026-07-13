@@ -14,8 +14,13 @@ logger = logging.getLogger(__name__)
 
 def run_worker_loop() -> None:
     init_db()
-    poll_seconds = get_settings().worker_poll_seconds
-    logger.info("Worker started. Poll interval=%ss", poll_seconds)
+    settings = get_settings()
+    poll_seconds = settings.worker_poll_seconds
+    logger.info(
+        "Worker started. Poll interval=%ss scrape_execution_mode=%s",
+        poll_seconds,
+        settings.scrape_execution_mode,
+    )
 
     while True:
         try:
@@ -34,17 +39,18 @@ def run_worker_loop() -> None:
                 if queued:
                     logger.info("Queued %s due show(s).", queued)
 
-                repaired = backfill_queued_runs(db)
-                if repaired:
-                    logger.info("Backfilled %s queued show(s) that were missing a scrape run.", repaired)
+                if settings.scrape_execution_mode == "worker":
+                    repaired = backfill_queued_runs(db)
+                    if repaired:
+                        logger.info("Backfilled %s queued show(s) that were missing a scrape run.", repaired)
 
-                campaign_run = run_next_campaign(db)
-                if campaign_run is not None:
-                    logger.info("Processed campaign run %s with status=%s.", campaign_run.id, campaign_run.status)
+                    campaign_run = run_next_campaign(db)
+                    if campaign_run is not None:
+                        logger.info("Processed campaign run %s with status=%s.", campaign_run.id, campaign_run.status)
 
-                synced = sync_approved_shows(db)
-                if synced:
-                    logger.info("Touched %s approved show(s) for provider sync.", synced)
+                    synced = sync_approved_shows(db)
+                    if synced:
+                        logger.info("Touched %s approved show(s) for provider sync.", synced)
         except Exception:  # noqa: BLE001
             logger.exception("Worker loop iteration failed. Continuing after backoff.")
 
