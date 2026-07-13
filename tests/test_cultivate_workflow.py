@@ -83,8 +83,13 @@ class CultivateWorkflowTests(unittest.TestCase):
         self.assertIn("row.smartleadCampaignId", validation_code)
         self.assertIn("row.finalEmailValidationStatus === 'valid'", validation_code)
         parse_validation_code = nodes["Parse Final Email Validation"]["parameters"]["jsCode"]
-        self.assertIn("trustedDirectorySourceFallback", parse_validation_code)
-        self.assertIn("scraped_trade_show_contact", parse_validation_code)
+        self.assertNotIn("trustedDirectorySourceFallback", parse_validation_code)
+        self.assertEqual(
+            nodes["Enrichley Validate Final Email"]["parameters"]["url"],
+            "https://api.enrichley.io/api/v1/validate-single-email",
+        )
+        self.assertNotIn("continueOnFail", nodes["Enrichley Validate Final Email"])
+        self.assertNotIn("continueOnFail", nodes["Enrichley Validate LeadMagic"])
 
         smartlead_node = nodes["Add Lead to Smartlead"]
         self.assertEqual(

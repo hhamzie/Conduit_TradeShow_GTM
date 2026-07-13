@@ -1598,25 +1598,16 @@ function isExplicitInvalid(value) {
 
 const source = $('Merge Final Email').item.json;
 const raw = item.json || {};
-const trustedDirectoryEmail = Boolean(
-  source.finalWorkEmail
-  && source.finalProvider === 'Scraped Contact'
-  && String(source.contactSourceType || '').trim() === 'scraped_trade_show_contact'
-);
 const validated = isValid(raw);
 const invalid = isExplicitInvalid(raw);
 return {
   json: {
     ...source,
-    finalEmailValidationRaw: trustedDirectoryEmail && !validated && !invalid
-      ? { ...raw, trustedDirectorySourceFallback: true }
-      : raw,
+    finalEmailValidationRaw: raw,
     finalEmailValidationStatus: validated
       ? 'valid'
       : invalid
       ? 'invalid'
-      : trustedDirectoryEmail
-      ? 'valid'
       : 'unknown',
   }
 };
@@ -2963,6 +2954,7 @@ def build_workflow(credentials_by_name: dict[str, dict[str, str]]) -> dict[str, 
             credential_type=enrichley_type,
             credentials=enrichley_credentials,
             json_body='={{ { "email": $json.leadMagicEmail } }}',
+            continue_on_fail=False,
         ),
         code_node("Parse LeadMagic Validation", (2880, 40), PARSE_LEADMAGIC_VALIDATION_JS),
         merge_node("Merge After LeadMagic Validation", (3140, 120)),
@@ -3032,6 +3024,7 @@ def build_workflow(credentials_by_name: dict[str, dict[str, str]]) -> dict[str, 
             credential_type=enrichley_type,
             credentials=enrichley_credentials,
             json_body='={{ { "email": $json.finalWorkEmail } }}',
+            continue_on_fail=False,
         ),
         code_node("Parse Final Email Validation", (8860, -240), PARSE_FINAL_EMAIL_VALIDATION_JS),
         merge_node("Merge After Final Email Validation", (9120, -160)),
