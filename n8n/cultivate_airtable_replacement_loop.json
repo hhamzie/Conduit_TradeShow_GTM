@@ -4,7 +4,7 @@
   "nodes": [
     {
       "parameters": {},
-      "id": "d24653fd-cb3e-42d5-8d77-2b9adea12bfe",
+      "id": "51a243b1-01be-4e02-a1f1-a3bc911436a3",
       "name": "Manual Trigger",
       "type": "n8n-nodes-base.manualTrigger",
       "typeVersion": 1,
@@ -20,7 +20,7 @@
         "responseMode": "onReceived",
         "options": {}
       },
-      "id": "03b82029-2797-4fe8-aebe-1e742c3558f1",
+      "id": "bfabca40-33dd-4ddc-a0ba-1941882efe18",
       "name": "Cultivate Intake Webhook",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
@@ -36,7 +36,7 @@
         "width": 560,
         "color": 5
       },
-      "id": "e75cd98a-8a9d-41cb-a29b-141be30c12fa",
+      "id": "e38f3610-3c76-4d67-bb76-af27c2aac860",
       "name": "Workflow Notes",
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
@@ -77,7 +77,7 @@
         "specifyQuery": "json",
         "jsonQuery": "={{ { \"maxRecords\": \"1000\", \"pageSize\": \"100\", \"filterByFormula\": \"AND(LEN({brand_name})>0,LEN({Official Company Domain (2)})=0)\" } }}"
       },
-      "id": "888af5c1-4684-4e0e-9c48-d97a6fbfef9b",
+      "id": "0534caf7-9dd3-4918-89a4-0b25bd27daf3",
       "name": "List Queued Cultivate Leads",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -98,7 +98,7 @@
         "mode": "runOnceForAllItems",
         "jsCode": "function asArray(value) {\n  if (!value) return [];\n  return Array.isArray(value) ? value : [value];\n}\n\nfunction unwrapPayload(input) {\n  const raw = input || {};\n  if (raw.body && typeof raw.body === 'object') return raw.body;\n  return raw;\n}\n\nfunction firstValue(row, names) {\n  for (const name of names) {\n    const value = row?.[name];\n    if (value !== undefined && value !== null && String(value).trim() !== '') {\n      return String(value).trim();\n    }\n  }\n  return '';\n}\n\nfunction domainFromUrl(value) {\n  if (!value) return '';\n  try {\n    const raw = String(value).trim();\n    const url = raw.match(/^https?:\\/\\//i) ? raw : `https://${raw}`;\n    return new URL(url).hostname.replace(/^www\\./i, '').toLowerCase();\n  } catch (error) {\n    return '';\n  }\n}\n\nfunction titleCase(value) {\n  return String(value || '')\n    .toLowerCase()\n    .replace(/\\b[a-z]/g, (letter) => letter.toUpperCase())\n    .replace(/\\b(And|Of|The|For|In)\\b/g, (word) => word.toLowerCase())\n    .trim();\n}\n\nfunction normalizeCompanyName(value) {\n  return titleCase(\n    String(value || '')\n      .replace(/\\b(incorporated|inc\\.?|llc|l\\.l\\.c\\.|ltd\\.?|co\\.?|corp\\.?|corporation|company)\\b/gi, '')\n      .replace(/[,.]+$/g, '')\n      .replace(/\\s+/g, ' ')\n      .trim()\n  );\n}\n\nfunction toBoolean(value) {\n  return ['1', 'true', 'yes', 'y', 'on'].includes(String(value || '').trim().toLowerCase());\n}\n\nfunction isoDate(value) {\n  const raw = String(value || '').trim();\n  if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(raw)) return '';\n  const parsed = new Date(`${raw}T00:00:00Z`);\n  return Number.isNaN(parsed.getTime()) ? '' : parsed.toISOString().slice(0, 10);\n}\n\nconst output = [];\nfor (const item of items) {\n  const payload = unwrapPayload(item.json);\n  const rows = [\n    ...asArray(payload.rows),\n    ...asArray(payload.leads),\n    ...asArray(payload.records),\n  ];\n  const sourceRows = rows.length ? rows : asArray(payload);\n\n  sourceRows.forEach((row, index) => {\n    const fields = row.fields && typeof row.fields === 'object' ? row.fields : row;\n    const brandName = firstValue(fields, ['brand_name', 'Brand Name', 'company_name', 'Company Name', 'company', 'name']);\n    if (!brandName) return;\n\n    const exhibitorUrl = firstValue(fields, ['exhibitor_url', 'Exhibitor URL', 'source_url', 'Source URL']);\n    const website = firstValue(fields, ['website', 'Website', 'website_url', 'Website URL']);\n    const suppliedDomain = firstValue(fields, ['Official Company Domain (2)', 'Official Company Domain', 'domain', 'Domain']);\n    const domain = domainFromUrl(suppliedDomain || website || exhibitorUrl);\n    // Airtable webhook rows carry their Airtable record id in `row.id`, but the\n    // durable dedupe key is the original exhibitor/source-row id. Prefer it so a\n    // reconciliation updates the existing lead rather than creating a duplicate.\n    const sourceRecordId = fields.source_row_id\n      || fields['Source Row ID']\n      || fields.record_id\n      || row.recordId\n      || row.id\n      || `incoming-${Date.now()}-${index + 1}`;\n    const attachedContacts = Array.isArray(fields.scraped_contacts) ? fields.scraped_contacts : [];\n\n    output.push({\n      json: {\n        sourceRecordId,\n        sourceRowIndex: Number.isFinite(Number(fields.sourceRowIndex ?? fields.source_row_index ?? row.sourceRowIndex ?? row.source_row_index))\n          ? Number(fields.sourceRowIndex ?? fields.source_row_index ?? row.sourceRowIndex ?? row.source_row_index)\n          : index,\n        rawLead: fields,\n        exhibitor_url: exhibitorUrl,\n        brand_name: brandName,\n        shown_by: firstValue(fields, ['shown_by', 'Shown By']),\n        showrooms: firstValue(fields, ['showrooms', 'Showrooms']),\n        website,\n        fax: firstValue(fields, ['fax', 'Fax']),\n        phone: firstValue(fields, ['general_contact_phone', 'General Contact Phone', 'phone', 'Phone']),\n        company_email: firstValue(fields, ['general_contact_email', 'General Contact Email', 'company_email', 'Company Email']),\n        showroom_contact: firstValue(fields, ['showroom_contact', 'Showroom Contact']),\n        scrapedContact: {\n          fullName: firstValue(fields, ['contact_name', 'Contact Name', 'person_name', 'Person Name']),\n          jobTitle: firstValue(fields, ['contact_title', 'Contact Title', 'job_title', 'Job Title']),\n          email: firstValue(fields, ['contact_email', 'Contact Email']),\n          phone: firstValue(fields, ['contact_phone', 'Contact Phone']),\n          sourceUrl: firstValue(fields, ['contact_source_url', 'Contact Source URL', 'source_url', 'Source URL']),\n        },\n        scrapedContacts: attachedContacts.map((contact) => ({\n          fullName: firstValue(contact, ['person_name', 'Person Name', 'contact_name', 'Contact Name']),\n          jobTitle: firstValue(contact, ['job_title', 'Job Title', 'contact_title', 'Contact Title']),\n          email: firstValue(contact, ['email', 'contact_email', 'Contact Email']),\n          phone: firstValue(contact, ['phone', 'contact_phone', 'Contact Phone']),\n          sourceUrl: firstValue(contact, ['source_url', 'Source URL']) || exhibitorUrl,\n          contactSourceType: 'scraped_trade_show_contact',\n        })).filter((contact) => contact.fullName),\n        address: firstValue(fields, ['address', 'Address']),\n        instagram: firstValue(fields, ['instagram', 'Instagram']),\n        contact_info: firstValue(fields, ['contact_info', 'Contact Info']),\n        error: firstValue(fields, ['error', 'Error']),\n        conference: firstValue(fields, ['Conference', 'conference', 'show_name', 'Show Name']) || payload.show?.name || '',\n        booth_number: firstValue(fields, ['booth_number', 'Booth Number', 'booth']),\n        suppliedDomain: domain,\n        normalizedName: firstValue(fields, ['Normalized Name', 'Normalized Company Name']) || normalizeCompanyName(brandName),\n        smartleadCampaignId: String(\n          payload.smartleadCampaignId\n          || fields.smartleadCampaignId\n          || fields['Smartlead Campaign ID']\n          || ''\n        ).trim(),\n        cadenceEnrollmentDate: isoDate(\n          payload.cadenceEnrollmentDate\n          || payload.campaignStartDate\n          || fields.cadenceEnrollmentDate\n          || fields['Cadence Enrollment Date']\n        ) || new Date().toISOString().slice(0, 10),\n        enableSmartlead: toBoolean(payload.enableSmartlead ?? fields.enableSmartlead ?? fields['Enable Smartlead']),\n      }\n    });\n  });\n}\n\nreturn output;"
       },
-      "id": "c309f0cf-ded8-4a15-8f8d-fa971d0fc366",
+      "id": "3f63531d-3c12-4d85-ace4-451bba076cc2",
       "name": "Normalize Incoming Leads",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -110,9 +110,9 @@
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "function compact(value) {\n  return Object.fromEntries(Object.entries(value).filter(([, item]) => item !== undefined && item !== null && item !== ''));\n}\n\nconst row = item.json;\nconst model = (typeof $vars !== 'undefined' && ($vars.CONDUIT_OPENAI_RESEARCH_MODEL || $vars.CONDUIT_OPENAI_MODEL)) || 'gpt-4o';\nconst showName = row.conference || row.showName || 'trade show';\nconst userPrompt = `\nYou are doing strict pre-show exhibitor prospecting for ${showName}.\nReturn only one valid JSON object.\n\nCompany/exhibitor input:\n${JSON.stringify(compact({\n  brand_name: row.brand_name,\n  exhibitor_url: row.exhibitor_url,\n  website: row.website,\n  showroom_contact: row.showroom_contact,\n  company_email: row.company_email,\n  supplied_domain: row.suppliedDomain,\n  conference: row.conference,\n  booth_number: row.booth_number\n}), null, 2)}\n\nTasks:\n1. Find the official root company domain. Return root domain only, no protocol and no www.\n2. Normalize the company name.\n3. Before contact research, qualify the company against Conduit Commerce's proven ICP. Conduit is an AI co-pilot layered on a wholesale distributor or supplier's existing ERP, CRM, and email systems. It parses incoming POs and inquiries, retrieves accurate pricing/inventory, and drafts responses for reps to review. Estimate:\n   - SKU/catalog breadth: low, medium, or high, with reasoning. Strong evidence includes hundreds or thousands of variants across finishes, sizes, patterns, or materials.\n   - Sales-rep count or range. Fewer than 5 reps is a red flag.\n   - Downstream retailer, restaurant, or dealer account count or range. Thousands of repeat-ordering accounts is strongest.\n   - Ordering pattern: repeat/high-frequency or one-time/seasonal, with reasoning.\n   - Red flags: fewer than 5 sales reps; small single-location owner-operated business; low SKU count; infrequent ordering; or no overlap with Conduit's proven verticals of home goods, tableware/glassware, restaurant supply, cabinetry, carpets, and furniture.\n   Score fit as exactly STRONG FIT, MODERATE FIT, WEAK FIT, or PASS. Return one-sentence pursue/deprioritize/pass recommendation and concise evidence URLs/reasoning. Do not turn a weak proxy into a fact; label estimates clearly.\n4. Only when ICP fit is STRONG FIT or MODERATE FIT, find current leaders for exactly these personas. For WEAK FIT or PASS, return Not Found persona objects without spending additional searches on contacts. For each qualified-company persona, search broadly enough to return up to three candidates before selecting the best one:\n   - sales: current sales/revenue/commercial leader. Title must directly contain sales, revenue, commercial, growth, business development, partnerships, account executive, account management, CRO, or chief revenue. Do not use founder/CEO/president unless the title also clearly says sales/revenue/commercial.\n   - cs: current customer support/customer success/customer service/client success/client services/customer advocacy leader. Title must directly contain customer support, customer service, customer success, client services, support, service, or customer care. Reject sales, operations, HR, founder, CEO, president, office/admin, generic contact, and directory-only matches unless the title clearly has one of those customer/support phrases.\n   - ops: current operations/supply-chain/logistics/manufacturing/production leader. Prefer COO, operations VP/director/head/manager, supply chain, logistics, production, procurement, fulfillment, warehouse, or manufacturing. Do not use sales/support/CEO/president-only matches.\n5. For each persona, return selected fullName, jobTitle, sourceUrl, confidence, linkedinUrl, linkedinActive, linkedinActivitySummary, and candidates.\n5. confidence must be High, Medium, Low, or Not Found.\n6. Use High only when the source clearly supports the person's exact full name, current company, and current persona-specific title.\n7. Do not use Wiza, Apollo, ZoomInfo, RocketReach, SignalHire, Lusha, ContactOut, or similar people-directory/sales-intelligence pages as sourceUrl. Prefer the official company site, company press/news pages, a real LinkedIn public profile, or a credible industry/news page.\n8. Do not invent LinkedIn URLs. Return linkedinUrl only when you found an exact public LinkedIn /in/ profile that visibly matches the full name and current company/title context. Otherwise return an empty string.\n9. linkedinActive must be YES only when you found recent visible LinkedIn posts, comments, or reactions for that exact public profile. Otherwise use NO.\n10. If the best match has only one name, weak source support, a mismatched title, or a directory-only source, return confidence \"Not Found\" for that persona.\n11. Prefer current employee evidence over stale award pages, old conference bios, reseller pages, or directory snippets. If evidence is old or ambiguous, downgrade confidence.\n12. Put concise evidence in each candidate's evidence field. Use rejectionReason when a candidate looks close but should not be selected.\n13. Before returning Not Found for a persona, explicitly try exact searches using the company name plus persona/title words. Examples: \"${row.brand_name} director of sales\", \"${row.brand_name} vice president sales\", \"${row.brand_name} customer service manager\", \"${row.brand_name} customer support manager\", \"${row.brand_name} customer success\", \"${row.brand_name} operations manager\", \"${row.brand_name} manufacturing manager\".\n14. For furniture, outdoor living, design, hospitality, and trade-show manufacturers, credible trade publications are acceptable evidence. Examples include Furniture Today, Casual News Now, Home Accents Today, ICFA member news, Business of Home, and similar industry publications.\n15. Do not return all personas as Not Found just because the official company website has no team page. Use credible trade/news evidence when it names the person, company, and matching role.\n16. If the evidence connects the person to a related distributor, parent, subsidiary, or brand but not clearly to this exhibitor, downgrade to Medium or Not Found and explain the relationship in evidence.\n17. Prefer one very clean persona match over filling all personas. It is better to return Not Found than a plausible but weak contact.\n\nJSON shape:\n{\n  \"officialCompanyDomain\": \"\",\n  \"normalizedCompanyName\": \"\",\n  \"icpQualification\": {\"skuEstimate\":\"\",\"salesRepEstimate\":\"\",\"accountBaseEstimate\":\"\",\"orderingPattern\":\"\",\"redFlags\":[],\"fitScore\":\"\",\"recommendation\":\"\",\"reasoning\":\"\",\"evidenceUrls\":[]},\n  \"sales\": {\"firstName\":\"\",\"fullName\":\"\",\"jobTitle\":\"\",\"sourceUrl\":\"\",\"confidence\":\"\",\"linkedinUrl\":\"\",\"linkedinActive\":\"NO\",\"linkedinActivitySummary\":\"\",\"evidence\":\"\",\"candidates\":[{\"fullName\":\"\",\"jobTitle\":\"\",\"sourceUrl\":\"\",\"confidence\":\"\",\"linkedinUrl\":\"\",\"evidence\":\"\",\"rejectionReason\":\"\"}]},\n  \"cs\": {\"firstName\":\"\",\"fullName\":\"\",\"jobTitle\":\"\",\"sourceUrl\":\"\",\"confidence\":\"\",\"linkedinUrl\":\"\",\"linkedinActive\":\"NO\",\"linkedinActivitySummary\":\"\",\"evidence\":\"\",\"candidates\":[{\"fullName\":\"\",\"jobTitle\":\"\",\"sourceUrl\":\"\",\"confidence\":\"\",\"linkedinUrl\":\"\",\"evidence\":\"\",\"rejectionReason\":\"\"}]},\n  \"ops\": {\"firstName\":\"\",\"fullName\":\"\",\"jobTitle\":\"\",\"sourceUrl\":\"\",\"confidence\":\"\",\"linkedinUrl\":\"\",\"linkedinActive\":\"NO\",\"linkedinActivitySummary\":\"\",\"evidence\":\"\",\"candidates\":[{\"fullName\":\"\",\"jobTitle\":\"\",\"sourceUrl\":\"\",\"confidence\":\"\",\"linkedinUrl\":\"\",\"evidence\":\"\",\"rejectionReason\":\"\"}]}\n}`;\n\nreturn {\n  json: {\n    ...row,\n    openaiResearchRequest: {\n      model,\n      tools: [{ type: 'web_search' }],\n      input: userPrompt\n    }\n  }\n};"
+        "jsCode": "function compact(value) {\n  return Object.fromEntries(Object.entries(value).filter(([, item]) => item !== undefined && item !== null && item !== ''));\n}\n\nconst row = item.json;\nconst model = (typeof $vars !== 'undefined' && ($vars.CONDUIT_OPENAI_RESEARCH_MODEL || $vars.CONDUIT_OPENAI_MODEL)) || 'gpt-4o';\nconst showName = row.conference || row.showName || 'trade show';\nconst userPrompt = `\nYou are doing strict pre-show exhibitor prospecting for ${showName}.\nReturn only one valid JSON object.\n\nCompany/exhibitor input:\n${JSON.stringify(compact({\n  brand_name: row.brand_name,\n  exhibitor_url: row.exhibitor_url,\n  website: row.website,\n  showroom_contact: row.showroom_contact,\n  company_email: row.company_email,\n  supplied_domain: row.suppliedDomain,\n  conference: row.conference,\n  booth_number: row.booth_number\n}), null, 2)}\n\nTasks:\n1. Find the official root company domain. Return root domain only, no protocol and no www.\n2. Normalize the company name.\n3. Before contact research, qualify the company against Conduit Commerce's proven ICP. Conduit is an AI co-pilot layered on a wholesale distributor or supplier's existing ERP, CRM, and email systems. It parses incoming POs and inquiries, retrieves accurate pricing/inventory, and drafts responses for reps to review. Estimate:\n   - SKU/catalog breadth: low, medium, or high, with reasoning. Strong evidence includes hundreds or thousands of variants across finishes, sizes, patterns, or materials.\n   - Sales-rep count or range. Fewer than 5 reps is a red flag.\n   - Downstream retailer, restaurant, or dealer account count or range. Thousands of repeat-ordering accounts is strongest.\n   - Ordering pattern: repeat/high-frequency or one-time/seasonal, with reasoning.\n   - Red flags: fewer than 5 sales reps; small single-location owner-operated business; low SKU count; infrequent ordering; or no overlap with Conduit's proven verticals of home goods, tableware/glassware, restaurant supply, cabinetry, carpets, and furniture.\n   Score fit as exactly STRONG FIT, MODERATE FIT, WEAK FIT, or PASS. Return one-sentence pursue/deprioritize/pass recommendation and concise evidence URLs/reasoning. Do not turn a weak proxy into a fact; label estimates clearly.\n4. When ICP fit is STRONG FIT, MODERATE FIT, or WEAK FIT, find current leaders for exactly these personas. For PASS, return Not Found persona objects without spending additional searches on contacts. For each FIT-company persona, search broadly enough to return up to three candidates before selecting the best one:\n   - sales: current sales/revenue/commercial leader. Title must directly contain sales, revenue, commercial, growth, business development, partnerships, account executive, account management, CRO, or chief revenue. Do not use founder/CEO/president unless the title also clearly says sales/revenue/commercial.\n   - cs: current customer support/customer success/customer service/client success/client services/customer advocacy leader. Title must directly contain customer support, customer service, customer success, client services, support, service, or customer care. Reject sales, operations, HR, founder, CEO, president, office/admin, generic contact, and directory-only matches unless the title clearly has one of those customer/support phrases.\n   - ops: current operations/supply-chain/logistics/manufacturing/production leader. Prefer COO, operations VP/director/head/manager, supply chain, logistics, production, procurement, fulfillment, warehouse, or manufacturing. Do not use sales/support/CEO/president-only matches.\n5. For each persona, return selected fullName, jobTitle, sourceUrl, confidence, linkedinUrl, linkedinActive, linkedinActivitySummary, and candidates.\n5. confidence must be High, Medium, Low, or Not Found.\n6. Use High only when the source clearly supports the person's exact full name, current company, and current persona-specific title.\n7. Do not use Wiza, Apollo, ZoomInfo, RocketReach, SignalHire, Lusha, ContactOut, or similar people-directory/sales-intelligence pages as sourceUrl. Prefer the official company site, company press/news pages, a real LinkedIn public profile, or a credible industry/news page.\n8. Do not invent LinkedIn URLs. Return linkedinUrl only when you found an exact public LinkedIn /in/ profile that visibly matches the full name and current company/title context. Otherwise return an empty string.\n9. linkedinActive must be YES only when you found recent visible LinkedIn posts, comments, or reactions for that exact public profile. Otherwise use NO.\n10. If the best match has only one name, weak source support, a mismatched title, or a directory-only source, return confidence \"Not Found\" for that persona.\n11. Prefer current employee evidence over stale award pages, old conference bios, reseller pages, or directory snippets. If evidence is old or ambiguous, downgrade confidence.\n12. Put concise evidence in each candidate's evidence field. Use rejectionReason when a candidate looks close but should not be selected.\n13. Before returning Not Found for a persona, explicitly try exact searches using the company name plus persona/title words. Examples: \"${row.brand_name} director of sales\", \"${row.brand_name} vice president sales\", \"${row.brand_name} customer service manager\", \"${row.brand_name} customer support manager\", \"${row.brand_name} customer success\", \"${row.brand_name} operations manager\", \"${row.brand_name} manufacturing manager\".\n14. For furniture, outdoor living, design, hospitality, and trade-show manufacturers, credible trade publications are acceptable evidence. Examples include Furniture Today, Casual News Now, Home Accents Today, ICFA member news, Business of Home, and similar industry publications.\n15. Do not return all personas as Not Found just because the official company website has no team page. Use credible trade/news evidence when it names the person, company, and matching role.\n16. If the evidence connects the person to a related distributor, parent, subsidiary, or brand but not clearly to this exhibitor, downgrade to Medium or Not Found and explain the relationship in evidence.\n17. Prefer one very clean persona match over filling all personas. It is better to return Not Found than a plausible but weak contact.\n\nJSON shape:\n{\n  \"officialCompanyDomain\": \"\",\n  \"normalizedCompanyName\": \"\",\n  \"icpQualification\": {\"skuEstimate\":\"\",\"salesRepEstimate\":\"\",\"accountBaseEstimate\":\"\",\"orderingPattern\":\"\",\"redFlags\":[],\"fitScore\":\"\",\"recommendation\":\"\",\"reasoning\":\"\",\"evidenceUrls\":[]},\n  \"sales\": {\"firstName\":\"\",\"fullName\":\"\",\"jobTitle\":\"\",\"sourceUrl\":\"\",\"confidence\":\"\",\"linkedinUrl\":\"\",\"linkedinActive\":\"NO\",\"linkedinActivitySummary\":\"\",\"evidence\":\"\",\"candidates\":[{\"fullName\":\"\",\"jobTitle\":\"\",\"sourceUrl\":\"\",\"confidence\":\"\",\"linkedinUrl\":\"\",\"evidence\":\"\",\"rejectionReason\":\"\"}]},\n  \"cs\": {\"firstName\":\"\",\"fullName\":\"\",\"jobTitle\":\"\",\"sourceUrl\":\"\",\"confidence\":\"\",\"linkedinUrl\":\"\",\"linkedinActive\":\"NO\",\"linkedinActivitySummary\":\"\",\"evidence\":\"\",\"candidates\":[{\"fullName\":\"\",\"jobTitle\":\"\",\"sourceUrl\":\"\",\"confidence\":\"\",\"linkedinUrl\":\"\",\"evidence\":\"\",\"rejectionReason\":\"\"}]},\n  \"ops\": {\"firstName\":\"\",\"fullName\":\"\",\"jobTitle\":\"\",\"sourceUrl\":\"\",\"confidence\":\"\",\"linkedinUrl\":\"\",\"linkedinActive\":\"NO\",\"linkedinActivitySummary\":\"\",\"evidence\":\"\",\"candidates\":[{\"fullName\":\"\",\"jobTitle\":\"\",\"sourceUrl\":\"\",\"confidence\":\"\",\"linkedinUrl\":\"\",\"evidence\":\"\",\"rejectionReason\":\"\"}]}\n}`;\n\nreturn {\n  json: {\n    ...row,\n    openaiResearchRequest: {\n      model,\n      tools: [{ type: 'web_search' }],\n      input: userPrompt\n    }\n  }\n};"
       },
-      "id": "53d59c62-2a2c-408a-aa9c-ddab3ca2badd",
+      "id": "2326c1cc-de54-47ad-a5c0-207f9da6f813",
       "name": "Build Lead Research Request",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -134,7 +134,7 @@
         "specifyBody": "json",
         "jsonBody": "={{$json.openaiResearchRequest}}"
       },
-      "id": "31d5b205-5d5d-4f8b-a2e2-4cd9ff2915d4",
+      "id": "99393f99-05bd-47f9-9153-21cf769f4968",
       "name": "OpenAI Lead and Persona Research",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -153,9 +153,9 @@
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "function stableStringify(value) {\n  try {\n    return JSON.stringify(value ?? {}, null, 2);\n  } catch (error) {\n    return String(value ?? '');\n  }\n}\n\nfunction outputText(response) {\n  if (!response) return '';\n  if (typeof response.output_text === 'string') return response.output_text;\n  if (Array.isArray(response.output)) {\n    return response.output.flatMap((entry) => {\n      if (Array.isArray(entry.content)) {\n        return entry.content.map((part) => part.text || part.output_text || '').filter(Boolean);\n      }\n      return [entry.text || ''];\n    }).filter(Boolean).join('\\n');\n  }\n  return response.text || response.message || '';\n}\n\nfunction collectAnnotations(response) {\n  const annotations = [];\n  if (!response || !Array.isArray(response.output)) return annotations;\n  for (const entry of response.output) {\n    for (const part of entry.content || []) {\n      for (const annotation of part.annotations || []) {\n        if (annotation?.url) {\n          annotations.push({\n            url: String(annotation.url || ''),\n            title: String(annotation.title || annotation.text || ''),\n          });\n        }\n      }\n    }\n  }\n  return annotations;\n}\n\nfunction parseJsonFromText(text) {\n  if (!text) return {};\n  try {\n    return JSON.parse(text);\n  } catch (error) {\n    const match = text.match(/\\{[\\s\\S]*\\}/);\n    if (!match) return {};\n    try {\n      return JSON.parse(match[0]);\n    } catch (nestedError) {\n      return {};\n    }\n  }\n}\n\nfunction cleanDomain(value) {\n  const raw = String(value || '').trim();\n  if (!raw) return '';\n  try {\n    const url = raw.match(/^https?:\\/\\//i) ? raw : `https://${raw}`;\n    return new URL(url).hostname.replace(/^www\\./i, '').toLowerCase();\n  } catch (error) {\n    return raw.replace(/^https?:\\/\\//i, '').replace(/^www\\./i, '').split('/')[0].toLowerCase();\n  }\n}\n\nfunction firstName(fullName, fallback) {\n  return String(fallback || fullName || '').replace(/^(Mr\\.|Ms\\.|Mrs\\.|Dr\\.)\\s+/i, '').split(/\\s+/).filter(Boolean)[0] || '';\n}\n\nfunction sourceHost(value) {\n  const raw = String(value || '').trim();\n  if (!raw) return '';\n  if (!/^(https?:\\/\\/)?[a-z0-9.-]+\\.[a-z]{2,}/i.test(raw)) return '';\n  try {\n    const url = raw.match(/^https?:\\/\\//i) ? raw : `https://${raw}`;\n    return new URL(url).hostname.replace(/^www\\./i, '').toLowerCase();\n  } catch (error) {\n    return raw\n      .replace(/^https?:\\/\\//i, '')\n      .replace(/^www\\./i, '')\n      .split('/')[0]\n      .split('?')[0]\n      .toLowerCase();\n  }\n}\n\nlet webAnnotations = [];\n\nfunction normalizeForMatch(value) {\n  return String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').replace(/\\s+/g, ' ').trim();\n}\n\nfunction cleanSourceUrl(value) {\n  const raw = String(value || '').trim();\n  if (!raw) return '';\n  if (sourceHost(raw)) return raw;\n  const needle = normalizeForMatch(raw);\n  if (!needle) return '';\n  const scored = webAnnotations\n    .map((annotation) => {\n      const title = normalizeForMatch(annotation.title);\n      const overlap = needle.split(' ').filter((word) => word.length > 3 && title.includes(word)).length;\n      return { annotation, overlap };\n    })\n    .sort((a, b) => b.overlap - a.overlap);\n  if (scored[0]?.overlap >= 3) return scored[0].annotation.url;\n  return '';\n}\n\nfunction isWeakDirectorySource(value) {\n  const host = sourceHost(value);\n  if (!host) return true;\n  return [\n    'wiza.co',\n    'apollo.io',\n    'zoominfo.com',\n    'rocketreach.co',\n    'signalhire.com',\n    'lusha.com',\n    'contactout.com',\n    'adapt.io',\n    'lead411.com',\n    'leadIQ.com'.toLowerCase(),\n    'peoplelooker.com',\n    'beenverified.com',\n    'visualvisitor.com',\n    'growjo.com',\n    'bizprofile.net',\n  ].some((domain) => host === domain || host.endsWith(`.${domain}`));\n}\n\nfunction hasFullName(value) {\n  return String(value || '').trim().split(/\\s+/).filter(Boolean).length >= 2;\n}\n\nfunction hasPersonaTitle(persona, title) {\n  const normalized = String(title || '').toLowerCase();\n  if (!normalized || normalized.includes('not found')) return false;\n  if (persona === 'sales') {\n    return /\\b(sales|revenue|commercial|growth|business development|partnerships?|account executive|account management|cro|chief revenue)\\b/i.test(normalized);\n  }\n  if (persona === 'ops') {\n    return /\\b(operations?|ops|coo|chief operating|supply chain|logistics?|manufacturing|production|procurement|fulfillment|warehouse)\\b/i.test(normalized);\n  }\n  if (/\\b(sales|revenue|business development|operations?|ops|supply chain|logistics?|hr|human resources|finance|accounting|admin|administrator|office)\\b/i.test(normalized)) {\n    return /\\b(customer success|customer support|customer service|client success|client services?|customer advocacy|customer care|support manager|support director|service manager|service director)\\b/i.test(normalized);\n  }\n  return /\\b(customer success|customer support|customer service|client success|client services?|customer advocacy|customer care|support manager|support director|service manager|service director|head of support|head of service)\\b/i.test(normalized);\n}\n\nfunction cleanLinkedInUrl(value) {\n  const raw = String(value || '').trim();\n  if (!raw) return '';\n  try {\n    const url = raw.match(/^https?:\\/\\//i) ? raw : `https://${raw}`;\n    const parsed = new URL(url);\n    const host = parsed.hostname.replace(/^www\\./i, '').toLowerCase();\n    if (!(host === 'linkedin.com' || host.endsWith('.linkedin.com')) || !parsed.pathname.toLowerCase().startsWith('/in/')) return '';\n    const slug = parsed.pathname.split('/').filter(Boolean)[1] || '';\n    if (!slug || /12345678|example|placeholder|your-name|first-last/i.test(slug)) return '';\n    return `https://www.linkedin.com${parsed.pathname.replace(/\\/+$/, '')}`;\n  } catch (error) {\n    const match = raw.match(/https?:\\/\\/(?:[\\w-]+\\.)?linkedin\\.com\\/in\\/[^\\s\"')?#]+/i);\n    if (!match) return '';\n    const slug = match[0].split('/in/')[1]?.replace(/\\/+$/, '') || '';\n    if (!slug || /12345678|example|placeholder|your-name|first-last/i.test(slug)) return '';\n    return `https://www.linkedin.com/in/${slug}`;\n  }\n}\n\nfunction person(value, includeCandidates = false) {\n  const source = value && typeof value === 'object' ? value : {};\n  const fullName = String(source.fullName || source.name || '').trim();\n  const output = {\n    firstName: firstName(fullName, source.firstName),\n    fullName,\n    jobTitle: String(source.jobTitle || source.title || '').trim(),\n    sourceUrl: cleanSourceUrl(source.sourceUrl || source.url || ''),\n    confidence: String(source.confidence || 'Not Found').trim(),\n    linkedinUrl: cleanLinkedInUrl(source.linkedinUrl || source.personLinkedin || source.linkedin || ''),\n    linkedinActive: String(source.linkedinActive || source.isActive || 'NO').trim().toUpperCase() === 'YES' ? 'YES' : 'NO',\n    linkedinActivitySummary: String(source.linkedinActivitySummary || source.activitySummary || source.summary || '').trim(),\n    evidence: String(source.evidence || source.reason || '').trim(),\n    rejectionReason: String(source.rejectionReason || '').trim(),\n  };\n  if (includeCandidates && Array.isArray(source.candidates)) {\n    output.candidates = source.candidates.map((candidate) => person(candidate)).filter((candidate) => candidate.fullName || candidate.jobTitle || candidate.sourceUrl);\n  }\n  return output;\n}\n\nfunction confidenceRank(value) {\n  const normalized = String(value || '').toLowerCase();\n  if (normalized.includes('high')) return 10;\n  if (normalized.includes('medium')) return 5;\n  if (normalized.includes('low')) return 1;\n  return 0;\n}\n\nfunction sourceScore(value, officialDomain) {\n  const host = sourceHost(value);\n  if (!host || isWeakDirectorySource(value)) return -100;\n  if (host === 'linkedin.com') return 18;\n  if (officialDomain && (host === officialDomain || host.endsWith(`.${officialDomain}`))) return 25;\n  if (/\\b(furnituretoday|businesswire|prnewswire|globenewswire|news|magazine|journal|market|homeaccentstoday|casualnewsnow|icfanet|businessofhome)\\b/i.test(host)) return 12;\n  if (['theorg.com', 'ahfa.us', 'hotelspeconline.com'].some((domain) => host === domain || host.endsWith(`.${domain}`))) return 8;\n  return -100;\n}\n\nfunction candidateScore(contact, persona, officialDomain) {\n  if (!hasFullName(contact.fullName) || !hasPersonaTitle(persona, contact.jobTitle)) return -100;\n  const source = sourceScore(contact.sourceUrl, officialDomain);\n  if (source < 0) return -100;\n  let score = 0;\n  score += 12;\n  score += 12;\n  score += source;\n  score += confidenceRank(contact.confidence);\n  if (contact.linkedinUrl) score += 3;\n  if (contact.evidence) score += 2;\n  if (/\\b(vp|vice president|director|head|chief|cro|coo|manager|lead)\\b/i.test(contact.jobTitle)) score += 3;\n  if (contact.rejectionReason) score -= 20;\n  return score;\n}\n\nfunction normalizePersonForPersona(rawContact, persona, officialDomain) {\n  const selected = person(rawContact, true);\n  const extraCandidates = [parsed?.[`${persona}Candidates`], parsed?.[`${persona}_candidates`]]\n    .filter(Array.isArray)\n    .flat()\n    .map((candidate) => person(candidate));\n  const candidates = [\n    selected,\n    ...(selected.candidates || []),\n    ...extraCandidates,\n  ].filter((candidate) => candidate.fullName || candidate.jobTitle || candidate.sourceUrl);\n  const ranked = candidates\n    .map((candidate) => ({ candidate, score: candidateScore(candidate, persona, officialDomain) }))\n    .sort((a, b) => b.score - a.score);\n  const best = ranked[0]?.score >= 30 ? ranked[0].candidate : selected;\n  const output = { ...best };\n  output.candidates = ranked.map(({ candidate, score }) => ({ ...candidate, score })).slice(0, 3);\n  const strongEnough = (\n    hasFullName(output.fullName) &&\n    hasPersonaTitle(persona, output.jobTitle) &&\n    !isWeakDirectorySource(output.sourceUrl) &&\n    candidateScore(output, persona, officialDomain) >= 30\n  );\n  if (!strongEnough) {\n    output.confidence = 'Not Found';\n    output.linkedinActive = 'NO';\n    if (!hasFullName(output.fullName) || !hasPersonaTitle(persona, output.jobTitle)) {\n      output.fullName = hasFullName(output.fullName) ? output.fullName : 'Not Found';\n      output.jobTitle = hasPersonaTitle(persona, output.jobTitle) ? output.jobTitle : 'Not Found';\n    }\n  } else if (candidateScore(output, persona, officialDomain) >= 34) {\n    output.confidence = 'High';\n  } else if (!['high', 'medium', 'low'].includes(String(output.confidence || '').toLowerCase())) {\n    output.confidence = 'Medium';\n  }\n  if (!output.linkedinUrl) {\n    output.linkedinActive = 'NO';\n    output.linkedinActivitySummary = '';\n  }\n  return output;\n}\n\nconst original = $('Build Lead Research Request').item.json;\nconst response = item.json || {};\nwebAnnotations = collectAnnotations(response);\nconst researchError = response.error\n  ? String(response.error.message || response.error.code || 'OpenAI research error').slice(0, 1000)\n  : '';\nconst text = outputText(response);\nconst parsed = parseJsonFromText(text);\nconst domain = cleanDomain(parsed.officialCompanyDomain || original.suppliedDomain || original.website || original.exhibitor_url);\nconst sales = normalizePersonForPersona(parsed.sales, 'sales', domain);\nconst cs = normalizePersonForPersona(parsed.cs, 'cs', domain);\nconst ops = normalizePersonForPersona(parsed.ops, 'ops', domain);\nconst normalizedName = String(parsed.normalizedCompanyName || original.normalizedName || original.brand_name || '').trim();\nconst rawIcp = parsed.icpQualification && typeof parsed.icpQualification === 'object' ? parsed.icpQualification : {};\nconst fitText = String(rawIcp.fitScore || rawIcp.fit || '').trim().toUpperCase();\nconst icpFitScore = ['STRONG FIT', 'MODERATE FIT', 'WEAK FIT', 'PASS'].includes(fitText) ? fitText : 'PASS';\nconst icpQualified = icpFitScore === 'STRONG FIT' || icpFitScore === 'MODERATE FIT';\nconst icpQualification = {\n  skuEstimate: String(rawIcp.skuEstimate || '').trim(),\n  salesRepEstimate: String(rawIcp.salesRepEstimate || '').trim(),\n  accountBaseEstimate: String(rawIcp.accountBaseEstimate || '').trim(),\n  orderingPattern: String(rawIcp.orderingPattern || '').trim(),\n  redFlags: Array.isArray(rawIcp.redFlags) ? rawIcp.redFlags.map((value) => String(value).trim()).filter(Boolean) : [],\n  fitScore: icpFitScore,\n  recommendation: String(rawIcp.recommendation || '').trim(),\n  reasoning: String(rawIcp.reasoning || '').trim(),\n  evidenceUrls: Array.isArray(rawIcp.evidenceUrls) ? rawIcp.evidenceUrls.map((value) => String(value).trim()).filter(Boolean) : [],\n};\n\nfunction isQualified(contact) {\n  return Boolean(\n    icpQualified &&\n    domain &&\n    contact.fullName &&\n    contact.jobTitle &&\n    !contact.fullName.toLowerCase().includes('not found') &&\n    !contact.jobTitle.toLowerCase().includes('not found') &&\n    contact.confidence.toLowerCase().includes('high')\n  );\n}\n\nconst leadFields = {\n  exhibitor_url: original.exhibitor_url,\n  brand_name: original.brand_name,\n  shown_by: original.shown_by,\n  showrooms: original.showrooms,\n  website: original.website,\n  fax: original.fax,\n  phone: original.phone,\n  company_email: original.company_email,\n  showroom_contact: original.showroom_contact,\n  address: original.address,\n  instagram: original.instagram,\n  contact_info: original.contact_info,\n  error: original.error || researchError,\n  'Official Company Domain': stableStringify({ response: parsed.officialCompanyDomain || domain, raw: parsed, error: researchError }),\n  'Official Company Domain (2)': domain,\n  'Sales Leader Info': stableStringify(sales),\n  'Sales Full Name': sales.fullName,\n  'Sales Job Title': sales.jobTitle,\n  'Sales Confidence': sales.confidence,\n  'Sales Source URL': sales.sourceUrl,\n  'Top Support Decision Maker': stableStringify(cs),\n  'CS Full Name': cs.fullName,\n  'CS Job Title': cs.jobTitle,\n  'CS Confidence': cs.confidence,\n  'CS Source URL': cs.sourceUrl,\n  'VP Operations Contact': stableStringify(ops),\n  'Ops Full Name': ops.fullName,\n  'Ops Job Title': ops.jobTitle,\n  'Ops Source Url': ops.sourceUrl,\n  'Ops Confidence': ops.confidence,\n  'Normalize Company Name': stableStringify({ normalizedCompanyName: normalizedName }),\n  'Normalized Name': normalizedName,\n  Conference: original.conference,\n  booth_number: original.booth_number,\n  'Dedupe Key': [domain || normalizedName.toLowerCase(), String(original.conference || '').toLowerCase()].filter(Boolean).join('|'),\n  'Source Row ID': original.sourceRecordId,\n  'Enable Smartlead': original.enableSmartlead ? 'true' : 'false',\n  'Smartlead Campaign ID': original.smartleadCampaignId,\n  'ICP SKU Estimate': icpQualification.skuEstimate,\n  'ICP Sales Rep Estimate': icpQualification.salesRepEstimate,\n  'ICP Account Base Estimate': icpQualification.accountBaseEstimate,\n  'ICP Ordering Pattern': icpQualification.orderingPattern,\n  'ICP Red Flags': icpQualification.redFlags.join('\\n'),\n  'ICP Fit Score': icpFitScore,\n  'ICP Recommendation': icpQualification.recommendation,\n  'ICP Reasoning': icpQualification.reasoning,\n  'ICP Evidence URLs': icpQualification.evidenceUrls.join('\\n'),\n  'Sales. ': isQualified(sales) ? 'queued' : 'skipped',\n  'Ops.': isQualified(ops) ? 'queued' : 'skipped',\n  'CS. ': isQualified(cs) ? 'queued' : 'skipped',\n  'Updated At': new Date().toISOString(),\n};\nconst leadDedupeKey = leadFields['Dedupe Key'];\n\nreturn {\n  json: {\n    ...original,\n    researchResponseRaw: response,\n    researchJson: parsed,\n    officialDomain: domain,\n    normalizedName,\n    sales,\n    cs,\n    ops,\n    icpQualification,\n    icpFitScore,\n    icpQualified,\n    qualified: {\n      sales: isQualified(sales),\n      cs: isQualified(cs),\n      ops: isQualified(ops),\n    },\n    leadDedupeKey,\n    airtableLeadBody: {\n      performUpsert: { fieldsToMergeOn: ['Dedupe Key'] },\n      records: [{ fields: leadFields }],\n      typecast: true,\n    },\n  }\n};"
+        "jsCode": "function stableStringify(value) {\n  try {\n    return JSON.stringify(value ?? {}, null, 2);\n  } catch (error) {\n    return String(value ?? '');\n  }\n}\n\nfunction outputText(response) {\n  if (!response) return '';\n  if (typeof response.output_text === 'string') return response.output_text;\n  if (Array.isArray(response.output)) {\n    return response.output.flatMap((entry) => {\n      if (Array.isArray(entry.content)) {\n        return entry.content.map((part) => part.text || part.output_text || '').filter(Boolean);\n      }\n      return [entry.text || ''];\n    }).filter(Boolean).join('\\n');\n  }\n  return response.text || response.message || '';\n}\n\nfunction collectAnnotations(response) {\n  const annotations = [];\n  if (!response || !Array.isArray(response.output)) return annotations;\n  for (const entry of response.output) {\n    for (const part of entry.content || []) {\n      for (const annotation of part.annotations || []) {\n        if (annotation?.url) {\n          annotations.push({\n            url: String(annotation.url || ''),\n            title: String(annotation.title || annotation.text || ''),\n          });\n        }\n      }\n    }\n  }\n  return annotations;\n}\n\nfunction parseJsonFromText(text) {\n  if (!text) return {};\n  try {\n    return JSON.parse(text);\n  } catch (error) {\n    const match = text.match(/\\{[\\s\\S]*\\}/);\n    if (!match) return {};\n    try {\n      return JSON.parse(match[0]);\n    } catch (nestedError) {\n      return {};\n    }\n  }\n}\n\nfunction cleanDomain(value) {\n  const raw = String(value || '').trim();\n  if (!raw) return '';\n  try {\n    const url = raw.match(/^https?:\\/\\//i) ? raw : `https://${raw}`;\n    return new URL(url).hostname.replace(/^www\\./i, '').toLowerCase();\n  } catch (error) {\n    return raw.replace(/^https?:\\/\\//i, '').replace(/^www\\./i, '').split('/')[0].toLowerCase();\n  }\n}\n\nfunction firstName(fullName, fallback) {\n  return String(fallback || fullName || '').replace(/^(Mr\\.|Ms\\.|Mrs\\.|Dr\\.)\\s+/i, '').split(/\\s+/).filter(Boolean)[0] || '';\n}\n\nfunction sourceHost(value) {\n  const raw = String(value || '').trim();\n  if (!raw) return '';\n  if (!/^(https?:\\/\\/)?[a-z0-9.-]+\\.[a-z]{2,}/i.test(raw)) return '';\n  try {\n    const url = raw.match(/^https?:\\/\\//i) ? raw : `https://${raw}`;\n    return new URL(url).hostname.replace(/^www\\./i, '').toLowerCase();\n  } catch (error) {\n    return raw\n      .replace(/^https?:\\/\\//i, '')\n      .replace(/^www\\./i, '')\n      .split('/')[0]\n      .split('?')[0]\n      .toLowerCase();\n  }\n}\n\nlet webAnnotations = [];\n\nfunction normalizeForMatch(value) {\n  return String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').replace(/\\s+/g, ' ').trim();\n}\n\nfunction cleanSourceUrl(value) {\n  const raw = String(value || '').trim();\n  if (!raw) return '';\n  if (sourceHost(raw)) return raw;\n  const needle = normalizeForMatch(raw);\n  if (!needle) return '';\n  const scored = webAnnotations\n    .map((annotation) => {\n      const title = normalizeForMatch(annotation.title);\n      const overlap = needle.split(' ').filter((word) => word.length > 3 && title.includes(word)).length;\n      return { annotation, overlap };\n    })\n    .sort((a, b) => b.overlap - a.overlap);\n  if (scored[0]?.overlap >= 3) return scored[0].annotation.url;\n  return '';\n}\n\nfunction isWeakDirectorySource(value) {\n  const host = sourceHost(value);\n  if (!host) return true;\n  return [\n    'wiza.co',\n    'apollo.io',\n    'zoominfo.com',\n    'rocketreach.co',\n    'signalhire.com',\n    'lusha.com',\n    'contactout.com',\n    'adapt.io',\n    'lead411.com',\n    'leadIQ.com'.toLowerCase(),\n    'peoplelooker.com',\n    'beenverified.com',\n    'visualvisitor.com',\n    'growjo.com',\n    'bizprofile.net',\n  ].some((domain) => host === domain || host.endsWith(`.${domain}`));\n}\n\nfunction hasFullName(value) {\n  return String(value || '').trim().split(/\\s+/).filter(Boolean).length >= 2;\n}\n\nfunction hasPersonaTitle(persona, title) {\n  const normalized = String(title || '').toLowerCase();\n  if (!normalized || normalized.includes('not found')) return false;\n  if (persona === 'sales') {\n    return /\\b(sales|revenue|commercial|growth|business development|partnerships?|account executive|account management|cro|chief revenue)\\b/i.test(normalized);\n  }\n  if (persona === 'ops') {\n    return /\\b(operations?|ops|coo|chief operating|supply chain|logistics?|manufacturing|production|procurement|fulfillment|warehouse)\\b/i.test(normalized);\n  }\n  if (/\\b(sales|revenue|business development|operations?|ops|supply chain|logistics?|hr|human resources|finance|accounting|admin|administrator|office)\\b/i.test(normalized)) {\n    return /\\b(customer success|customer support|customer service|client success|client services?|customer advocacy|customer care|support manager|support director|service manager|service director)\\b/i.test(normalized);\n  }\n  return /\\b(customer success|customer support|customer service|client success|client services?|customer advocacy|customer care|support manager|support director|service manager|service director|head of support|head of service)\\b/i.test(normalized);\n}\n\nfunction cleanLinkedInUrl(value) {\n  const raw = String(value || '').trim();\n  if (!raw) return '';\n  try {\n    const url = raw.match(/^https?:\\/\\//i) ? raw : `https://${raw}`;\n    const parsed = new URL(url);\n    const host = parsed.hostname.replace(/^www\\./i, '').toLowerCase();\n    if (!(host === 'linkedin.com' || host.endsWith('.linkedin.com')) || !parsed.pathname.toLowerCase().startsWith('/in/')) return '';\n    const slug = parsed.pathname.split('/').filter(Boolean)[1] || '';\n    if (!slug || /12345678|example|placeholder|your-name|first-last/i.test(slug)) return '';\n    return `https://www.linkedin.com${parsed.pathname.replace(/\\/+$/, '')}`;\n  } catch (error) {\n    const match = raw.match(/https?:\\/\\/(?:[\\w-]+\\.)?linkedin\\.com\\/in\\/[^\\s\"')?#]+/i);\n    if (!match) return '';\n    const slug = match[0].split('/in/')[1]?.replace(/\\/+$/, '') || '';\n    if (!slug || /12345678|example|placeholder|your-name|first-last/i.test(slug)) return '';\n    return `https://www.linkedin.com/in/${slug}`;\n  }\n}\n\nfunction person(value, includeCandidates = false) {\n  const source = value && typeof value === 'object' ? value : {};\n  const fullName = String(source.fullName || source.name || '').trim();\n  const output = {\n    firstName: firstName(fullName, source.firstName),\n    fullName,\n    jobTitle: String(source.jobTitle || source.title || '').trim(),\n    sourceUrl: cleanSourceUrl(source.sourceUrl || source.url || ''),\n    confidence: String(source.confidence || 'Not Found').trim(),\n    linkedinUrl: cleanLinkedInUrl(source.linkedinUrl || source.personLinkedin || source.linkedin || ''),\n    linkedinActive: String(source.linkedinActive || source.isActive || 'NO').trim().toUpperCase() === 'YES' ? 'YES' : 'NO',\n    linkedinActivitySummary: String(source.linkedinActivitySummary || source.activitySummary || source.summary || '').trim(),\n    evidence: String(source.evidence || source.reason || '').trim(),\n    rejectionReason: String(source.rejectionReason || '').trim(),\n  };\n  if (includeCandidates && Array.isArray(source.candidates)) {\n    output.candidates = source.candidates.map((candidate) => person(candidate)).filter((candidate) => candidate.fullName || candidate.jobTitle || candidate.sourceUrl);\n  }\n  return output;\n}\n\nfunction confidenceRank(value) {\n  const normalized = String(value || '').toLowerCase();\n  if (normalized.includes('high')) return 10;\n  if (normalized.includes('medium')) return 5;\n  if (normalized.includes('low')) return 1;\n  return 0;\n}\n\nfunction sourceScore(value, officialDomain) {\n  const host = sourceHost(value);\n  if (!host || isWeakDirectorySource(value)) return -100;\n  if (host === 'linkedin.com') return 18;\n  if (officialDomain && (host === officialDomain || host.endsWith(`.${officialDomain}`))) return 25;\n  if (/\\b(furnituretoday|businesswire|prnewswire|globenewswire|news|magazine|journal|market|homeaccentstoday|casualnewsnow|icfanet|businessofhome)\\b/i.test(host)) return 12;\n  if (['theorg.com', 'ahfa.us', 'hotelspeconline.com'].some((domain) => host === domain || host.endsWith(`.${domain}`))) return 8;\n  return -100;\n}\n\nfunction candidateScore(contact, persona, officialDomain) {\n  if (!hasFullName(contact.fullName) || !hasPersonaTitle(persona, contact.jobTitle)) return -100;\n  const source = sourceScore(contact.sourceUrl, officialDomain);\n  if (source < 0) return -100;\n  let score = 0;\n  score += 12;\n  score += 12;\n  score += source;\n  score += confidenceRank(contact.confidence);\n  if (contact.linkedinUrl) score += 3;\n  if (contact.evidence) score += 2;\n  if (/\\b(vp|vice president|director|head|chief|cro|coo|manager|lead)\\b/i.test(contact.jobTitle)) score += 3;\n  if (contact.rejectionReason) score -= 20;\n  return score;\n}\n\nfunction normalizePersonForPersona(rawContact, persona, officialDomain) {\n  const selected = person(rawContact, true);\n  const extraCandidates = [parsed?.[`${persona}Candidates`], parsed?.[`${persona}_candidates`]]\n    .filter(Array.isArray)\n    .flat()\n    .map((candidate) => person(candidate));\n  const candidates = [\n    selected,\n    ...(selected.candidates || []),\n    ...extraCandidates,\n  ].filter((candidate) => candidate.fullName || candidate.jobTitle || candidate.sourceUrl);\n  const ranked = candidates\n    .map((candidate) => ({ candidate, score: candidateScore(candidate, persona, officialDomain) }))\n    .sort((a, b) => b.score - a.score);\n  const best = ranked[0]?.score >= 30 ? ranked[0].candidate : selected;\n  const output = { ...best };\n  output.candidates = ranked.map(({ candidate, score }) => ({ ...candidate, score })).slice(0, 3);\n  const strongEnough = (\n    hasFullName(output.fullName) &&\n    hasPersonaTitle(persona, output.jobTitle) &&\n    !isWeakDirectorySource(output.sourceUrl) &&\n    candidateScore(output, persona, officialDomain) >= 30\n  );\n  if (!strongEnough) {\n    output.confidence = 'Not Found';\n    output.linkedinActive = 'NO';\n    if (!hasFullName(output.fullName) || !hasPersonaTitle(persona, output.jobTitle)) {\n      output.fullName = hasFullName(output.fullName) ? output.fullName : 'Not Found';\n      output.jobTitle = hasPersonaTitle(persona, output.jobTitle) ? output.jobTitle : 'Not Found';\n    }\n  } else if (candidateScore(output, persona, officialDomain) >= 34) {\n    output.confidence = 'High';\n  } else if (!['high', 'medium', 'low'].includes(String(output.confidence || '').toLowerCase())) {\n    output.confidence = 'Medium';\n  }\n  if (!output.linkedinUrl) {\n    output.linkedinActive = 'NO';\n    output.linkedinActivitySummary = '';\n  }\n  return output;\n}\n\nconst original = $('Build Lead Research Request').item.json;\nconst response = item.json || {};\nwebAnnotations = collectAnnotations(response);\nconst researchError = response.error\n  ? String(response.error.message || response.error.code || 'OpenAI research error').slice(0, 1000)\n  : '';\nconst text = outputText(response);\nconst parsed = parseJsonFromText(text);\nconst domain = cleanDomain(parsed.officialCompanyDomain || original.suppliedDomain || original.website || original.exhibitor_url);\nconst sales = normalizePersonForPersona(parsed.sales, 'sales', domain);\nconst cs = normalizePersonForPersona(parsed.cs, 'cs', domain);\nconst ops = normalizePersonForPersona(parsed.ops, 'ops', domain);\nconst normalizedName = String(parsed.normalizedCompanyName || original.normalizedName || original.brand_name || '').trim();\nconst rawIcp = parsed.icpQualification && typeof parsed.icpQualification === 'object' ? parsed.icpQualification : {};\nconst fitText = String(rawIcp.fitScore || rawIcp.fit || '').trim().toUpperCase();\nconst icpFitScore = ['STRONG FIT', 'MODERATE FIT', 'WEAK FIT', 'PASS'].includes(fitText) ? fitText : 'PASS';\n// All graded FIT tiers belong in Pipedrive. PASS remains Smartlead-only.\nconst icpQualified = ['STRONG FIT', 'MODERATE FIT', 'WEAK FIT'].includes(icpFitScore);\nconst icpQualification = {\n  skuEstimate: String(rawIcp.skuEstimate || '').trim(),\n  salesRepEstimate: String(rawIcp.salesRepEstimate || '').trim(),\n  accountBaseEstimate: String(rawIcp.accountBaseEstimate || '').trim(),\n  orderingPattern: String(rawIcp.orderingPattern || '').trim(),\n  redFlags: Array.isArray(rawIcp.redFlags) ? rawIcp.redFlags.map((value) => String(value).trim()).filter(Boolean) : [],\n  fitScore: icpFitScore,\n  recommendation: String(rawIcp.recommendation || '').trim(),\n  reasoning: String(rawIcp.reasoning || '').trim(),\n  evidenceUrls: Array.isArray(rawIcp.evidenceUrls) ? rawIcp.evidenceUrls.map((value) => String(value).trim()).filter(Boolean) : [],\n};\n\nfunction isQualified(contact) {\n  return Boolean(\n    icpQualified &&\n    domain &&\n    contact.fullName &&\n    contact.jobTitle &&\n    !contact.fullName.toLowerCase().includes('not found') &&\n    !contact.jobTitle.toLowerCase().includes('not found') &&\n    contact.confidence.toLowerCase().includes('high')\n  );\n}\n\nconst leadFields = {\n  exhibitor_url: original.exhibitor_url,\n  brand_name: original.brand_name,\n  shown_by: original.shown_by,\n  showrooms: original.showrooms,\n  website: original.website,\n  fax: original.fax,\n  phone: original.phone,\n  company_email: original.company_email,\n  showroom_contact: original.showroom_contact,\n  address: original.address,\n  instagram: original.instagram,\n  contact_info: original.contact_info,\n  error: original.error || researchError,\n  'Official Company Domain': stableStringify({ response: parsed.officialCompanyDomain || domain, raw: parsed, error: researchError }),\n  'Official Company Domain (2)': domain,\n  'Sales Leader Info': stableStringify(sales),\n  'Sales Full Name': sales.fullName,\n  'Sales Job Title': sales.jobTitle,\n  'Sales Confidence': sales.confidence,\n  'Sales Source URL': sales.sourceUrl,\n  'Top Support Decision Maker': stableStringify(cs),\n  'CS Full Name': cs.fullName,\n  'CS Job Title': cs.jobTitle,\n  'CS Confidence': cs.confidence,\n  'CS Source URL': cs.sourceUrl,\n  'VP Operations Contact': stableStringify(ops),\n  'Ops Full Name': ops.fullName,\n  'Ops Job Title': ops.jobTitle,\n  'Ops Source Url': ops.sourceUrl,\n  'Ops Confidence': ops.confidence,\n  'Normalize Company Name': stableStringify({ normalizedCompanyName: normalizedName }),\n  'Normalized Name': normalizedName,\n  Conference: original.conference,\n  booth_number: original.booth_number,\n  'Dedupe Key': [domain || normalizedName.toLowerCase(), String(original.conference || '').toLowerCase()].filter(Boolean).join('|'),\n  'Source Row ID': original.sourceRecordId,\n  'Enable Smartlead': original.enableSmartlead ? 'true' : 'false',\n  'Smartlead Campaign ID': original.smartleadCampaignId,\n  'ICP SKU Estimate': icpQualification.skuEstimate,\n  'ICP Sales Rep Estimate': icpQualification.salesRepEstimate,\n  'ICP Account Base Estimate': icpQualification.accountBaseEstimate,\n  'ICP Ordering Pattern': icpQualification.orderingPattern,\n  'ICP Red Flags': icpQualification.redFlags.join('\\n'),\n  'ICP Fit Score': icpFitScore,\n  'ICP Recommendation': icpQualification.recommendation,\n  'ICP Reasoning': icpQualification.reasoning,\n  'ICP Evidence URLs': icpQualification.evidenceUrls.join('\\n'),\n  'Sales. ': isQualified(sales) ? 'queued' : 'skipped',\n  'Ops.': isQualified(ops) ? 'queued' : 'skipped',\n  'CS. ': isQualified(cs) ? 'queued' : 'skipped',\n  'Updated At': new Date().toISOString(),\n};\nconst leadDedupeKey = leadFields['Dedupe Key'];\n\nreturn {\n  json: {\n    ...original,\n    researchResponseRaw: response,\n    researchJson: parsed,\n    officialDomain: domain,\n    normalizedName,\n    sales,\n    cs,\n    ops,\n    icpQualification,\n    icpFitScore,\n    icpQualified,\n    qualified: {\n      sales: isQualified(sales),\n      cs: isQualified(cs),\n      ops: isQualified(ops),\n    },\n    leadDedupeKey,\n    airtableLeadBody: {\n      performUpsert: { fieldsToMergeOn: ['Dedupe Key'] },\n      records: [{ fields: leadFields }],\n      typecast: true,\n    },\n  }\n};"
       },
-      "id": "4bf6a01f-c067-4fe8-ac2c-7be0dd216751",
+      "id": "a1207c66-29f3-44bf-afe3-8e9b633bd103",
       "name": "Parse Research Result",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -177,7 +177,7 @@
         "specifyBody": "json",
         "jsonBody": "={{$json.airtableLeadBody}}"
       },
-      "id": "ae97cb64-f7fc-4eb6-9bd7-632f8592d594",
+      "id": "7a46644c-e063-40ac-9985-fd9114a919eb",
       "name": "Write Cultivate Lead",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -198,7 +198,7 @@
         "mode": "runOnceForAllItems",
         "jsCode": "function stableStringify(value) {\n  try {\n    return JSON.stringify(value ?? {}, null, 2);\n  } catch (error) {\n    return String(value ?? '');\n  }\n}\n\nfunction firstName(fullName, fallback) {\n  return String(fallback || fullName || '').replace(/^(Mr\\.|Ms\\.|Mrs\\.|Dr\\.)\\s+/i, '').split(/\\s+/).filter(Boolean)[0] || '';\n}\n\nfunction identityPart(value) {\n  return String(value || '').trim().toLowerCase().replace(/[^a-z0-9@._+-]+/g, '-').replace(/^-+|-+$/g, '');\n}\n\nfunction contactItem(row, personaKey, clayPersona, tableId, person) {\n  const fullName = person.fullName || '';\n  const first = firstName(fullName, person.firstName);\n  const base = {\n    sourceLeadRecordId: row.sourceRecordId,\n    sourceRowIndex: row.sourceRowIndex,\n    leadAirtableRecordId: row.leadAirtableRecordId || '',\n    persona: personaKey,\n    clayPersona,\n    contactAirtableTableId: tableId,\n    brand_name: row.brand_name,\n    companyName: row.brand_name,\n    normalizedName: row.normalizedName,\n    domain: row.officialDomain,\n    exhibitor_url: row.exhibitor_url,\n    company_email: row.company_email,\n    showroom_contact: row.showroom_contact,\n    conference: row.conference,\n    booth_number: row.booth_number,\n    fullName,\n    firstName: first,\n    lastName: fullName.split(/\\s+/).slice(1).join(' '),\n    jobTitle: person.jobTitle || '',\n    sourceUrl: person.sourceUrl || '',\n    confidence: person.confidence || '',\n    linkedinUrl: person.linkedinUrl || '',\n    linkedinActive: person.linkedinActive || 'NO',\n    linkedinActivitySummary: person.linkedinActivitySummary || '',\n    suppliedEmail: person.email || '',\n    suppliedPhone: person.phone || '',\n    contactSourceType: person.contactSourceType || 'researched_persona',\n    icpFitScore: row.icpFitScore || 'PASS',\n    icpRecommendation: row.icpQualification?.recommendation || '',\n    icpQualified: row.icpQualified === true,\n    smartleadCampaignId: row.smartleadCampaignId || '',\n    cadenceEnrollmentDate: row.cadenceEnrollmentDate || new Date().toISOString().slice(0, 10),\n    // Smartlead may receive every scored, verified contact; Pipedrive remains\n    // restricted by icpQualified below. A usable first name is mandatory for\n    // email personalization.\n    enableSmartlead: row.enableSmartlead === true && Boolean(first) && /^[A-Za-z][A-Za-z'-]*$/.test(first),\n  };\n  base.contactDedupeKey = [\n    identityPart(base.suppliedEmail || base.linkedinUrl || base.fullName),\n    identityPart(base.domain || base.normalizedName),\n  ].filter(Boolean).join('|');\n\n  let fields;\n  if (personaKey === 'Sales') {\n    fields = {\n      showroom_contact: base.showroom_contact,\n      company_email: base.company_email,\n      'Rows from: las_vegas_market_exhibitors': base.sourceLeadRecordId,\n      brand_name: base.brand_name,\n      exhibitor_url: base.exhibitor_url,\n      'Official Company Domain (2)': base.domain,\n      'Sales Job Title': base.jobTitle,\n      'Sales Confidence': base.confidence,\n      'Sales Full Name': base.fullName,\n      'Sales Source URL': base.sourceUrl,\n      'LinkedIn Profile URL': stableStringify({ linkedinUrl: base.linkedinUrl }),\n      'Person LinkedIn': base.linkedinUrl,\n      'Normalized Company Name': base.normalizedName,\n      'First Name': stableStringify({ firstName: base.firstName }),\n      'First Name (2)': base.firstName,\n      'LinkedIn Activity Status': stableStringify({\n        personLinkedin: base.linkedinUrl,\n        isActive: base.linkedinActive,\n        summary: base.linkedinActivitySummary,\n      }),\n      'Normalized Name': base.normalizedName,\n      'Dedupe Key': base.contactDedupeKey,\n      'Contact Email': base.suppliedEmail,\n      'Contact Phone': base.suppliedPhone,\n      'Contact Source Type': base.contactSourceType,\n      'ICP Fit Score': base.icpFitScore,\n      'ICP Recommendation': base.icpRecommendation,\n    };\n  } else if (personaKey === 'Ops') {\n    fields = {\n      'Ops Full Name': base.fullName,\n      brand_name: base.brand_name,\n      'Ops Job Title': base.jobTitle,\n      'Ops Source Url': base.sourceUrl,\n      'Official Company Domain (2)': base.domain,\n      'Ops Confidence': base.confidence,\n      'Lookup Multiple Rows in Other Table (2)': '',\n      'LinkedIn Profile URL': stableStringify({ linkedinUrl: base.linkedinUrl }),\n      'Extract First Name': stableStringify({ firstName: base.firstName }),\n      'First Name': base.firstName,\n      'Normalized Company Name': base.normalizedName,\n      'Normalized Name': base.normalizedName,\n      company_email: base.company_email,\n      exhibitor_url: base.exhibitor_url,\n      showroom_contact: base.showroom_contact,\n      'Rows from: InfoComm Market Leads': base.sourceLeadRecordId,\n      Conference: base.conference,\n      booth_number: base.booth_number,\n      'Dedupe Key': base.contactDedupeKey,\n      'Contact Email': base.suppliedEmail,\n      'Contact Phone': base.suppliedPhone,\n      'Contact Source Type': base.contactSourceType,\n      'ICP Fit Score': base.icpFitScore,\n      'ICP Recommendation': base.icpRecommendation,\n    };\n  } else {\n    fields = {\n      brand_name: base.brand_name,\n      'CS Confidence': base.confidence,\n      'CS Job Title': base.jobTitle,\n      exhibitor_url: base.exhibitor_url,\n      'Official Company Domain (2)': base.domain,\n      'CS Source URL': base.sourceUrl,\n      'CS Full Name': base.fullName,\n      'LinkedIn Profile URL': stableStringify({ linkedinUrl: base.linkedinUrl }),\n      'Lookup Multiple Rows in Other Table': '',\n      'Extract First Name': stableStringify({ First_Name: base.firstName, firstName: base.firstName }),\n      First_Name: base.firstName,\n      'Normalized Company Name': base.normalizedName,\n      'Normalized Name': base.normalizedName,\n      'Rows from: InfoComm Market Leads': base.sourceLeadRecordId,\n      company_email: base.company_email,\n      showroom_contact: base.showroom_contact,\n      'Sales Confidence': row.sales?.confidence || '',\n      'Sales Job Title': row.sales?.jobTitle || '',\n      'Sales Full Name': row.sales?.fullName || '',\n      'Sales Source URL': row.sales?.sourceUrl || '',\n      booth_number: base.booth_number,\n      Conference: base.conference,\n      'Dedupe Key': base.contactDedupeKey,\n      'Contact Email': base.suppliedEmail,\n      'Contact Phone': base.suppliedPhone,\n      'Contact Source Type': base.contactSourceType,\n      'ICP Fit Score': base.icpFitScore,\n      'ICP Recommendation': base.icpRecommendation,\n    };\n  }\n\n  return {\n    json: {\n      ...base,\n      airtableContactBody: {\n        performUpsert: { fieldsToMergeOn: ['Dedupe Key'] },\n        records: [{ fields }],\n        typecast: true,\n      },\n    }\n  };\n}\n\nconst parsedRows = $('Parse Research Result').all().map((entry) => entry.json);\nconst leadWriteRows = $input.all().map((entry) => entry.json);\nconst out = [];\nfor (let index = 0; index < parsedRows.length; index += 1) {\n  const row = parsedRows[index];\n  const leadWrite = leadWriteRows[index] || {};\n  const leadRecord = Array.isArray(leadWrite.records) ? (leadWrite.records[0] || {}) : leadWrite;\n  row.leadAirtableRecordId = leadRecord.id || leadRecord.recordId || '';\n  const beforeCount = out.length;\n  const scrapedPeople = row.scrapedContacts?.length\n    ? row.scrapedContacts\n    : (row.scrapedContact?.fullName ? [row.scrapedContact] : []);\n  for (const scrapedPerson of scrapedPeople) {\n    out.push(contactItem(row, 'Sales', 'trade_show_contact', 'tblh8mxFnH3xYuDkK', {\n      ...scrapedPerson,\n      confidence: 'Scraped',\n      linkedinUrl: '',\n      linkedinActive: 'NO',\n      contactSourceType: 'scraped_trade_show_contact',\n    }));\n  }\n  if (row.qualified.sales) out.push(contactItem(row, 'Sales', 'sales', 'tblh8mxFnH3xYuDkK', row.sales));\n  if (row.qualified.ops) out.push(contactItem(row, 'Ops', 'ops', 'tblwk9D9Ve1RxwfNa', row.ops));\n  if (row.qualified.cs) out.push(contactItem(row, 'CS', 'cs', 'tblRtquRALrH3ZXEk', row.cs));\n  if (out.length === beforeCount) {\n    out.push({\n      json: {\n        noQualifiedContacts: true,\n        sourceLeadRecordId: row.sourceRecordId,\n        sourceRowIndex: row.sourceRowIndex,\n        leadAirtableRecordId: row.leadAirtableRecordId || '',\n        brand_name: row.brand_name,\n        companyName: row.brand_name,\n        normalizedName: row.normalizedName,\n        domain: row.officialDomain,\n        conference: row.conference,\n        booth_number: row.booth_number,\n        skippedReason: 'No persona met the clean-contact threshold.',\n        personaResults: {\n          sales: row.sales,\n          ops: row.ops,\n          cs: row.cs,\n        },\n      }\n    });\n  }\n}\nreturn out;"
       },
-      "id": "15dbd975-b50f-450e-9347-983cf4a0106d",
+      "id": "200584f7-3dd5-4cba-a5d1-5f242eb3f3c1",
       "name": "Materialize Contact Rows",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -218,7 +218,7 @@
           ]
         }
       },
-      "id": "1df1c73f-cb7d-4263-b92c-addb845cbfb9",
+      "id": "3b3b3ad9-be44-4b4b-a705-4c65df128028",
       "name": "Has Qualified Contact?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 1,
@@ -240,7 +240,7 @@
         "specifyBody": "json",
         "jsonBody": "={{$json.airtableContactBody}}"
       },
-      "id": "b8e32fb7-f8a1-473b-b530-a9e4eb7ab716",
+      "id": "5e8de192-8ee5-4527-b6ac-0a7ff3e0f173",
       "name": "Upsert Cultivate Contact",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -261,7 +261,7 @@
         "mode": "runOnceForEachItem",
         "jsCode": "function clean(value) {\n  return String(value || '').trim();\n}\n\nfunction parseJson(value) {\n  const raw = clean(value);\n  if (!raw || !raw.startsWith('{')) return {};\n  try {\n    return JSON.parse(raw);\n  } catch (error) {\n    return {};\n  }\n}\n\nfunction firstName(fullName, fallback) {\n  return clean(fallback || fullName).replace(/^(Mr\\.|Ms\\.|Mrs\\.|Dr\\.)\\s+/i, '').split(/\\s+/).filter(Boolean)[0] || '';\n}\n\nconst rawResponse = item.json || {};\nconst response = Array.isArray(rawResponse.records) ? (rawResponse.records[0] || {}) : rawResponse;\nconst fields = response.fields || {};\nconst materialized = $('Materialize Contact Rows').item.json;\nlet persona = 'CS';\nlet contactAirtableTableId = 'tblRtquRALrH3ZXEk';\nlet fullName = clean(fields['CS Full Name']);\nlet jobTitle = clean(fields['CS Job Title']);\nlet sourceUrl = clean(fields['CS Source URL']);\nlet confidence = clean(fields['CS Confidence']);\nlet first = clean(fields.First_Name || parseJson(fields['Extract First Name']).firstName || parseJson(fields['Extract First Name']).First_Name);\nlet sourceLeadRecordId = clean(fields['Rows from: InfoComm Market Leads']);\n\nif (fields['Sales Full Name'] !== undefined || fields['Sales Job Title'] !== undefined) {\n  persona = 'Sales';\n  contactAirtableTableId = 'tblh8mxFnH3xYuDkK';\n  fullName = clean(fields['Sales Full Name']);\n  jobTitle = clean(fields['Sales Job Title']);\n  sourceUrl = clean(fields['Sales Source URL']);\n  confidence = clean(fields['Sales Confidence']);\n  first = clean(fields['First Name (2)'] || parseJson(fields['First Name']).firstName);\n  sourceLeadRecordId = clean(fields['Rows from: las_vegas_market_exhibitors']);\n} else if (fields['Ops Full Name'] !== undefined || fields['Ops Job Title'] !== undefined) {\n  persona = 'Ops';\n  contactAirtableTableId = 'tblwk9D9Ve1RxwfNa';\n  fullName = clean(fields['Ops Full Name']);\n  jobTitle = clean(fields['Ops Job Title']);\n  sourceUrl = clean(fields['Ops Source Url']);\n  confidence = clean(fields['Ops Confidence']);\n  first = clean(fields.FirstName || fields['First Name'] || parseJson(fields['Extract First Name']).firstName);\n  sourceLeadRecordId = clean(fields['Rows from: InfoComm Market Leads']);\n}\n\nconst linkedinLookup = parseJson(fields['LinkedIn Profile URL']);\nconst linkedinUrl = clean(\n  fields['Person LinkedIn']\n  || linkedinLookup.linkedinUrl\n  || linkedinLookup.personLinkedin\n  || linkedinLookup.linkedin\n);\n\nreturn {\n  json: {\n    sourceLeadRecordId,\n    leadAirtableRecordId: sourceLeadRecordId,\n    persona,\n    clayPersona: persona.toLowerCase(),\n    contactAirtableTableId,\n    brand_name: clean(fields.brand_name),\n    companyName: clean(fields.brand_name),\n    normalizedName: clean(fields['Normalized Name'] || fields['Normalized Company Name']),\n    domain: clean(fields['Official Company Domain (2)']),\n    exhibitor_url: clean(fields.exhibitor_url),\n    company_email: clean(fields.company_email),\n    showroom_contact: clean(fields.showroom_contact),\n    conference: clean(fields.Conference),\n    booth_number: clean(fields.booth_number),\n    fullName,\n    firstName: firstName(fullName, first),\n    lastName: fullName.split(/\\s+/).slice(1).join(' '),\n    jobTitle,\n    sourceUrl,\n    confidence,\n    linkedinUrl,\n    linkedinActive: 'NO',\n    linkedinActivitySummary: '',\n    suppliedEmail: clean(fields['Contact Email']),\n    suppliedPhone: clean(fields['Contact Phone']),\n    contactSourceType: clean(fields['Contact Source Type']),\n    icpFitScore: clean(fields['ICP Fit Score'] || materialized.icpFitScore || 'PASS'),\n    icpRecommendation: clean(fields['ICP Recommendation'] || materialized.icpRecommendation),\n    icpQualified: materialized.icpQualified === true,\n    enableSmartlead: materialized.enableSmartlead === true,\n    smartleadCampaignId: materialized.smartleadCampaignId || '',\n    cadenceEnrollmentDate: materialized.cadenceEnrollmentDate || new Date().toISOString().slice(0, 10),\n    airtableContactRecordId: response.id || response.recordId || '',\n    airtableContactCreateResponse: response,\n  }\n};"
       },
-      "id": "9e6b0b81-4836-4ec6-914e-2ed6a1d7444c",
+      "id": "58895c85-9575-425d-9bfa-2264f9e4667c",
       "name": "After Contact Write",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -275,7 +275,7 @@
         "mode": "runOnceForEachItem",
         "jsCode": "function compact(value) {\n  return Object.fromEntries(Object.entries(value).filter(([, item]) => item !== undefined && item !== null && item !== ''));\n}\n\nconst row = item.json;\nconst model = (typeof $vars !== 'undefined' && $vars.CONDUIT_OPENAI_LINKEDIN_MODEL) || (typeof $vars !== 'undefined' && $vars.CONDUIT_OPENAI_MODEL) || 'gpt-4o-mini';\nconst userPrompt = `\nFind the exact public LinkedIn profile URL for this trade-show prospect. Return only one valid JSON object.\n\nProspect:\n${JSON.stringify(compact({\n  full_name: row.fullName,\n  job_title: row.jobTitle,\n  company: row.companyName,\n  normalized_company: row.normalizedName,\n  domain: row.domain,\n  existing_linkedin_url: row.linkedinUrl,\n  source_url: row.sourceUrl\n}), null, 2)}\n\nRules:\n1. Return linkedinUrl only if it is an exact /in/ public profile for the same full name and current company/title context.\n2. Do not return company pages, posts, sales-navigator URLs, directory pages, search URLs, or guessed LinkedIn slugs.\n3. If the exact profile is not visible, return an empty linkedinUrl.\n4. confidence must be High, Medium, Low, or Not Found.\n5. Use High only when the profile visibly matches the person and company/title context.\n\nJSON shape:\n{\"linkedinUrl\":\"\",\"confidence\":\"\",\"sourceUrl\":\"\",\"reason\":\"\"}`;\n\nreturn {\n  json: {\n    ...row,\n    openaiLinkedinLookupRequest: {\n      model,\n      tools: [{ type: 'web_search' }],\n      input: userPrompt\n    }\n  }\n};"
       },
-      "id": "c43c9a79-d195-49ab-9c15-7ca68b2568c1",
+      "id": "7721ed92-84ff-41b0-ad95-10d7aefeefbe",
       "name": "Build LinkedIn Profile Lookup Request",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -297,7 +297,7 @@
         "specifyBody": "json",
         "jsonBody": "={{$json.openaiLinkedinLookupRequest}}"
       },
-      "id": "6969d5de-4d9e-4053-a413-84acea575774",
+      "id": "66e3c828-491a-47c7-8b81-268d2b17b318",
       "name": "OpenAI LinkedIn Profile Lookup",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -318,7 +318,7 @@
         "mode": "runOnceForEachItem",
         "jsCode": "function outputText(response) {\n  if (!response) return '';\n  if (typeof response.output_text === 'string') return response.output_text;\n  if (Array.isArray(response.output)) {\n    return response.output.flatMap((entry) => {\n      if (Array.isArray(entry.content)) {\n        return entry.content.map((part) => part.text || part.output_text || '').filter(Boolean);\n      }\n      return [entry.text || ''];\n    }).filter(Boolean).join('\\n');\n  }\n  return response.text || response.message || '';\n}\n\nfunction parseJsonFromText(text) {\n  if (!text) return {};\n  try {\n    return JSON.parse(text);\n  } catch (error) {\n    const match = text.match(/\\{[\\s\\S]*\\}/);\n    if (!match) return {};\n    try {\n      return JSON.parse(match[0]);\n    } catch (nestedError) {\n      return {};\n    }\n  }\n}\n\nfunction cleanLinkedInUrl(value) {\n  const raw = String(value || '').trim();\n  if (!raw) return '';\n  try {\n    const url = raw.match(/^https?:\\/\\//i) ? raw : `https://${raw}`;\n    const parsed = new URL(url);\n    const host = parsed.hostname.replace(/^www\\./i, '').toLowerCase();\n    if (!(host === 'linkedin.com' || host.endsWith('.linkedin.com')) || !parsed.pathname.toLowerCase().startsWith('/in/')) return '';\n    const slug = parsed.pathname.split('/').filter(Boolean)[1] || '';\n    if (!slug || /12345678|example|placeholder|your-name|first-last/i.test(slug)) return '';\n    return `https://www.linkedin.com${parsed.pathname.replace(/\\/+$/, '')}`;\n  } catch (error) {\n    const match = raw.match(/https?:\\/\\/(?:[\\w-]+\\.)?linkedin\\.com\\/in\\/[^\\s\"')?#]+/i);\n    if (!match) return '';\n    const slug = match[0].split('/in/')[1]?.replace(/\\/+$/, '') || '';\n    if (!slug || /12345678|example|placeholder|your-name|first-last/i.test(slug)) return '';\n    return `https://www.linkedin.com/in/${slug}`;\n  }\n}\n\nfunction stableStringify(value) {\n  try {\n    return JSON.stringify(value ?? {}, null, 2);\n  } catch (error) {\n    return String(value ?? '');\n  }\n}\n\nfunction clean(value) {\n  return String(value || '').trim();\n}\n\nfunction isHighConfidence(value) {\n  return clean(value).toLowerCase().includes('high');\n}\n\nfunction sourceQualityScore(row, hasVerifiedLinkedin) {\n  let score = 0;\n  if (isHighConfidence(row.confidence)) score += 35;\n  else if (clean(row.confidence).toLowerCase().includes('medium')) score += 20;\n  if (clean(row.fullName).split(/\\s+/).filter(Boolean).length >= 2) score += 10;\n  if (clean(row.jobTitle) && !clean(row.jobTitle).toLowerCase().includes('not found')) score += 10;\n  if (clean(row.sourceUrl)) score += 10;\n  if (hasVerifiedLinkedin) score += 35;\n  return Math.min(score, 100);\n}\n\nconst source = $('Build LinkedIn Profile Lookup Request').item.json;\nconst response = item.json || {};\nconst text = outputText(response);\nconst parsed = parseJsonFromText(text);\nconst foundUrl = cleanLinkedInUrl(parsed.linkedinUrl || parsed.url || text);\nconst keptUrl = cleanLinkedInUrl(source.linkedinUrl);\nconst lookupConfidence = clean(parsed.confidence || '');\nconst linkedinUrl = foundUrl && isHighConfidence(lookupConfidence) ? foundUrl : '';\nconst rejectedLinkedInUrl = linkedinUrl ? '' : (foundUrl || keptUrl);\nconst verificationStatus = linkedinUrl\n  ? 'verified_exact_high_confidence'\n  : rejectedLinkedInUrl\n  ? `rejected_${lookupConfidence ? lookupConfidence.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') : 'not_high_confidence'}`\n  : 'missing_exact_profile';\nconst qualityScore = sourceQualityScore(source, Boolean(linkedinUrl));\nconst qualityNotes = [\n  `LinkedIn verification: ${verificationStatus}`,\n  lookupConfidence ? `Lookup confidence: ${lookupConfidence}` : '',\n  rejectedLinkedInUrl ? `Rejected URL: ${rejectedLinkedInUrl}` : '',\n  parsed.reason ? `Reason: ${parsed.reason}` : '',\n].filter(Boolean).join('\\n');\nconst lookup = {\n  linkedinUrl,\n  confidence: linkedinUrl ? lookupConfidence : (lookupConfidence || 'Not Found'),\n  sourceUrl: parsed.sourceUrl || '',\n  reason: parsed.reason || '',\n  verificationStatus,\n  rejectedLinkedInUrl,\n  raw: parsed,\n  error: response.error ? String(response.error.message || response.error.code || 'LinkedIn lookup error').slice(0, 1000) : '',\n};\nconst fields = {\n  'LinkedIn Profile URL': stableStringify(lookup),\n  'LinkedIn Verification Status': verificationStatus,\n  'LinkedIn Verification Confidence': lookup.confidence,\n  'Quality Score': qualityScore,\n  'Quality Notes': qualityNotes,\n};\nif (source.persona === 'Sales') {\n  fields['Person LinkedIn'] = linkedinUrl;\n}\nreturn {\n  json: {\n    ...source,\n    linkedinUrl,\n    linkedinVerified: Boolean(linkedinUrl),\n    linkedinVerificationStatus: verificationStatus,\n    linkedinVerificationConfidence: lookup.confidence,\n    rejectedLinkedInUrl,\n    qualityScore,\n    qualityNotes,\n    linkedinActive: 'NO',\n    linkedinActivitySummary: '',\n    linkedinLookup: lookup,\n    airtableLinkedInUpdateBody: {\n      fields,\n      typecast: true,\n    },\n  }\n};"
       },
-      "id": "356eda11-97af-4d29-9712-54f02ac795c5",
+      "id": "f9cb29ca-1637-4e50-acdc-345336c87d38",
       "name": "Parse LinkedIn Profile Lookup",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -340,7 +340,7 @@
         "specifyBody": "json",
         "jsonBody": "={{$json.airtableLinkedInUpdateBody}}"
       },
-      "id": "93b0dd5f-4b38-4aec-b6c0-a04e27345e77",
+      "id": "6cf92e5c-7dc2-4054-8c19-3a667f57c53d",
       "name": "Update Contact LinkedIn Fields",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -361,7 +361,7 @@
         "mode": "runOnceForEachItem",
         "jsCode": "const source = $('Parse LinkedIn Profile Lookup').item.json;\nreturn {\n  json: {\n    ...source,\n    airtableLinkedInUpdateResponse: item.json || {},\n  }\n};"
       },
-      "id": "0b6a6f74-7bd6-4fb4-a4fd-fe7afe19a76a",
+      "id": "d680cd40-05fd-4bf2-91d8-162fdb0fc28f",
       "name": "After LinkedIn Airtable Update",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -375,7 +375,7 @@
         "mode": "runOnceForEachItem",
         "jsCode": "const suppliedEmail = String(item.json.suppliedEmail || '').trim().toLowerCase();\nreturn {\n  json: {\n    ...item.json,\n    leadMagicRaw: {},\n    leadMagicEmail: '',\n    leadMagicCatchAll: false,\n    leadMagicValidationRaw: {},\n    validLeadMagicEmail: '',\n    wizaRaw: { skipped: true, reason: 'Wiza credential not available yet' },\n    wizaEmail: '',\n    wizaValidationRaw: {},\n    validWizaEmail: '',\n    icypeasStartRaw: {},\n    icypeasReadRaw: {},\n    icypeasEmail: '',\n    prospeoRaw: {},\n    prospeoEmail: '',\n    findymailRaw: {},\n    findymailEmail: '',\n    finalProvider: suppliedEmail ? 'Scraped Contact' : '',\n    finalWorkEmail: suppliedEmail,\n    shouldRunLeadMagic: Boolean(!suppliedEmail && item.json.linkedinUrl && item.json.fullName && item.json.domain),\n  }\n};"
       },
-      "id": "b91049ab-24b1-4c37-bd15-53127908db60",
+      "id": "ee2b636e-a519-41a4-9d97-84620571f5a0",
       "name": "Prepare Email Waterfall",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -395,7 +395,7 @@
           ]
         }
       },
-      "id": "d057d3fb-10dc-4acc-b1b6-0b91716574ac",
+      "id": "7c12bb3d-9eb3-4766-89ab-08c83c16ff92",
       "name": "Need LeadMagic?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 1,
@@ -417,7 +417,7 @@
         "specifyBody": "json",
         "jsonBody": "={{ { \"full_name\": $json.fullName, \"domain\": $json.domain, \"company_name\": $json.companyName } }}"
       },
-      "id": "eedb8a4a-02ed-48e1-a7be-4822cf4b1b56",
+      "id": "f55c8134-5eb3-4a89-8c55-274fc6e6c4dc",
       "name": "LeadMagic Email Finder",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -438,7 +438,7 @@
         "mode": "runOnceForEachItem",
         "jsCode": "function findFirstEmail(value) {\n  if (!value) return '';\n  if (typeof value === 'string') {\n    const match = value.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}/i);\n    return match ? match[0].toLowerCase() : '';\n  }\n  if (Array.isArray(value)) {\n    for (const item of value) {\n      const result = findFirstEmail(item);\n      if (result) return result;\n    }\n  }\n  if (typeof value === 'object') {\n    for (const key of ['email', 'work_email', 'email_address', 'lead_email']) {\n      const result = findFirstEmail(value[key]);\n      if (result) return result;\n    }\n    for (const nested of Object.values(value)) {\n      const result = findFirstEmail(nested);\n      if (result) return result;\n    }\n  }\n  return '';\n}\n\nfunction findCatchAll(value) {\n  if (!value || typeof value !== 'object') return false;\n  for (const [key, item] of Object.entries(value)) {\n    const normalized = key.toLowerCase();\n    if (normalized.includes('catch') && normalized.includes('all')) return Boolean(item);\n    if (item && typeof item === 'object' && findCatchAll(item)) return true;\n  }\n  return false;\n}\n\nconst source = $('Prepare Email Waterfall').item.json;\nconst raw = item.json || {};\nconst email = findFirstEmail(raw);\nconst catchAll = findCatchAll(raw);\nreturn {\n  json: {\n    ...source,\n    leadMagicRaw: raw,\n    leadMagicEmail: email,\n    leadMagicCatchAll: catchAll,\n    validLeadMagicEmail: email && !catchAll ? email : '',\n    shouldValidateLeadMagic: Boolean(email && catchAll),\n  }\n};"
       },
-      "id": "c87ad80c-b9a9-4e93-93e5-3b3203d31264",
+      "id": "b3b43ce0-fe4d-4d69-8242-44368b9d28fc",
       "name": "Parse LeadMagic",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -451,7 +451,7 @@
       "parameters": {
         "mode": "append"
       },
-      "id": "9ec4bca7-d924-4a0e-b140-e45801345aaa",
+      "id": "37239623-e0ef-4aed-ae32-5bc896645600",
       "name": "Merge After LeadMagic",
       "type": "n8n-nodes-base.merge",
       "typeVersion": 2,
@@ -471,7 +471,7 @@
           ]
         }
       },
-      "id": "05aa36c0-0919-463f-b788-0e31cc35a516",
+      "id": "1105b9e2-acdc-43c2-a9d3-8fdb2df281d8",
       "name": "Need LeadMagic Validation?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 1,
@@ -493,7 +493,7 @@
         "specifyBody": "json",
         "jsonBody": "={{ { \"email\": $json.leadMagicEmail } }}"
       },
-      "id": "86f65ddf-aa58-4b2b-831c-35794ece48b4",
+      "id": "09e4d555-49f8-4336-be80-530179a57a74",
       "name": "Enrichley Validate LeadMagic",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -513,7 +513,7 @@
         "mode": "runOnceForEachItem",
         "jsCode": "function isValid(value) {\n  if (!value) return false;\n  const text = JSON.stringify(value).toLowerCase();\n  if (text.includes('\"valid\":true') || text.includes('\"is_valid\":true')) return true;\n  if (text.includes('\"status\":\"valid\"') || text.includes('\"result\":\"valid\"')) return true;\n  if (text.includes('\"deliverable\"') && !text.includes('\"undeliverable\"')) return true;\n  return false;\n}\n\nconst source = $('Merge After LeadMagic').item.json;\nconst raw = item.json || {};\nreturn {\n  json: {\n    ...source,\n    leadMagicValidationRaw: raw,\n    validLeadMagicEmail: isValid(raw) ? source.leadMagicEmail : source.validLeadMagicEmail,\n  }\n};"
       },
-      "id": "f55e1c18-f54f-471b-a3af-fa3b81560e1d",
+      "id": "8f9f8480-270a-4e59-adb2-90fdd472eb6e",
       "name": "Parse LeadMagic Validation",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -526,7 +526,7 @@
       "parameters": {
         "mode": "append"
       },
-      "id": "15dfe918-6cd6-48a5-bff6-93b9d878d654",
+      "id": "1bd9a54b-cd4b-400f-8c8f-ee3ff3fc8039",
       "name": "Merge After LeadMagic Validation",
       "type": "n8n-nodes-base.merge",
       "typeVersion": 2,
@@ -540,7 +540,7 @@
         "mode": "runOnceForEachItem",
         "jsCode": "const row = item.json;\nreturn {\n  json: {\n    ...row,\n    shouldRunIcypeas: Boolean(row.linkedinUrl && !row.validLeadMagicEmail && row.fullName && row.domain),\n  }\n};"
       },
-      "id": "6de507a8-708f-4765-9096-10bde53421bd",
+      "id": "5e66072c-a865-488c-887a-3d8f15af6211",
       "name": "After LeadMagic Validation",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -560,7 +560,7 @@
           ]
         }
       },
-      "id": "7f02b917-66d2-405c-8de7-15efcecc0353",
+      "id": "56192d12-417f-4265-b473-9351f62da4d4",
       "name": "Need Icypeas?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 1,
@@ -582,7 +582,7 @@
         "specifyBody": "json",
         "jsonBody": "={{ { \"firstname\": $json.firstName, \"lastname\": $json.lastName, \"domainOrCompany\": $json.domain } }}"
       },
-      "id": "d28ce029-0458-422c-8b51-c82b2191ffa5",
+      "id": "987b7589-8e84-4139-8544-61dfbeb19759",
       "name": "Icypeas Start Email Search",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -603,7 +603,7 @@
         "mode": "runOnceForEachItem",
         "jsCode": "const source = $('After LeadMagic Validation').item.json;\nconst raw = item.json || {};\nreturn {\n  json: {\n    ...source,\n    icypeasStartRaw: raw,\n    icypeasSearchId: raw.item?._id || raw._id || raw.id || '',\n  }\n};"
       },
-      "id": "f98c1e23-e5e9-45f0-803b-03e4add36f73",
+      "id": "e1bcec2f-98b0-48c3-81e4-bd286736404d",
       "name": "Parse Icypeas Start",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -618,7 +618,7 @@
         "amount": 8,
         "unit": "seconds"
       },
-      "id": "522e6ce1-7939-4426-b69c-814b83379d10",
+      "id": "0054e889-1ce8-4260-90b8-f58097ed33c4",
       "name": "Wait for Icypeas",
       "type": "n8n-nodes-base.wait",
       "typeVersion": 1,
@@ -640,7 +640,7 @@
         "specifyBody": "json",
         "jsonBody": "={{ { \"id\": $json.icypeasSearchId } }}"
       },
-      "id": "a1a0f919-8716-43bc-a087-4d0ade39ed00",
+      "id": "10a502a2-059a-40ee-af63-ea04d10b8dbb",
       "name": "Icypeas Read Search",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -661,7 +661,7 @@
         "mode": "runOnceForEachItem",
         "jsCode": "function findEmail(value) {\n  if (!value) return '';\n  if (typeof value === 'string') {\n    const match = value.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}/i);\n    return match ? match[0].toLowerCase() : '';\n  }\n  if (Array.isArray(value)) {\n    for (const item of value) {\n      const result = findEmail(item);\n      if (result) return result;\n    }\n  }\n  if (typeof value === 'object') {\n    for (const nested of Object.values(value)) {\n      const result = findEmail(nested);\n      if (result) return result;\n    }\n  }\n  return '';\n}\n\nfunction firstEmail(raw) {\n  const items = Array.isArray(raw.items) ? raw.items : [];\n  for (const item of items) {\n    const emails = item?.results?.emails || item?.emails || [];\n    if (Array.isArray(emails) && emails.length) {\n      const email = findEmail(emails);\n      if (email) return email;\n    }\n  }\n  return findEmail(raw);\n}\n\nconst source = $('Wait for Icypeas').item.json;\nconst raw = item.json || {};\nreturn {\n  json: {\n    ...source,\n    icypeasReadRaw: raw,\n    icypeasEmail: firstEmail(raw),\n  }\n};"
       },
-      "id": "103c4b0e-d8d3-43de-ad2b-fd9479b54e16",
+      "id": "9c34d0c6-a4f1-44ec-96f5-fa174ef0bcfb",
       "name": "Parse Icypeas Read",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -674,7 +674,7 @@
       "parameters": {
         "mode": "append"
       },
-      "id": "346ed479-f1e8-4b05-82ba-bc9d48639eba",
+      "id": "e6dda12f-6a75-4c24-a4ce-09191345ea2f",
       "name": "Merge After Icypeas",
       "type": "n8n-nodes-base.merge",
       "typeVersion": 2,
@@ -688,7 +688,7 @@
         "mode": "runOnceForEachItem",
         "jsCode": "const row = item.json;\nreturn {\n  json: {\n    ...row,\n    shouldRunProspeo: Boolean(row.linkedinUrl && !row.validLeadMagicEmail && !row.icypeasEmail && !row.validWizaEmail && row.fullName && row.domain),\n    prospeoRequest: {\n      only_verified_email: true,\n      data: {\n        full_name: row.fullName,\n        company_name: row.companyName,\n        company_website: row.domain,\n        ...(row.linkedinUrl ? { linkedin_url: row.linkedinUrl } : {})\n      }\n    }\n  }\n};"
       },
-      "id": "5bfea5ba-3bde-4bcc-81c7-07f33e617cd5",
+      "id": "4e1f1ad0-53c5-4ddb-9e39-fa0e85d33a3b",
       "name": "After Icypeas",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -708,7 +708,7 @@
           ]
         }
       },
-      "id": "690d808b-2e37-4254-8e17-b841ba7d3b5a",
+      "id": "9cfed806-34c4-4931-8ae2-4e2627ce15e8",
       "name": "Need Prospeo?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 1,
@@ -730,7 +730,7 @@
         "specifyBody": "json",
         "jsonBody": "={{$json.prospeoRequest}}"
       },
-      "id": "885b2dd1-95fe-471b-bd61-6d5e27e56693",
+      "id": "a021eced-a2fe-4ca3-a36c-d2b48f84bb99",
       "name": "Prospeo Enrich Person",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -751,7 +751,7 @@
         "mode": "runOnceForEachItem",
         "jsCode": "function findEmail(value) {\n  if (!value) return '';\n  if (typeof value === 'string') {\n    const match = value.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}/i);\n    return match ? match[0].toLowerCase() : '';\n  }\n  if (Array.isArray(value)) {\n    for (const item of value) {\n      const result = findEmail(item);\n      if (result) return result;\n    }\n  }\n  if (typeof value === 'object') {\n    for (const key of ['email', 'work_email', 'email_address']) {\n      const result = findEmail(value[key]);\n      if (result) return result;\n    }\n    for (const nested of Object.values(value)) {\n      const result = findEmail(nested);\n      if (result) return result;\n    }\n  }\n  return '';\n}\n\nfunction emailFromProspeo(raw) {\n  const person = raw.person || raw.data?.person || raw.result?.person || raw.data || raw;\n  return findEmail(person);\n}\n\nconst source = $('After Icypeas').item.json;\nconst raw = item.json || {};\nreturn {\n  json: {\n    ...source,\n    prospeoRaw: raw,\n    prospeoEmail: emailFromProspeo(raw),\n  }\n};"
       },
-      "id": "8aa64b8a-2cf3-45a9-a5e2-a9b1ec175326",
+      "id": "28fbe519-a5dc-42c2-a2ec-cb078647acca",
       "name": "Parse Prospeo",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -764,7 +764,7 @@
       "parameters": {
         "mode": "append"
       },
-      "id": "59819d66-9ac8-43fd-a87c-596d6993927f",
+      "id": "a428d537-ed4a-4c50-ab95-2921a8d386ee",
       "name": "Merge After Prospeo",
       "type": "n8n-nodes-base.merge",
       "typeVersion": 2,
@@ -778,7 +778,7 @@
         "mode": "runOnceForEachItem",
         "jsCode": "const row = item.json;\nreturn {\n  json: {\n    ...row,\n    shouldRunFindymail: Boolean(row.linkedinUrl && !row.validLeadMagicEmail && !row.icypeasEmail && !row.validWizaEmail && !row.prospeoEmail && row.fullName && row.domain),\n  }\n};"
       },
-      "id": "f5df068b-b8e3-4078-b05d-0e4c11c13f34",
+      "id": "53c0a488-6b68-4c44-9ea3-af9e120fe672",
       "name": "After Prospeo",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -798,7 +798,7 @@
           ]
         }
       },
-      "id": "36fae745-776a-4d8b-ad03-9cdefa199fa7",
+      "id": "b5e706a8-bcab-4a45-98a7-6e4e5ecb16be",
       "name": "Need Findymail?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 1,
@@ -820,7 +820,7 @@
         "specifyBody": "json",
         "jsonBody": "={{ { \"name\": $json.fullName, \"domain\": $json.domain } }}"
       },
-      "id": "393ace54-82d8-48c7-86a4-97396dddb364",
+      "id": "3d2dc28e-7046-407c-987f-4fb130212147",
       "name": "Findymail Name Search",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -841,7 +841,7 @@
         "mode": "runOnceForEachItem",
         "jsCode": "function findEmail(value) {\n  if (!value) return '';\n  if (typeof value === 'string') {\n    const match = value.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}/i);\n    return match ? match[0].toLowerCase() : '';\n  }\n  if (Array.isArray(value)) {\n    for (const item of value) {\n      const result = findEmail(item);\n      if (result) return result;\n    }\n  }\n  if (typeof value === 'object') {\n    for (const key of ['email', 'email_address', 'work_email']) {\n      const result = findEmail(value[key]);\n      if (result) return result;\n    }\n    for (const nested of Object.values(value)) {\n      const result = findEmail(nested);\n      if (result) return result;\n    }\n  }\n  return '';\n}\n\nconst source = $('After Prospeo').item.json;\nconst raw = item.json || {};\nreturn {\n  json: {\n    ...source,\n    findymailRaw: raw,\n    findymailEmail: findEmail(raw),\n  }\n};"
       },
-      "id": "bf159b9f-da42-49e2-95c6-d41e8b2640ee",
+      "id": "de697691-b786-410b-bf02-d4cbbfc4e9a9",
       "name": "Parse Findymail",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -854,7 +854,7 @@
       "parameters": {
         "mode": "append"
       },
-      "id": "d6da0312-43e6-4a29-8442-6d821c7f3be0",
+      "id": "13ba2d53-3299-47bb-a006-9c07183216e8",
       "name": "Merge After Findymail",
       "type": "n8n-nodes-base.merge",
       "typeVersion": 2,
@@ -868,7 +868,7 @@
         "mode": "runOnceForEachItem",
         "jsCode": "function stableStringify(value) {\n  try {\n    return JSON.stringify(value ?? {}, null, 2);\n  } catch (error) {\n    return String(value ?? '');\n  }\n}\n\nfunction cleanEmail(value) {\n  if (typeof value !== 'string') return '';\n  const match = value.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}/i);\n  return match ? match[0].toLowerCase() : '';\n}\n\nfunction baseUpdates(row) {\n  const common = {\n    'Find work email': stableStringify(row.leadMagicRaw),\n    'LeadMagic Email': row.leadMagicEmail,\n    'Is Domain Catch All': row.leadMagicCatchAll ? 'true' : 'false',\n    'Validate Email': stableStringify(row.leadMagicValidationRaw),\n    'Find Work Email - Prospeo': stableStringify(row.prospeoRaw),\n    'Prospeo Email': row.prospeoEmail,\n    'Find Work Email - Findymail': stableStringify(row.findymailRaw),\n    'Findymail Email': row.findymailEmail,\n    'Final Work Email': row.finalWorkEmail,\n  };\n\n  if (row.persona === 'Sales') {\n    return {\n      ...common,\n      'Find work email (2)': stableStringify(row.icypeasReadRaw || row.icypeasStartRaw),\n      'Icypeas Email': row.icypeasEmail,\n      'Valid LeadMagic Email': row.validLeadMagicEmail,\n      'Find work email (3)': stableStringify(row.wizaRaw),\n      'Wiza Email': row.wizaEmail,\n      'Validate Email (2)': stableStringify(row.wizaValidationRaw),\n      'Valid Wiza Email': row.validWizaEmail,\n    };\n  }\n\n  if (row.persona === 'Ops') {\n    return {\n      ...common,\n      'Valid Email': row.validLeadMagicEmail ? 'true' : 'false',\n      'Valid Leadmagic Email': row.validLeadMagicEmail,\n      'Find work email (2)': stableStringify(row.wizaRaw),\n      'Wiza Email': row.wizaEmail,\n      'Validate Email (2)': stableStringify(row.wizaValidationRaw),\n      Valid: row.validWizaEmail ? 'true' : 'false',\n      'Valid Wiza Email': row.validWizaEmail,\n      'Find work email (3)': stableStringify(row.icypeasReadRaw || row.icypeasStartRaw),\n      'Icypeas Email': row.icypeasEmail,\n    };\n  }\n\n  return {\n    ...common,\n    'Valid LeadMagic Email': row.validLeadMagicEmail,\n    'Find work email (2)': stableStringify(row.icypeasReadRaw || row.icypeasStartRaw),\n    'Icypeas Email': row.icypeasEmail,\n    'Find work email (3)': stableStringify(row.wizaRaw),\n    'Wiza Email': row.wizaEmail,\n    'Validate Email (2)': stableStringify(row.wizaValidationRaw),\n    'Validate Wiza Email': row.validWizaEmail ? 'true' : 'false',\n    'Valid Wiza Email': row.validWizaEmail,\n  };\n}\n\nconst row = item.json;\nconst salesOrder = [\n  ['Scraped Contact', cleanEmail(row.suppliedEmail)],\n  ['LeadMagic', cleanEmail(row.validLeadMagicEmail)],\n  ['Icypeas', cleanEmail(row.icypeasEmail)],\n  ['Wiza', cleanEmail(row.validWizaEmail)],\n  ['Prospeo', cleanEmail(row.prospeoEmail)],\n  ['Findymail', cleanEmail(row.findymailEmail)],\n];\nconst opsCsOrder = [\n  ['Scraped Contact', cleanEmail(row.suppliedEmail)],\n  ['LeadMagic', cleanEmail(row.validLeadMagicEmail)],\n  ['Wiza', cleanEmail(row.validWizaEmail)],\n  ['Icypeas', cleanEmail(row.icypeasEmail)],\n  ['Prospeo', cleanEmail(row.prospeoEmail)],\n  ['Findymail', cleanEmail(row.findymailEmail)],\n];\nconst winner = (row.persona === 'Sales' ? salesOrder : opsCsOrder).find(([, email]) => Boolean(email)) || ['None', ''];\nconst finalRow = {\n  ...row,\n  finalProvider: winner[0],\n  finalWorkEmail: winner[1],\n  finalEmailValidationRaw: {},\n  finalEmailValidationStatus: winner[1] ? 'pending' : 'skipped_no_email',\n  shouldValidateFinalEmail: Boolean(winner[1]),\n};\n\nreturn {\n  json: {\n    ...finalRow,\n    shouldPushSmartlead: Boolean(\n      finalRow.finalWorkEmail\n      && finalRow.enableSmartlead === true\n      && String(finalRow.smartleadCampaignId || '').trim()\n    ),\n    shouldRunApify: Boolean(finalRow.linkedinUrl),\n    airtableContactUpdateBody: {\n      fields: baseUpdates(finalRow),\n      typecast: true,\n    }\n  }\n};"
       },
-      "id": "540d771c-8330-4a70-b3da-3596099976a2",
+      "id": "98269e15-33d6-405f-a5b3-8bbf388e4e4a",
       "name": "Merge Final Email",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -888,7 +888,7 @@
           ]
         }
       },
-      "id": "14a01a49-e563-47d6-95ea-127b217854c0",
+      "id": "15228b9e-7528-4660-b530-a42a570baea9",
       "name": "Need Final Email Validation?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 1,
@@ -910,7 +910,7 @@
         "specifyBody": "json",
         "jsonBody": "={{ { \"email\": $json.finalWorkEmail } }}"
       },
-      "id": "f6bd6a4c-95e7-4578-b3dd-34577403c789",
+      "id": "0058d0c1-8eeb-4024-948b-74a7ac2d4eb2",
       "name": "Enrichley Validate Final Email",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -930,7 +930,7 @@
         "mode": "runOnceForEachItem",
         "jsCode": "function isValid(value) {\n  if (!value) return false;\n  const text = JSON.stringify(value).toLowerCase();\n  if (text.includes('\"valid\":true') || text.includes('\"is_valid\":true')) return true;\n  if (text.includes('\"status\":\"valid\"') || text.includes('\"result\":\"valid\"')) return true;\n  if (text.includes('\"state\":\"valid\"') || text.includes('\"verdict\":\"valid\"')) return true;\n  if (text.includes('\"deliverable\"') && !text.includes('\"undeliverable\"')) return true;\n  return false;\n}\n\nfunction isExplicitInvalid(value) {\n  if (!value) return false;\n  const text = JSON.stringify(value).toLowerCase();\n  if (text.includes('\"valid\":false') || text.includes('\"is_valid\":false')) return true;\n  if (text.includes('\"status\":\"invalid\"') || text.includes('\"result\":\"invalid\"')) return true;\n  if (text.includes('\"state\":\"invalid\"') || text.includes('\"verdict\":\"invalid\"')) return true;\n  if (text.includes('\"undeliverable\"')) return true;\n  return false;\n}\n\nconst source = $('Merge Final Email').item.json;\nconst raw = item.json || {};\nconst validated = isValid(raw);\nconst invalid = isExplicitInvalid(raw);\nreturn {\n  json: {\n    ...source,\n    finalEmailValidationRaw: raw,\n    finalEmailValidationStatus: validated\n      ? 'valid'\n      : invalid\n      ? 'invalid'\n      : 'unknown',\n  }\n};"
       },
-      "id": "2ef83a1b-ea93-4c3d-972a-4dc46a86675b",
+      "id": "a9f42b22-f8bc-4f23-91ae-276db0198ab5",
       "name": "Parse Final Email Validation",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -943,7 +943,7 @@
       "parameters": {
         "mode": "append"
       },
-      "id": "8e96130c-fede-424d-858b-89463770d8e9",
+      "id": "437aedeb-b5eb-42a3-85bc-9158c046b2b8",
       "name": "Merge After Final Email Validation",
       "type": "n8n-nodes-base.merge",
       "typeVersion": 2,
@@ -957,7 +957,7 @@
         "mode": "runOnceForEachItem",
         "jsCode": "function stableStringify(value) {\n  try {\n    return JSON.stringify(value ?? {}, null, 2);\n  } catch (error) {\n    return String(value ?? '');\n  }\n}\n\nfunction baseUpdates(row) {\n  const validateEmailPayload = {\n    leadMagic: row.leadMagicValidationRaw || {},\n    final: row.finalEmailValidationRaw || {},\n    finalStatus: row.finalEmailValidationStatus || '',\n    rejectedFinalProvider: row.rejectedFinalProvider || '',\n    rejectedFinalEmail: row.rejectedFinalEmail || '',\n  };\n  const common = {\n    'Find work email': stableStringify(row.leadMagicRaw),\n    'LeadMagic Email': row.leadMagicEmail,\n    'Is Domain Catch All': row.leadMagicCatchAll ? 'true' : 'false',\n    'Validate Email': stableStringify(validateEmailPayload),\n    'Find Work Email - Prospeo': stableStringify(row.prospeoRaw),\n    'Prospeo Email': row.prospeoEmail,\n    'Find Work Email - Findymail': stableStringify(row.findymailRaw),\n    'Findymail Email': row.findymailEmail,\n    'Final Work Email': row.finalWorkEmail,\n  };\n\n  if (row.persona === 'Sales') {\n    return {\n      ...common,\n      'Find work email (2)': stableStringify(row.icypeasReadRaw || row.icypeasStartRaw),\n      'Icypeas Email': row.icypeasEmail,\n      'Valid LeadMagic Email': row.validLeadMagicEmail,\n      'Find work email (3)': stableStringify(row.wizaRaw),\n      'Wiza Email': row.wizaEmail,\n      'Validate Email (2)': stableStringify(row.wizaValidationRaw),\n      'Valid Wiza Email': row.validWizaEmail,\n    };\n  }\n\n  if (row.persona === 'Ops') {\n    return {\n      ...common,\n      'Valid Email': row.validLeadMagicEmail ? 'true' : 'false',\n      'Valid Leadmagic Email': row.validLeadMagicEmail,\n      'Find work email (2)': stableStringify(row.wizaRaw),\n      'Wiza Email': row.wizaEmail,\n      'Validate Email (2)': stableStringify(row.wizaValidationRaw),\n      Valid: row.validWizaEmail ? 'true' : 'false',\n      'Valid Wiza Email': row.validWizaEmail,\n      'Find work email (3)': stableStringify(row.icypeasReadRaw || row.icypeasStartRaw),\n      'Icypeas Email': row.icypeasEmail,\n    };\n  }\n\n  return {\n    ...common,\n    'Valid LeadMagic Email': row.validLeadMagicEmail,\n    'Find work email (2)': stableStringify(row.icypeasReadRaw || row.icypeasStartRaw),\n    'Icypeas Email': row.icypeasEmail,\n    'Find work email (3)': stableStringify(row.wizaRaw),\n    'Wiza Email': row.wizaEmail,\n    'Validate Email (2)': stableStringify(row.wizaValidationRaw),\n    'Validate Wiza Email': row.validWizaEmail ? 'true' : 'false',\n    'Valid Wiza Email': row.validWizaEmail,\n  };\n}\n\nconst source = item.json;\nconst rejected = source.finalWorkEmail && source.finalEmailValidationStatus === 'invalid';\nconst row = rejected\n  ? {\n      ...source,\n      rejectedFinalProvider: source.finalProvider,\n      rejectedFinalEmail: source.finalWorkEmail,\n      finalProvider: 'None',\n      finalWorkEmail: '',\n    }\n  : source;\n\nreturn {\n  json: {\n    ...row,\n    shouldPushSmartlead: Boolean(\n      row.finalWorkEmail\n      && row.enableSmartlead === true\n      && row.finalEmailValidationStatus === 'valid'\n      && String(row.smartleadCampaignId || '').trim()\n    ),\n    smartleadSkippedReason: !row.finalWorkEmail\n      ? 'No validated final work email.'\n      : row.enableSmartlead !== true\n      ? 'Smartlead disabled for this run.'\n      : row.finalEmailValidationStatus !== 'valid'\n      ? 'Final work email is not validated.'\n      : !String(row.smartleadCampaignId || '').trim()\n      ? 'Missing required show-specific Smartlead campaign ID.'\n      : '',\n    shouldRunApify: Boolean(row.linkedinUrl),\n    airtableContactUpdateBody: {\n      fields: baseUpdates(row),\n      typecast: true,\n    }\n  }\n};"
       },
-      "id": "27a3f69b-2963-4a6c-be49-f298d9b138dc",
+      "id": "8c0eab9b-e591-4f6f-9a38-80cc8836e5d5",
       "name": "Apply Final Email Validation",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -979,7 +979,7 @@
         "specifyBody": "json",
         "jsonBody": "={{$json.airtableContactUpdateBody}}"
       },
-      "id": "1c38c8c4-340e-4ea3-96d3-ef6841694d5d",
+      "id": "83e8c7cb-75d8-4685-bf20-ef26335180d2",
       "name": "Update Contact Email Fields",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -1000,7 +1000,7 @@
         "mode": "runOnceForEachItem",
         "jsCode": "const source = $('Apply Final Email Validation').item.json;\nreturn {\n  json: {\n    ...source,\n    airtableEmailUpdateResponse: item.json || {},\n  }\n};"
       },
-      "id": "70a04d98-b6d9-43c6-a771-bd066a28566e",
+      "id": "c07ffd82-6d53-4770-a53f-5e83fd1d42d0",
       "name": "After Email Airtable Update",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -1014,7 +1014,7 @@
         "mode": "runOnceForAllItems",
         "jsCode": "function clean(value) {\n  return String(value || '').trim();\n}\n\nfunction cleanEmail(value) {\n  const email = clean(value).toLowerCase();\n  return /^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$/.test(email) ? email : '';\n}\n\nfunction cleanPhone(value) {\n  const digits = clean(value).replace(/\\D/g, '');\n  return digits.length >= 7 ? digits : '';\n}\n\nfunction cleanLinkedIn(value) {\n  const match = clean(value).match(/linkedin\\.com\\/in\\/([A-Za-z0-9_%.-]+)/i);\n  return match ? match[1].toLowerCase() : '';\n}\n\nfunction identityKey(row) {\n  const email = cleanEmail(row.finalWorkEmail || row.suppliedEmail);\n  if (email) return `email:${email}`;\n  const phone = cleanPhone(row.finalPhone || row.suppliedPhone || row.contactPhone || row.phone);\n  if (phone) return `phone:${phone}`;\n  const linkedin = cleanLinkedIn(row.linkedinUrl);\n  if (linkedin) return `linkedin:${linkedin}`;\n  const company = clean(row.domain || row.normalizedName || row.companyName).toLowerCase();\n  const name = clean(row.fullName).toLowerCase();\n  return company && name ? `name:${company}|${name}` : `row:${clean(row.airtableContactRecordId || row.contactDedupeKey || row.sourceRecordId)}`;\n}\n\nfunction qualityScore(row) {\n  let score = 0;\n  if (cleanEmail(row.finalWorkEmail || row.suppliedEmail)) score += 50;\n  if (clean(row.finalEmailValidationStatus).toLowerCase() === 'valid') score += 20;\n  if (clean(row.contactSourceType).includes('scraped_trade_show_contact')) score += 15;\n  if (clean(row.fullName).split(/\\s+/).filter(Boolean).length >= 2) score += 10;\n  if (clean(row.jobTitle)) score += 5;\n  if (cleanLinkedIn(row.linkedinUrl)) score += 5;\n  return score;\n}\n\nfunction mergeMissing(preferred, fallback) {\n  const merged = { ...preferred };\n  for (const [key, value] of Object.entries(fallback || {})) {\n    if ((merged[key] === undefined || merged[key] === null || merged[key] === '') && value !== undefined && value !== null && value !== '') {\n      merged[key] = value;\n    }\n  }\n  return merged;\n}\n\nconst deduped = new Map();\nfor (const entry of $input.all()) {\n  const row = entry.json || {};\n  const key = identityKey(row);\n  const existing = deduped.get(key);\n  if (!existing) {\n    deduped.set(key, { ...row, finalContactIdentity: key, duplicateSuppressedCount: 0 });\n    continue;\n  }\n  const preferred = qualityScore(row) > qualityScore(existing) ? row : existing;\n  const fallback = preferred === row ? existing : row;\n  const merged = mergeMissing(preferred, fallback);\n  merged.finalContactIdentity = key;\n  merged.duplicateSuppressedCount = Number(existing.duplicateSuppressedCount || 0) + 1;\n  merged.sourceContactMatched = Boolean(\n    clean(row.contactSourceType).includes('scraped_trade_show_contact')\n    || clean(existing.contactSourceType).includes('scraped_trade_show_contact')\n  );\n  deduped.set(key, merged);\n}\n\nreturn Array.from(deduped.values()).map((row) => ({ json: row }));"
       },
-      "id": "84c201a1-1850-440c-ad55-3ebfae795df8",
+      "id": "c644947c-d14f-4c06-b83c-a33dfed78cc4",
       "name": "Dedupe Final Contacts",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -1034,7 +1034,7 @@
           ]
         }
       },
-      "id": "f4b9bf74-c486-4833-834f-1baab4542e00",
+      "id": "cc18ca18-bc7d-4127-8d08-9d2e8ad1e225",
       "name": "Need Smartlead?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 1,
@@ -1056,7 +1056,7 @@
         "specifyBody": "json",
         "jsonBody": "={{ { \"lead_list\": [{ \"email\": $json.finalWorkEmail, \"first_name\": $json.firstName, \"company_name\": $json.normalizedName || $json.companyName, \"custom_fields\": { \"persona\": $json.persona, \"show_name\": $json.conference, \"source_lead_record_id\": $json.sourceLeadRecordId, \"airtable_contact_record_id\": $json.airtableContactRecordId } }], \"settings\": { \"ignore_duplicate_leads_in_other_campaign\": false, \"ignore_global_block_list\": false, \"ignore_unsubscribe_list\": false, \"ignore_community_bounce_list\": false, \"return_lead_ids\": true } } }}"
       },
-      "id": "4486ef2f-6510-4921-ab28-cfb679bd0426",
+      "id": "ee36f367-4392-4400-996d-9527a0d2ea74",
       "name": "Add Lead to Smartlead",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -1077,7 +1077,7 @@
         "mode": "runOnceForEachItem",
         "jsCode": "const source = $('Need Smartlead?').item.json;\nreturn {\n  json: {\n    ...source,\n    smartleadRaw: item.json || {},\n  }\n};"
       },
-      "id": "f8e4efd5-ba95-4ea6-9d3a-36fde863f1e4",
+      "id": "3f70e1d7-1151-4fa0-9dc4-a0790f47b250",
       "name": "Parse Smartlead",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -1090,7 +1090,7 @@
       "parameters": {
         "mode": "append"
       },
-      "id": "233f9bd4-4d21-4a83-b1a1-38d94814682b",
+      "id": "56b16e2c-4052-4bcc-9b39-8b64cd814850",
       "name": "Merge After Smartlead",
       "type": "n8n-nodes-base.merge",
       "typeVersion": 2,
@@ -1104,7 +1104,7 @@
         "mode": "runOnceForEachItem",
         "jsCode": "const row = item.json;\nlet smartleadField = '';\ntry {\n  smartleadField = JSON.stringify({\n    campaignId: row.smartleadCampaignId || '',\n    cadenceEnrollmentDate: row.cadenceEnrollmentDate || '',\n    attempted: Boolean(row.smartleadRaw),\n    response: row.smartleadRaw || { skipped: true, reason: row.smartleadSkippedReason || 'Smartlead skipped.' },\n  }, null, 2);\n} catch (error) {\n  smartleadField = String(row.smartleadRaw || row.smartleadSkippedReason || 'Smartlead skipped.');\n}\nconst fieldName = row.persona === 'Sales' ? 'Atlanta Market Campaign' : 'Add Lead to Campaign';\nreturn {\n  json: {\n    ...row,\n    airtableSmartleadUpdateBody: {\n      fields: {\n        [fieldName]: smartleadField,\n      },\n      typecast: true,\n    },\n  }\n};"
       },
-      "id": "2b7b7b1a-f910-48d2-9909-f058650323b0",
+      "id": "3317fec5-f8f7-4529-bd11-91410f108db4",
       "name": "After Smartlead",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -1126,7 +1126,7 @@
         "specifyBody": "json",
         "jsonBody": "={{$json.airtableSmartleadUpdateBody}}"
       },
-      "id": "b33fd666-b795-4fa1-8a7a-c410c5f8d9f4",
+      "id": "433dc668-937c-440c-91a1-e4211543018b",
       "name": "Update Contact Smartlead Fields",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -1147,7 +1147,7 @@
         "mode": "runOnceForEachItem",
         "jsCode": "const source = $('After Smartlead').item.json;\nreturn {\n  json: {\n    ...source,\n    airtableSmartleadUpdateResponse: item.json || {},\n  }\n};"
       },
-      "id": "6c33fd60-62ba-4a64-a681-b75eefb97784",
+      "id": "0b41e9eb-7c57-40a3-b71e-c3847967e6ca",
       "name": "After Smartlead Airtable Update",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -1167,7 +1167,7 @@
           ]
         }
       },
-      "id": "eded4db5-f5c6-483e-a1d1-89134800f1ff",
+      "id": "32d78483-bf71-4c3d-8ecc-3891b91331b6",
       "name": "Need Apify?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 1,
@@ -1195,7 +1195,7 @@
         "specifyBody": "json",
         "jsonBody": "={{ { \"maxItems\": 1, \"profiles\": [$json.linkedinUrl] } }}"
       },
-      "id": "fe058ae7-4d48-4c0e-9573-4db7687f9dfe",
+      "id": "3a48bb5d-a30f-45b4-83b1-43a3e5011e84",
       "name": "Run Apify LinkedIn Actor",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -1217,7 +1217,7 @@
         "mode": "runOnceForEachItem",
         "jsCode": "const sourceItems = $('Need Apify?').all();\nconst source = sourceItems[$itemIndex]?.json || {};\nconst raw = item.json || {};\nlet parsed = raw;\nif (typeof raw.apifyResponseText === 'string') {\n  try {\n    parsed = JSON.parse(raw.apifyResponseText || '[]');\n  } catch (error) {\n    parsed = { rawText: raw.apifyResponseText };\n  }\n}\nreturn {\n  json: {\n    ...source,\n    apifyRaw: parsed,\n  }\n};"
       },
-      "id": "8dc3dfe4-dfd3-421c-92dd-5358f7705938",
+      "id": "04acb44f-429e-4c59-b884-5207e75c57b8",
       "name": "Parse Apify",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -1230,7 +1230,7 @@
       "parameters": {
         "mode": "append"
       },
-      "id": "d4836f73-cb2e-4eae-b7e0-e8150d47c0b3",
+      "id": "96a6ef6e-fe35-4584-9e80-47887709453b",
       "name": "Merge After Apify",
       "type": "n8n-nodes-base.merge",
       "typeVersion": 2,
@@ -1244,7 +1244,7 @@
         "mode": "runOnceForEachItem",
         "jsCode": "const row = item.json;\nconst apifyWasRun = row.shouldRunApify === true && Object.prototype.hasOwnProperty.call(row, 'apifyRaw');\nconst apifyResult = apifyWasRun\n  ? (row.apifyRaw || {})\n  : { skipped: true, reason: 'No verified LinkedIn profile URL; Apify skipped.' };\nlet apifyField = '';\ntry {\n  apifyField = JSON.stringify(apifyResult, null, 2);\n} catch (error) {\n  apifyField = String(apifyResult || '');\n}\nconst apifyItems = Array.isArray(apifyResult) ? apifyResult : [];\nfunction itemTimestamp(value) {\n  if (!value || typeof value !== 'object') return 0;\n  if (Number.isFinite(Number(value.createdAtTimestamp))) return Number(value.createdAtTimestamp);\n  const parsed = Date.parse(value.createdAt || value.postedAt || '');\n  return Number.isFinite(parsed) ? parsed : 0;\n}\nconst latestActivityTs = apifyItems.reduce((latest, entry) => Math.max(latest, itemTimestamp(entry)), 0);\nconst activeWindowMs = 365 * 24 * 60 * 60 * 1000;\nconst apifyVerifiedActivity = Boolean(latestActivityTs && (Date.now() - latestActivityTs) <= activeWindowMs);\nconst latestActivityAt = latestActivityTs ? new Date(latestActivityTs).toISOString() : '';\nconst activitySummary = !apifyWasRun\n  ? 'No verified LinkedIn profile URL; Apify skipped.'\n  : apifyItems.length === 0\n  ? 'Apify returned no LinkedIn reaction/activity items for the supplied profile.'\n  : apifyVerifiedActivity\n  ? `Apify returned ${apifyItems.length} LinkedIn reaction/activity item(s); latest visible activity was ${latestActivityAt}.`\n  : `Apify returned ${apifyItems.length} LinkedIn reaction/activity item(s), but latest visible activity was stale (${latestActivityAt}).`;\nconst apifyVerificationStatus = !row.linkedinUrl\n  ? 'missing_exact_profile'\n  : apifyVerifiedActivity\n  ? 'verified_active'\n  : 'verified_no_recent_activity';\nconst finalQualityScore = Math.min(100, Number(row.qualityScore || 0) + (apifyVerifiedActivity ? 20 : 0));\nconst finalQualityNotes = [\n  row.qualityNotes || '',\n  `Apify verification: ${apifyVerificationStatus}`,\n  activitySummary,\n].filter(Boolean).join('\\n');\nconst fields = {\n  'Run Apify Actor': apifyField,\n  'LinkedIn Verification Status': apifyVerificationStatus,\n  'Quality Score': finalQualityScore,\n  'Quality Notes': finalQualityNotes,\n};\nif (row.persona === 'Sales') {\n  fields['LinkedIn Activity Status'] = JSON.stringify({\n    personLinkedin: row.linkedinUrl || '',\n    isActive: apifyVerifiedActivity ? 'YES' : 'NO',\n    source: 'Apify',\n    latestActivityAt,\n    summary: activitySummary,\n  }, null, 2);\n}\nreturn {\n  json: {\n    ...row,\n    linkedinActive: apifyVerifiedActivity ? 'YES' : 'NO',\n    linkedinVerificationStatus: apifyVerificationStatus,\n    linkedinActivitySummary: activitySummary,\n    latestLinkedInActivityAt: latestActivityAt,\n    qualityScore: finalQualityScore,\n    qualityNotes: finalQualityNotes,\n    airtableApifyUpdateBody: {\n      fields,\n      typecast: true,\n    },\n  }\n};"
       },
-      "id": "f3c1d889-f720-4765-bc09-9d6e68122635",
+      "id": "57f57702-25e8-417d-b469-4327fe26c84e",
       "name": "After Apify",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -1266,7 +1266,7 @@
         "specifyBody": "json",
         "jsonBody": "={{$json.airtableApifyUpdateBody}}"
       },
-      "id": "3bcf26c2-3334-442c-b3e8-63e1cc2e329b",
+      "id": "e54b96b4-2b4a-4e26-a6a4-d44f52b8f9a6",
       "name": "Update Contact Apify Fields",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -1287,7 +1287,7 @@
         "mode": "runOnceForEachItem",
         "jsCode": "const source = $('After Apify').item.json;\nreturn {\n  json: {\n    ...source,\n    airtableApifyUpdateResponse: item.json || {},\n  }\n};"
       },
-      "id": "01d266ce-1094-4b24-9d43-1effc2b2c347",
+      "id": "4d850674-a835-40bf-98e0-b04172fc6023",
       "name": "After Apify Airtable Update",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -1301,7 +1301,7 @@
         "mode": "runOnceForEachItem",
         "jsCode": "function clean(value) {\n  return String(value || '').trim();\n}\n\nfunction cleanEmail(value) {\n  const email = clean(value).toLowerCase();\n  return /^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$/.test(email) ? email : '';\n}\n\nfunction cleanPhone(value) {\n  const phone = clean(value);\n  if (!phone || isBadPlaceholder(phone)) return '';\n  const digits = phone.replace(/\\D/g, '');\n  return digits.length >= 7 && digits.length <= 15 ? phone : '';\n}\n\nfunction slug(value) {\n  return clean(value)\n    .toLowerCase()\n    .replace(/[^a-z0-9]+/g, '_')\n    .replace(/^_+|_+$/g, '') || 'trade_show';\n}\n\nfunction identityPart(value) {\n  return clean(value)\n    .toLowerCase()\n    .replace(/https?:\\/\\//g, '')\n    .replace(/^www\\./g, '')\n    .replace(/[^a-z0-9]+/g, '-')\n    .replace(/^-+|-+$/g, '');\n}\n\nfunction keyFor(row) {\n  return clean(row.airtableContactRecordId)\n    || [row.persona, row.companyName, row.fullName, row.sourceLeadRecordId].map(clean).join('|');\n}\n\nfunction finiteIndex(value) {\n  const number = Number(value);\n  return Number.isFinite(number) && number >= 0 ? Math.floor(number) : null;\n}\n\nfunction escapeHtml(value) {\n  return clean(value)\n    .replace(/&/g, '&amp;')\n    .replace(/</g, '&lt;')\n    .replace(/>/g, '&gt;')\n    .replace(/\"/g, '&quot;');\n}\n\nfunction noteLine(label, value) {\n  const text = clean(value);\n  return text ? `<strong>${escapeHtml(label)}:</strong> ${escapeHtml(text)}` : '';\n}\n\nfunction isBadPlaceholder(value) {\n  const text = clean(value).toLowerCase();\n  if (!text) return false;\n  return [\n    'not found',\n    'missing input',\n    'no qualifying',\n    'no phone found',\n    'none',\n    'n/a',\n    'unknown',\n    'placeholder',\n    'example',\n    'the provided',\n    'identified top',\n    'per instructions',\n  ].some((needle) => text.includes(needle)) || /\\{\\{.+\\}\\}|\\$json|^\\[[^\\]]+\\]$/.test(text);\n}\n\nfunction validLinkedInProfile(value) {\n  let raw = clean(value);\n  if (!raw) return '';\n  if (raw.startsWith('{')) {\n    try {\n      const parsed = JSON.parse(raw);\n      raw = clean(parsed.linkedinUrl || parsed.personLinkedin || parsed.linkedin || parsed.raw?.linkedinUrl || raw);\n    } catch (error) {\n      // Fall through to regex extraction.\n    }\n  }\n  const match = raw.match(/(?:https?:\\/\\/)?(?:[\\w-]+\\.)?linkedin\\.com\\/in\\/([A-Za-z0-9_%.-]+)/i);\n  if (!match) return '';\n  const slugPart = clean(match[1]).replace(/\\/+$/, '');\n  if (!slugPart || /12345678|example|placeholder|your-name|first-last/i.test(slugPart)) return '';\n  const normalized = `https://www.linkedin.com/in/${slugPart}`;\n  return isBadPlaceholder(normalized) ? '' : normalized;\n}\n\nlet completedRows = [];\ntry {\n  completedRows = $('After Apify Airtable Update').all()\n    .map((entry) => entry.json)\n    .filter((row) => Boolean(\n      !row.noQualifiedContacts\n      && clean(row.fullName)\n      && clean(row.companyName)\n      && (\n        (clean(row.finalEmailValidationStatus).toLowerCase() === 'valid' && cleanEmail(row.finalWorkEmail))\n        || cleanPhone(row.suppliedPhone || row.contactPhone || row.phone)\n        || validLinkedInProfile(row.linkedinUrl)\n      )\n    ));\n} catch (error) {\n  completedRows = [];\n}\n\nconst row = item.json || {};\nconst fullName = clean(row.fullName);\nconst companyName = clean(row.normalizedName || row.companyName);\nconst finalWorkEmail = clean(row.finalEmailValidationStatus).toLowerCase() === 'valid'\n  ? cleanEmail(row.finalWorkEmail)\n  : '';\nconst finalPhone = cleanPhone(row.suppliedPhone || row.contactPhone || row.phone);\nconst linkedinUrl = validLinkedInProfile(row.linkedinUrl);\nconst showName = clean(row.conference || row.showName || row.rawLead?.Conference || row.rawLead?.conference || 'trade_show');\nconst showContext = showName === 'trade_show' ? 'Trade Show' : showName;\nconst sourceChannelId = `preshow_${slug(showName)}`;\nconst pipedriveRowIdentity = [\n  'preshow',\n  identityPart(showContext),\n  identityPart(row.persona),\n  identityPart(companyName),\n  identityPart(fullName),\n  identityPart(linkedinUrl || finalWorkEmail || finalPhone),\n].filter(Boolean).join(':');\nconst currentKey = keyFor(row);\nconst completedIndex = completedRows.findIndex((candidate) => keyFor(candidate) === currentKey);\nconst n8nItemIndex = typeof $itemIndex === 'undefined' ? null : finiteIndex($itemIndex);\nconst sourceRowIndex = finiteIndex(row.sourceRowIndex);\nconst assignmentIndex = completedIndex >= 0 ? completedIndex : (n8nItemIndex ?? sourceRowIndex ?? 0);\nconst reps = [\n  { name: 'Lea Skoumbakis', id: 25200571 },\n  { name: 'Austin Weitman', id: 25188570 },\n];\nconst rep = reps[assignmentIndex % reps.length];\nconst invalidPerson = isBadPlaceholder(fullName) || isBadPlaceholder(row.jobTitle);\nconst hasReachableChannel = Boolean(finalWorkEmail || finalPhone || linkedinUrl);\nconst shouldSyncPipedrive = Boolean(\n  fullName\n  && companyName\n  && hasReachableChannel\n  && !invalidPerson\n  && row.icpQualified === true\n);\n\nlet skipReason = '';\nif (!shouldSyncPipedrive) {\n  if (!fullName) skipReason = 'Missing completed contact name.';\n  else if (!companyName) skipReason = 'Missing completed company name.';\n  else if (row.icpQualified !== true) skipReason = `ICP gate excluded ${row.icpFitScore || 'unscored'} company.`;\n  else if (isBadPlaceholder(fullName) || isBadPlaceholder(row.jobTitle)) skipReason = 'Contact contains unresolved placeholder text.';\n  else if (!hasReachableChannel) skipReason = 'Missing a valid final email, phone, or LinkedIn profile.';\n  else skipReason = 'Contact is not complete enough for Pipedrive.';\n}\n\nconst leadTitle = `${companyName} - ${fullName} - ${showContext}`;\nconst legacyLeadTitle = `${companyName} - ${fullName}`;\nconst activityBaseNote = [\n  noteLine('Show', showContext),\n  noteLine('Cadence enrollment date', row.cadenceEnrollmentDate),\n  noteLine('Source channel id', sourceChannelId),\n  noteLine('Assigned owner', `${rep.name} (${rep.id})`),\n  noteLine('Persona', row.persona),\n  noteLine('Company', companyName),\n  noteLine('Domain', row.domain),\n  noteLine('Website', row.website || (row.domain ? `https://${row.domain}` : '')),\n  noteLine('Person', fullName),\n  noteLine('Title', row.jobTitle),\n  noteLine('Email', finalWorkEmail),\n  noteLine('Phone', finalPhone),\n  noteLine('Email provider', row.finalProvider),\n  noteLine('Email validation', row.finalEmailValidationStatus),\n  noteLine('LinkedIn', linkedinUrl),\n  noteLine('LinkedIn active', row.linkedinActive),\n  noteLine('Latest LinkedIn activity', row.latestLinkedInActivityAt),\n  noteLine('LinkedIn activity summary', row.linkedinActivitySummary),\n  noteLine('Company source URL', row.sourceUrl),\n  noteLine('Booth', row.booth_number),\n  noteLine('Airtable lead record', row.leadAirtableRecordId || row.sourceLeadRecordId),\n  noteLine('Airtable contact record', row.airtableContactRecordId),\n].filter(Boolean).join('<br>');\n\nreturn {\n  json: {\n    ...row,\n    linkedinUrl,\n    finalWorkEmail,\n    finalPhone,\n    shouldSyncPipedrive,\n    pipedriveSyncStatus: shouldSyncPipedrive ? 'pending' : 'skipped',\n    pipedriveSkipReason: skipReason,\n    pipedriveOwnerName: rep.name,\n    pipedriveOwnerId: rep.id,\n    pipedriveAssignmentIndex: assignmentIndex,\n    pipedriveRowIdentity,\n    pipedriveSourceChannelId: sourceChannelId,\n    pipedriveShowContext: showContext,\n    pipedriveLeadTitle: leadTitle,\n    pipedriveLegacyLeadTitle: legacyLeadTitle,\n    pipedriveActivityBaseNote: activityBaseNote,\n    pipedriveOrgSearchTerm: companyName,\n    pipedrivePersonSearchTerm: finalWorkEmail || finalPhone || fullName,\n    pipedrivePersonSearchFields: finalWorkEmail ? 'email' : finalPhone ? 'phone' : 'name',\n    pipedriveOriginId: pipedriveRowIdentity || clean(row.airtableContactRecordId || row.waterfallKey || row.sourceRecordId),\n  }\n};"
       },
-      "id": "c5b6da82-3373-4697-868b-9bc2155c56c6",
+      "id": "09f25641-464b-4b52-8e7b-255d47ec9b7d",
       "name": "Build Pipedrive Sync",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -1321,7 +1321,7 @@
           ]
         }
       },
-      "id": "5cca20c5-2979-4a8c-9737-dfe87dff2bab",
+      "id": "decc98fd-156f-4e05-a419-5899b2e13d0e",
       "name": "Need Pipedrive Sync?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 1,
@@ -1343,7 +1343,7 @@
         "specifyQuery": "json",
         "jsonQuery": "={{ JSON.stringify({ \"term\": $json.pipedriveOrgSearchTerm, \"fields\": \"name\", \"limit\": \"10\" }) }}"
       },
-      "id": "07c20965-868c-4ab7-baac-406b38d5493f",
+      "id": "d8936320-21f3-44c2-99d2-7aff9c4ed423",
       "name": "Pipedrive Search Organization",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -1364,7 +1364,7 @@
         "mode": "runOnceForEachItem",
         "jsCode": "function clean(value) {\n  return String(value || '').trim();\n}\n\nfunction normalizeName(value) {\n  return clean(value)\n    .toLowerCase()\n    .replace(/\\b(incorporated|inc\\.?|llc|l\\.l\\.c\\.|ltd\\.?|co\\.?|corp\\.?|corporation|company)\\b/g, '')\n    .replace(/[^a-z0-9]+/g, ' ')\n    .replace(/\\s+/g, ' ')\n    .trim();\n}\n\nconst source = $('Build Pipedrive Sync').item.json;\nconst raw = item.json || {};\nconst items = Array.isArray(raw.data?.items)\n  ? raw.data.items\n  : Array.isArray(raw.data)\n  ? raw.data\n  : [];\nconst target = normalizeName(source.pipedriveOrgSearchTerm || source.companyName);\nconst candidates = items.map((entry) => entry.item || entry).filter(Boolean);\nconst match = candidates.find((candidate) => normalizeName(candidate.name) === target) || candidates[0] || null;\nconst id = match?.id || '';\nreturn {\n  json: {\n    ...source,\n    pipedriveOrgId: id ? Number(id) : '',\n    pipedriveOrgStatus: id ? 'reused' : 'not_found',\n    pipedriveOrgSearchError: raw.error?.message || raw.message || '',\n  }\n};"
       },
-      "id": "815f2ed8-fa43-4a5e-b90c-ed2c7c287a1b",
+      "id": "08686281-1688-49d2-a718-e8a871f4ef7d",
       "name": "Parse Pipedrive Org Search",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -1384,7 +1384,7 @@
           ]
         }
       },
-      "id": "e493c3a3-a622-4d96-a991-60ae9562ee3a",
+      "id": "22163b09-8f76-4bab-a977-235998447871",
       "name": "Need Create Pipedrive Org?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 1,
@@ -1406,7 +1406,7 @@
         "specifyBody": "json",
         "jsonBody": "={{ { \"name\": $json.companyName, \"owner_id\": $json.pipedriveOwnerId, \"visible_to\": \"3\" } }}"
       },
-      "id": "c798d051-57e9-4422-9344-d0966d8990f4",
+      "id": "39f8b390-51f3-49b2-8898-37083ed74afe",
       "name": "Pipedrive Create Organization",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -1435,7 +1435,7 @@
         "specifyBody": "json",
         "jsonBody": "={{ { \"name\": $json.companyName, \"owner_id\": $json.pipedriveOwnerId, \"visible_to\": \"3\" } }}"
       },
-      "id": "ddf320f0-de72-4435-9c07-5e5db071ba48",
+      "id": "69420682-d03a-4732-be5d-1a3d777a1818",
       "name": "Pipedrive Update Organization",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -1456,7 +1456,7 @@
         "mode": "runOnceForEachItem",
         "jsCode": "const source = $('Need Create Pipedrive Org?').item.json;\nconst raw = item.json || {};\nconst id = raw.data?.id || raw.id || source.pipedriveOrgId || '';\nconst status = source.pipedriveOrgId ? 'updated' : 'created';\nreturn {\n  json: {\n    ...source,\n    pipedriveOrgId: id ? Number(id) : '',\n    pipedriveOrgStatus: id ? status : 'error',\n    pipedriveOrgError: id ? '' : (raw.error?.message || raw.message || 'Pipedrive organization upsert did not return an id.'),\n  }\n};"
       },
-      "id": "fb5909d7-78fd-4e4e-b14b-59750fb26c3b",
+      "id": "461ecc6e-f88c-4745-9657-4a6dcc284a10",
       "name": "Parse Pipedrive Org Create",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -1469,7 +1469,7 @@
       "parameters": {
         "mode": "append"
       },
-      "id": "dea70576-92ae-4c00-8860-88e93422307d",
+      "id": "1bdd10b0-b1c0-470a-9e6f-94c1c623e536",
       "name": "Merge Pipedrive Org",
       "type": "n8n-nodes-base.merge",
       "typeVersion": 2,
@@ -1491,7 +1491,7 @@
         "specifyQuery": "json",
         "jsonQuery": "={{ JSON.stringify({ \"term\": $json.pipedrivePersonSearchTerm, \"fields\": $json.pipedrivePersonSearchFields, \"exact_match\": true, \"limit\": \"10\" }) }}"
       },
-      "id": "57d067a8-9d8d-4d96-b216-a118b820033f",
+      "id": "0253562f-68b5-4437-b458-3ead3ce5a3d8",
       "name": "Pipedrive Search Person",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -1512,7 +1512,7 @@
         "mode": "runOnceForEachItem",
         "jsCode": "function clean(value) {\n  return String(value || '').trim();\n}\n\nfunction cleanEmail(value) {\n  const email = clean(value).toLowerCase();\n  return /^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$/.test(email) ? email : '';\n}\n\nfunction normalizeName(value) {\n  return clean(value).toLowerCase().replace(/[^a-z0-9]+/g, ' ').replace(/\\s+/g, ' ').trim();\n}\n\nfunction candidateEmails(candidate) {\n  const values = [];\n  if (candidate.email) values.push(candidate.email);\n  if (candidate.primary_email) values.push(candidate.primary_email);\n  for (const entry of candidate.emails || []) {\n    if (typeof entry === 'string') values.push(entry);\n    else if (entry?.value) values.push(entry.value);\n  }\n  return values.map(cleanEmail).filter(Boolean);\n}\n\nconst source = $('Merge Pipedrive Org').item.json;\nconst raw = item.json || {};\nconst items = Array.isArray(raw.data?.items)\n  ? raw.data.items\n  : Array.isArray(raw.data)\n  ? raw.data\n  : [];\nconst candidates = items.map((entry) => entry.item || entry).filter(Boolean);\nconst email = cleanEmail(source.finalWorkEmail);\nconst targetName = normalizeName(source.fullName);\nlet match = null;\nif (email) {\n  match = candidates.find((candidate) => candidateEmails(candidate).includes(email)) || null;\n}\nif (!match) {\n  match = candidates.find((candidate) => normalizeName(candidate.name) === targetName) || null;\n}\nconst id = match?.id || '';\nreturn {\n  json: {\n    ...source,\n    pipedrivePersonId: id ? Number(id) : '',\n    pipedrivePersonStatus: id ? 'reused' : 'not_found',\n    pipedrivePersonSearchError: raw.error?.message || raw.message || '',\n  }\n};"
       },
-      "id": "e69276fb-b88c-4e4b-b979-4a967d45eee4",
+      "id": "65c19aa6-3bdc-41f9-9fdf-d019246ecd4e",
       "name": "Parse Pipedrive Person Search",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -1532,7 +1532,7 @@
           ]
         }
       },
-      "id": "87437b51-4fef-4295-8818-31b9a10ab885",
+      "id": "60037328-2f45-4e8b-95c9-e7dbfdd58d16",
       "name": "Need Create Pipedrive Person?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 1,
@@ -1554,7 +1554,7 @@
         "specifyBody": "json",
         "jsonBody": "={{ (() => { const body = { \"name\": $json.fullName, \"owner_id\": $json.pipedriveOwnerId, \"visible_to\": \"3\" }; if ($json.pipedriveOrgId) body.org_id = Number($json.pipedriveOrgId); if ($json.finalWorkEmail) body.email = [{ \"value\": $json.finalWorkEmail, \"primary\": true, \"label\": \"work\" }]; if ($json.finalPhone) body.phone = [{ \"value\": $json.finalPhone, \"primary\": true, \"label\": \"work\" }]; if ($json.jobTitle) body.job_title = $json.jobTitle; if ($json.linkedinUrl) body[\"57139293fba428fc3ffebc689b0fecc628569aa0\"] = $json.linkedinUrl; if ($json.linkedinUrl) body[\"2e0318b3854d2c3996417e4b74e8ba0ea1f80813\"] = $json.linkedinUrl; return body; })() }}"
       },
-      "id": "0bb35856-9201-4a4a-9521-b473890d1af4",
+      "id": "baccbc12-ba26-4cd7-94f8-696ba740845c",
       "name": "Pipedrive Create Person",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -1583,7 +1583,7 @@
         "specifyBody": "json",
         "jsonBody": "={{ (() => { const body = { \"name\": $json.fullName, \"owner_id\": $json.pipedriveOwnerId, \"visible_to\": \"3\" }; if ($json.pipedriveOrgId) body.org_id = Number($json.pipedriveOrgId); if ($json.finalWorkEmail) body.email = [{ \"value\": $json.finalWorkEmail, \"primary\": true, \"label\": \"work\" }]; if ($json.finalPhone) body.phone = [{ \"value\": $json.finalPhone, \"primary\": true, \"label\": \"work\" }]; if ($json.jobTitle) body.job_title = $json.jobTitle; if ($json.linkedinUrl) body[\"57139293fba428fc3ffebc689b0fecc628569aa0\"] = $json.linkedinUrl; if ($json.linkedinUrl) body[\"2e0318b3854d2c3996417e4b74e8ba0ea1f80813\"] = $json.linkedinUrl; return body; })() }}"
       },
-      "id": "f602a47a-6c65-4194-b4cb-b125865c567d",
+      "id": "bcdc134a-b160-42d0-a814-15cdf623908b",
       "name": "Pipedrive Update Person",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -1604,7 +1604,7 @@
         "mode": "runOnceForEachItem",
         "jsCode": "const source = $('Need Create Pipedrive Person?').item.json;\nconst raw = item.json || {};\nconst id = raw.data?.id || raw.id || source.pipedrivePersonId || '';\nconst status = source.pipedrivePersonId ? 'updated' : 'created';\nreturn {\n  json: {\n    ...source,\n    pipedrivePersonId: id ? Number(id) : '',\n    pipedrivePersonStatus: id ? status : 'error',\n    pipedrivePersonError: id ? '' : (raw.error?.message || raw.message || 'Pipedrive person upsert did not return an id.'),\n  }\n};"
       },
-      "id": "13ecba45-e23c-4136-ba7c-9b7ff2104f27",
+      "id": "4100a422-10c5-4036-a7d0-486f98c22aed",
       "name": "Parse Pipedrive Person Create",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -1617,7 +1617,7 @@
       "parameters": {
         "mode": "append"
       },
-      "id": "37b7cf37-37f8-45c3-aeaa-b36b0af3ff4f",
+      "id": "14636234-19f1-450f-8cfd-738cf8e90da2",
       "name": "Merge Pipedrive Person",
       "type": "n8n-nodes-base.merge",
       "typeVersion": 2,
@@ -1636,7 +1636,7 @@
           "timeout": 120000
         }
       },
-      "id": "ae18d9f5-0bd2-4e59-aa39-c09436b611a3",
+      "id": "b0892104-4103-4b3a-bfa4-044824a31372",
       "name": "Pipedrive Get Tradeshow Field",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -1657,7 +1657,7 @@
         "mode": "runOnceForEachItem",
         "jsCode": "function clean(value) {\n  return String(value || '').trim();\n}\n\nfunction optionKey(value) {\n  return clean(value)\n    .toLowerCase()\n    .replace(/\\b20\\d{2}\\b/g, '')\n    .replace(/[^a-z0-9]+/g, ' ')\n    .replace(/\\s+/g, ' ')\n    .trim();\n}\n\nconst source = $('Merge Pipedrive Person').item.json;\nconst raw = item.json || {};\nconst options = Array.isArray(raw.data?.options) ? raw.data.options : [];\nconst target = optionKey(source.pipedriveShowContext);\nconst match = options.find((option) => optionKey(option.label || option.name) === target) || null;\nconst id = match?.id || '';\nreturn {\n  json: {\n    ...source,\n    pipedriveTradeshowOptionId: id ? Number(id) : '',\n    shouldCreatePipedriveTradeshowOption: Boolean(source.shouldSyncPipedrive && !id && target),\n    pipedriveTradeshowOptionStatus: id ? 'reused' : 'not_found',\n    pipedriveTradeshowOptionError: raw.error?.message || raw.message || '',\n  }\n};"
       },
-      "id": "d0f53892-8c11-471c-b25a-738a14d91109",
+      "id": "25b8eec9-f66b-46d7-80d6-6372dbcac85e",
       "name": "Parse Pipedrive Tradeshow Field",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -1677,7 +1677,7 @@
           ]
         }
       },
-      "id": "deced4f9-f6f8-4d8d-8b0d-7a0c8defa5b4",
+      "id": "2a42a5d8-8757-4b04-82eb-d993cd2c4eab",
       "name": "Need Create Pipedrive Tradeshow Option?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 1,
@@ -1699,7 +1699,7 @@
         "specifyBody": "json",
         "jsonBody": "={{ [{ \"label\": $json.pipedriveShowContext }] }}"
       },
-      "id": "8b419a61-900b-407e-ac65-7f4cdd08d773",
+      "id": "badda8ed-7f6b-46c6-ae9a-7cb5a3d1183e",
       "name": "Pipedrive Create Tradeshow Option",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -1720,7 +1720,7 @@
         "mode": "runOnceForEachItem",
         "jsCode": "const source = $('Need Create Pipedrive Tradeshow Option?').item.json;\nconst raw = item.json || {};\nconst rows = Array.isArray(raw.data) ? raw.data : [];\nconst first = rows[0] || raw.data || {};\nconst id = first?.id || raw.id || source.pipedriveTradeshowOptionId || '';\nreturn {\n  json: {\n    ...source,\n    pipedriveTradeshowOptionId: id ? Number(id) : '',\n    pipedriveTradeshowOptionStatus: id ? 'created' : 'error',\n    pipedriveTradeshowOptionError: id ? '' : (raw.error?.message || raw.message || 'Pipedrive trade-show option create did not return an id.'),\n  }\n};"
       },
-      "id": "52a9559d-fa2f-4e7f-b6fc-662bef76698f",
+      "id": "0c392158-3da7-43cc-ade8-8b08633ba464",
       "name": "Parse Pipedrive Tradeshow Option Create",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -1733,7 +1733,7 @@
       "parameters": {
         "mode": "append"
       },
-      "id": "ab2bb457-c688-4c46-9dce-1f5eb6ba824a",
+      "id": "57456ed1-da24-479d-b7ba-d8bfeef3a1f3",
       "name": "Merge Pipedrive Tradeshow Option",
       "type": "n8n-nodes-base.merge",
       "typeVersion": 2,
@@ -1755,7 +1755,7 @@
         "specifyQuery": "json",
         "jsonQuery": "={{ (() => { const q = { \"limit\": \"100\", \"owner_id\": String($json.pipedriveOwnerId) }; if ($json.pipedrivePersonId) q.person_id = String($json.pipedrivePersonId); if ($json.pipedriveOrgId) q.organization_id = String($json.pipedriveOrgId); return JSON.stringify(q); })() }}"
       },
-      "id": "1612c8d3-74bb-49dc-bced-82c006bdf34c",
+      "id": "474fd411-6dbb-4784-9e9c-a2ec903d6224",
       "name": "Pipedrive Search Lead",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -1776,7 +1776,7 @@
         "mode": "runOnceForEachItem",
         "jsCode": "function clean(value) {\n  return String(value || '').trim();\n}\n\nconst source = $('Merge Pipedrive Tradeshow Option').item.json;\nconst raw = item.json || {};\nconst rows = Array.isArray(raw.data) ? raw.data : [];\nconst wanted = new Set([source.pipedriveLeadTitle, source.pipedriveLegacyLeadTitle].map((title) => clean(title).toLowerCase()).filter(Boolean));\nconst match = rows.find((lead) => {\n  const title = clean(lead.title).toLowerCase();\n  const status = clean(lead.status || 'open').toLowerCase();\n  return wanted.has(title) && status !== 'deleted';\n}) || null;\nconst id = match?.id || '';\nreturn {\n  json: {\n    ...source,\n    pipedriveLeadId: id || '',\n    pipedriveLeadStatus: id ? 'reused' : 'not_found',\n    pipedriveLeadSearchError: raw.error?.message || raw.message || '',\n  }\n};"
       },
-      "id": "57441f13-82d2-4ee8-856c-b2dc8cab1457",
+      "id": "c847bac1-c780-4524-9c82-791730d0551e",
       "name": "Parse Pipedrive Lead Search",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -1796,7 +1796,7 @@
           ]
         }
       },
-      "id": "8bf30aad-ab4b-4198-ad9a-e939d1ed6387",
+      "id": "1b830d26-cbb2-487b-ae93-6e414ad25501",
       "name": "Need Create Pipedrive Lead?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 1,
@@ -1818,7 +1818,7 @@
         "specifyBody": "json",
         "jsonBody": "={{ (() => { const body = { \"title\": $json.pipedriveLeadTitle, \"owner_id\": $json.pipedriveOwnerId, \"visible_to\": \"3\", \"channel_id\": $json.pipedriveSourceChannelId }; if ($json.pipedriveOriginId) body.origin_id = $json.pipedriveOriginId; if ($json.pipedrivePersonId) body.person_id = Number($json.pipedrivePersonId); if ($json.pipedriveOrgId) body.organization_id = Number($json.pipedriveOrgId); if ($json.pipedriveTradeshowOptionId) body[\"dfcc62a9104fce98ed1ea6566a9bd82d002a6986\"] = Number($json.pipedriveTradeshowOptionId); body[\"6d24142b70f5c8b1b140c9b278bb7c8141fcb8bc\"] = 277; return body; })() }}"
       },
-      "id": "6bfc2cc4-b6d4-49c7-a258-a8c69ac35835",
+      "id": "c4930245-81ce-4ab6-af6e-bd2f78296edf",
       "name": "Pipedrive Create Lead",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -1847,7 +1847,7 @@
         "specifyBody": "json",
         "jsonBody": "={{ (() => { const body = { \"title\": $json.pipedriveLeadTitle, \"owner_id\": $json.pipedriveOwnerId, \"visible_to\": \"3\", \"channel_id\": $json.pipedriveSourceChannelId }; if ($json.pipedriveOriginId) body.origin_id = $json.pipedriveOriginId; if ($json.pipedrivePersonId) body.person_id = Number($json.pipedrivePersonId); if ($json.pipedriveOrgId) body.organization_id = Number($json.pipedriveOrgId); if ($json.pipedriveTradeshowOptionId) body[\"dfcc62a9104fce98ed1ea6566a9bd82d002a6986\"] = Number($json.pipedriveTradeshowOptionId); body[\"6d24142b70f5c8b1b140c9b278bb7c8141fcb8bc\"] = 277; return body; })() }}"
       },
-      "id": "0c69cec2-64b0-4d65-89cc-e52518be9886",
+      "id": "5cb9c156-416b-4fc8-a14d-da73d1f49a09",
       "name": "Pipedrive Update Lead",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -1868,7 +1868,7 @@
         "mode": "runOnceForEachItem",
         "jsCode": "const source = $('Need Create Pipedrive Lead?').item.json;\nconst raw = item.json || {};\nconst id = raw.data?.id || raw.id || source.pipedriveLeadId || '';\nconst status = source.pipedriveLeadId ? 'updated' : 'created';\nreturn {\n  json: {\n    ...source,\n    pipedriveLeadId: id || '',\n    pipedriveLeadStatus: id ? status : 'error',\n    pipedriveLeadError: id ? '' : (raw.error?.message || raw.message || 'Pipedrive lead upsert did not return an id.'),\n  }\n};"
       },
-      "id": "fa86814e-2c6a-4f0c-bd54-f0687d8a74a2",
+      "id": "a4b59d5a-949e-4f44-b00a-32ef2609b562",
       "name": "Parse Pipedrive Lead Upsert",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -1888,7 +1888,7 @@
           ]
         }
       },
-      "id": "590ce464-1231-498c-81aa-94d109c6d7fe",
+      "id": "a93b193c-1279-4299-9175-8783799dab3a",
       "name": "Need Pipedrive Activities?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 1,
@@ -1902,7 +1902,7 @@
         "mode": "runOnceForAllItems",
         "jsCode": "function clean(value) {\n  return String(value || '').trim();\n}\n\nfunction enrollmentDate(value) {\n  const raw = clean(value);\n  if (/^\\d{4}-\\d{2}-\\d{2}$/.test(raw)) {\n    const parsed = new Date(`${raw}T00:00:00Z`);\n    if (!Number.isNaN(parsed.getTime())) return parsed;\n  }\n  const today = new Date();\n  return new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()));\n}\n\nfunction dueDate(start, offsetDays) {\n  const date = new Date(start.getTime());\n  date.setUTCDate(date.getUTCDate() + offsetDays);\n  return date.toISOString().slice(0, 10);\n}\n\nconst schedule = [\n  { key: 'linkedin_day_4', offsetDays: 4, type: 'task', action: 'Send LinkedIn message', label: 'LinkedIn message' },\n  { key: 'call_1_day_5', offsetDays: 5, type: 'call', action: 'Call lead (first call)', label: 'Call 1' },\n  { key: 'call_2_day_7', offsetDays: 7, type: 'call', action: 'Call lead (second call)', label: 'Call 2' },\n];\n\nconst out = [];\nfor (const [inputIndex, entry] of $input.all().entries()) {\n  const row = entry.json || {};\n  if (!row.shouldSyncPipedrive || !row.pipedriveLeadId) continue;\n  const start = enrollmentDate(row.cadenceEnrollmentDate);\n  const startIso = start.toISOString().slice(0, 10);\n  for (const activity of schedule) {\n    const subject = `${activity.label} - ${row.fullName || row.companyName} - ${row.pipedriveShowContext} [Pre-show D${activity.offsetDays}]`;\n    const note = [\n      `<strong>Action:</strong> ${activity.action}`,\n      `<strong>Cadence step:</strong> Day ${activity.offsetDays}`,\n      `<strong>Cadence enrollment date:</strong> ${startIso}`,\n      row.pipedriveActivityBaseNote || '',\n    ].filter(Boolean).join('<br>');\n    out.push({\n      json: {\n        ...row,\n        cadenceEnrollmentDate: startIso,\n        pipedriveActivityKey: activity.key,\n        pipedriveActivityOffsetDays: activity.offsetDays,\n        pipedriveActivityType: activity.type,\n        pipedriveActivitySubject: subject,\n        pipedriveActivityDueDate: dueDate(start, activity.offsetDays),\n        pipedriveActivityNote: note,\n      },\n      pairedItem: { item: inputIndex },\n    });\n  }\n}\nreturn out;"
       },
-      "id": "2a56e2a2-67c9-4c95-81e6-2ee8643bd2d0",
+      "id": "5ebc144d-32c6-452c-9d11-eb6c769cee10",
       "name": "Materialize Pipedrive Activities",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -1924,7 +1924,7 @@
         "specifyQuery": "json",
         "jsonQuery": "={{ JSON.stringify({ \"limit\": \"100\", \"owner_id\": $json.pipedriveOwnerId, \"lead_id\": $json.pipedriveLeadId }) }}"
       },
-      "id": "b6eb0504-b2cd-4cb6-bc1c-b67137ff661e",
+      "id": "2695291d-12ed-435e-b7fe-b50b99323f83",
       "name": "Pipedrive Search Activity",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -1945,7 +1945,7 @@
         "mode": "runOnceForEachItem",
         "jsCode": "function clean(value) {\n  return String(value || '').trim();\n}\n\nconst source = $('Materialize Pipedrive Activities').item.json;\nconst raw = item.json || {};\nconst rows = Array.isArray(raw.data?.items)\n  ? raw.data.items\n  : Array.isArray(raw.data)\n  ? raw.data\n  : [];\nconst target = clean(source.pipedriveActivitySubject).toLowerCase();\nconst legacy = source.pipedriveActivityKey === 'linkedin_day_4'\n  ? `dm ${clean(source.fullName || source.companyName).toLowerCase()} on linkedin`\n  : '';\nconst match = rows.find((activity) => {\n  const subject = clean(activity.subject).toLowerCase();\n  return subject === target || (legacy && (subject === legacy || subject.startsWith(`${legacy} -`)));\n}) || null;\nconst id = match?.id || '';\nreturn {\n  json: {\n    ...source,\n    pipedriveActivityId: id ? Number(id) : '',\n    pipedriveActivityStatus: id ? 'reused' : 'not_found',\n    pipedriveActivitySearchError: raw.error?.message || raw.message || '',\n  }\n};"
       },
-      "id": "e36e069e-4351-4fe6-a270-e6b5dd51565e",
+      "id": "034339fd-3a7f-424d-b5de-0f4fe8c0c208",
       "name": "Parse Pipedrive Activity Search",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -1965,7 +1965,7 @@
           ]
         }
       },
-      "id": "e3a17357-08c8-4569-98fa-4b41af45fb58",
+      "id": "d30d4439-c832-4c23-95ab-b71385e76fb9",
       "name": "Need Create Pipedrive Activity?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 1,
@@ -1987,7 +1987,7 @@
         "specifyBody": "json",
         "jsonBody": "={{ (() => { const body = { \"subject\": $json.pipedriveActivitySubject, \"type\": $json.pipedriveActivityType, \"owner_id\": $json.pipedriveOwnerId, \"due_date\": $json.pipedriveActivityDueDate, \"note\": $json.pipedriveActivityNote, \"done\": false }; if ($json.pipedriveLeadId) body.lead_id = $json.pipedriveLeadId; if ($json.pipedrivePersonId) body.participants = [{ \"person_id\": Number($json.pipedrivePersonId), \"primary\": true }]; if ($json.pipedriveOrgId) body.org_id = Number($json.pipedriveOrgId); return body; })() }}"
       },
-      "id": "dea26b92-e3e3-44d2-97e1-92770aacf0f7",
+      "id": "5f2b12be-5f84-4df5-aff2-36eedde7fef7",
       "name": "Pipedrive Create Activity",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -2016,7 +2016,7 @@
         "specifyBody": "json",
         "jsonBody": "={{ (() => { const body = { \"subject\": $json.pipedriveActivitySubject, \"type\": $json.pipedriveActivityType, \"owner_id\": $json.pipedriveOwnerId, \"due_date\": $json.pipedriveActivityDueDate, \"note\": $json.pipedriveActivityNote }; if ($json.pipedriveLeadId) body.lead_id = $json.pipedriveLeadId; if ($json.pipedrivePersonId) body.participants = [{ \"person_id\": Number($json.pipedrivePersonId), \"primary\": true }]; if ($json.pipedriveOrgId) body.org_id = Number($json.pipedriveOrgId); return body; })() }}"
       },
-      "id": "8e4dc484-ac1c-4b1c-baef-61333d473d91",
+      "id": "20141acb-d6fe-4054-83e7-df9b902d5466",
       "name": "Pipedrive Update Activity",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -2037,7 +2037,7 @@
         "mode": "runOnceForEachItem",
         "jsCode": "const source = $('Need Create Pipedrive Activity?').item.json;\nconst raw = item.json || {};\nconst id = raw.data?.id || raw.id || source.pipedriveActivityId || '';\nconst responseError = raw.error?.message || raw.message || '';\nconst status = responseError\n  ? 'error'\n  : source.pipedriveActivityId\n  ? 'updated'\n  : id\n  ? 'created'\n  : 'error';\nreturn {\n  json: {\n    ...source,\n    pipedriveActivityId: id ? Number(id) : '',\n    pipedriveActivityStatus: status,\n    pipedriveActivityError: status === 'error'\n      ? (responseError || 'Pipedrive activity upsert did not return an id.')\n      : '',\n  }\n};"
       },
-      "id": "800f13c5-4f87-4d1f-99b9-a566162d0afb",
+      "id": "07ed1e56-2a1a-4332-87bc-cee489b12542",
       "name": "Parse Pipedrive Activity Create",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -2051,7 +2051,7 @@
         "mode": "runOnceForEachItem",
         "jsCode": "const source = $('Need Create Pipedrive Activity?').item.json;\nconst raw = item.json || {};\nconst id = raw.data?.id || raw.id || source.pipedriveActivityId || '';\nconst responseError = raw.error?.message || raw.message || '';\nconst status = responseError\n  ? 'error'\n  : source.pipedriveActivityId\n  ? 'updated'\n  : id\n  ? 'created'\n  : 'error';\nreturn {\n  json: {\n    ...source,\n    pipedriveActivityId: id ? Number(id) : '',\n    pipedriveActivityStatus: status,\n    pipedriveActivityError: status === 'error'\n      ? (responseError || 'Pipedrive activity upsert did not return an id.')\n      : '',\n  }\n};"
       },
-      "id": "ed1db7ec-883f-4dba-82c5-20935146f582",
+      "id": "4f61c5d5-005f-4f50-837b-302b1752cf7c",
       "name": "Parse Pipedrive Activity Update",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -2064,7 +2064,7 @@
       "parameters": {
         "mode": "append"
       },
-      "id": "97db08c8-d5f8-4c2f-a657-8bd43ba336f6",
+      "id": "ae7bd604-dcf0-4415-bbc9-eb223283baef",
       "name": "Merge Pipedrive Activity Upserts",
       "type": "n8n-nodes-base.merge",
       "typeVersion": 2,
@@ -2078,7 +2078,7 @@
         "mode": "runOnceForAllItems",
         "jsCode": "const groups = new Map();\nfor (const entry of $input.all()) {\n  const row = entry.json || {};\n  const key = row.pipedriveRowIdentity || row.airtableContactRecordId || row.sourceRecordId;\n  if (!groups.has(key)) groups.set(key, []);\n  groups.get(key).push(row);\n}\n\nconst out = [];\nfor (const rows of groups.values()) {\n  const ordered = rows.slice().sort((a, b) => Number(a.pipedriveActivityOffsetDays || 0) - Number(b.pipedriveActivityOffsetDays || 0));\n  const base = ordered[0] || {};\n  const activities = ordered.map((row) => ({\n    key: row.pipedriveActivityKey || '',\n    offsetDays: Number(row.pipedriveActivityOffsetDays || 0),\n    type: row.pipedriveActivityType || '',\n    subject: row.pipedriveActivitySubject || '',\n    dueDate: row.pipedriveActivityDueDate || '',\n    id: row.pipedriveActivityId || '',\n    status: row.pipedriveActivityStatus || '',\n    error: row.pipedriveActivityError || row.pipedriveActivitySearchError || '',\n  }));\n  const ids = activities.map((activity) => activity.id).filter(Boolean);\n  const errors = activities.map((activity) => activity.error).filter(Boolean);\n  out.push({\n    json: {\n      ...base,\n      pipedriveActivities: activities,\n      pipedriveActivityIds: ids,\n      pipedriveActivityId: ids.join(','),\n      pipedriveActivityError: errors.join(' | '),\n    },\n  });\n}\nreturn out;"
       },
-      "id": "9e52cd22-3789-467d-8589-d08f8ef5d0b9",
+      "id": "6b3e8fe9-cf5a-47ec-b3a5-67f6922a6a54",
       "name": "Summarize Pipedrive Activities",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -2092,7 +2092,7 @@
         "mode": "runOnceForEachItem",
         "jsCode": "const row = item.json || {};\nlet status = row.pipedriveSyncStatus || 'skipped';\nif (row.shouldSyncPipedrive) {\n  const activities = Array.isArray(row.pipedriveActivities) ? row.pipedriveActivities : [];\n  const syncedActivities = activities.filter((activity) => activity.id);\n  if (row.pipedriveLeadId && activities.length === 3 && syncedActivities.length === 3) {\n    status = activities.some((activity) => activity.status === 'updated')\n      ? 'synced_cadence_existing_activities_updated'\n      : 'synced_cadence';\n  } else if (row.pipedriveLeadId) {\n    status = `lead_synced_${syncedActivities.length}_of_3_activities`;\n  } else {\n    status = 'error';\n  }\n}\nreturn {\n  json: {\n    ...row,\n    pipedriveSyncStatus: status,\n  }\n};"
       },
-      "id": "31a2ddc9-09f8-46f9-bcaa-2edbb886d6aa",
+      "id": "e4069e23-70de-4b98-a43a-ebf0e4305600",
       "name": "After Pipedrive Sync",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -2114,7 +2114,7 @@
         "specifyBody": "json",
         "jsonBody": "={{ { \"fields\": { \"Pipedrive Row Identity\": $json.pipedriveRowIdentity || \"\", \"Pipedrive Sync Status\": $json.pipedriveSyncStatus || \"\", \"Pipedrive Skip Reason\": $json.pipedriveSkipReason || \"\", \"Pipedrive Owner Name\": $json.pipedriveOwnerName || \"\", \"Pipedrive Owner ID\": String($json.pipedriveOwnerId || \"\"), \"Pipedrive Source Channel ID\": $json.pipedriveSourceChannelId || \"\", \"Pipedrive Tradeshow Option ID\": String($json.pipedriveTradeshowOptionId || \"\"), \"Pipedrive Org ID\": String($json.pipedriveOrgId || \"\"), \"Pipedrive Person ID\": String($json.pipedrivePersonId || \"\"), \"Pipedrive Lead ID\": String($json.pipedriveLeadId || \"\"), \"Pipedrive Activity ID\": String($json.pipedriveActivityId || \"\"), \"Pipedrive Activity Error\": $json.pipedriveActivityError || $json.pipedriveLeadError || $json.pipedrivePersonError || $json.pipedriveOrgError || \"\", \"Pipedrive Synced At\": new Date().toISOString() }, \"typecast\": true } }}"
       },
-      "id": "6ce4bb07-55ff-4a6a-9f86-a635e8154914",
+      "id": "6c76b349-3545-48cd-aedf-25e109b5f06c",
       "name": "Update Contact Pipedrive Fields",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -2135,7 +2135,7 @@
         "mode": "runOnceForEachItem",
         "jsCode": "const source = $('After Pipedrive Sync').item.json;\nreturn {\n  json: {\n    ...source,\n    airtablePipedriveUpdateResponse: item.json || {},\n  }\n};"
       },
-      "id": "9a4e884a-f9c1-43ef-bf71-daed3cdde828",
+      "id": "8cd11f14-dc6a-4500-988d-827d4815e0cd",
       "name": "After Pipedrive Airtable Update",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -2148,7 +2148,7 @@
       "parameters": {
         "mode": "append"
       },
-      "id": "a309f902-9ef6-4ac6-bf95-7e0edae46010",
+      "id": "5f8f2f5b-0be9-49e8-849b-766f619e5338",
       "name": "Merge Response Rows",
       "type": "n8n-nodes-base.merge",
       "typeVersion": 2,
@@ -2162,7 +2162,7 @@
         "mode": "runOnceForAllItems",
         "jsCode": "function allFrom(nodeName) {\n  try {\n    return $(nodeName).all().map((entry) => entry.json);\n  } catch (error) {\n    return [];\n  }\n}\n\nconst leadRows = allFrom('Parse Research Result');\nconst contactRows = allFrom('After Pipedrive Airtable Update').filter((row) => !row.noQualifiedContacts);\nconst skippedRows = allFrom('Materialize Contact Rows').filter((row) => row.noQualifiedContacts);\nconst leadIds = new Set(leadRows.map((row) => row.sourceRecordId || row.leadAirtableRecordId || row.brand_name).filter(Boolean));\nreturn [{\n  json: {\n    ok: true,\n    processedLeads: leadIds.size,\n    processedContacts: contactRows.length,\n    skippedLeads: skippedRows.map((row) => ({\n      company: row.companyName,\n      domain: row.domain,\n      reason: row.skippedReason,\n      sales: {\n        fullName: row.personaResults?.sales?.fullName || '',\n        jobTitle: row.personaResults?.sales?.jobTitle || '',\n        confidence: row.personaResults?.sales?.confidence || '',\n        sourceUrl: row.personaResults?.sales?.sourceUrl || '',\n      },\n      ops: {\n        fullName: row.personaResults?.ops?.fullName || '',\n        jobTitle: row.personaResults?.ops?.jobTitle || '',\n        confidence: row.personaResults?.ops?.confidence || '',\n        sourceUrl: row.personaResults?.ops?.sourceUrl || '',\n      },\n      cs: {\n        fullName: row.personaResults?.cs?.fullName || '',\n        jobTitle: row.personaResults?.cs?.jobTitle || '',\n        confidence: row.personaResults?.cs?.confidence || '',\n        sourceUrl: row.personaResults?.cs?.sourceUrl || '',\n      },\n    })),\n    contacts: contactRows.map((row) => ({\n      persona: row.persona,\n      company: row.companyName,\n      fullName: row.fullName,\n      finalProvider: row.finalProvider,\n      finalWorkEmail: row.finalWorkEmail,\n      finalEmailValidationStatus: row.finalEmailValidationStatus || '',\n      linkedinUrl: row.linkedinUrl || '',\n      cadenceEnrollmentDate: row.cadenceEnrollmentDate || '',\n      smartleadCampaignId: row.smartleadCampaignId || '',\n      smartleadAttempted: Boolean(row.smartleadRaw),\n      apifyAttempted: Boolean(row.apifyRaw),\n      linkedinActive: row.linkedinActive,\n      pipedriveSyncStatus: row.pipedriveSyncStatus,\n      pipedriveSkipReason: row.pipedriveSkipReason,\n      pipedriveRowIdentity: row.pipedriveRowIdentity,\n      pipedriveOwnerName: row.pipedriveOwnerName,\n      pipedriveOwnerId: row.pipedriveOwnerId,\n      pipedriveSourceChannelId: row.pipedriveSourceChannelId,\n      pipedriveTradeshowOptionId: row.pipedriveTradeshowOptionId,\n      pipedriveLeadId: row.pipedriveLeadId,\n      pipedriveActivityId: row.pipedriveActivityId,\n      pipedriveActivities: row.pipedriveActivities || [],\n      pipedriveActivityError: row.pipedriveActivityError,\n    })),\n  }\n}];"
       },
-      "id": "9f33ab7e-ce1c-4005-af8a-51bb9560effd",
+      "id": "a7c9d0f1-729d-4820-ac57-e5666a877d88",
       "name": "Build Webhook Response",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,

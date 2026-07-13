@@ -47,11 +47,12 @@ class CultivateWorkflowTests(unittest.TestCase):
         self.assertIn("Conduit Commerce's proven ICP", research_prompt)
         self.assertIn("STRONG FIT", research_prompt)
         self.assertIn("MODERATE FIT", research_prompt)
-        self.assertIn("Only when ICP fit", research_prompt)
+        self.assertIn("When ICP fit is STRONG FIT, MODERATE FIT, or WEAK FIT", research_prompt)
         parse_research = nodes["Parse Research Result"]["parameters"]["jsCode"]
         self.assertIn("'ICP SKU Estimate'", parse_research)
         self.assertIn("'ICP Fit Score'", parse_research)
         self.assertIn("icpQualified", parse_research)
+        self.assertIn("'WEAK FIT'", parse_research)
 
         final_dedupe = nodes["Dedupe Final Contacts"]
         self.assertEqual(final_dedupe["parameters"]["mode"], "runOnceForAllItems")

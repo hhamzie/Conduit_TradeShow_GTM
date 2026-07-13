@@ -237,7 +237,7 @@ Tasks:
    - Ordering pattern: repeat/high-frequency or one-time/seasonal, with reasoning.
    - Red flags: fewer than 5 sales reps; small single-location owner-operated business; low SKU count; infrequent ordering; or no overlap with Conduit's proven verticals of home goods, tableware/glassware, restaurant supply, cabinetry, carpets, and furniture.
    Score fit as exactly STRONG FIT, MODERATE FIT, WEAK FIT, or PASS. Return one-sentence pursue/deprioritize/pass recommendation and concise evidence URLs/reasoning. Do not turn a weak proxy into a fact; label estimates clearly.
-4. Only when ICP fit is STRONG FIT or MODERATE FIT, find current leaders for exactly these personas. For WEAK FIT or PASS, return Not Found persona objects without spending additional searches on contacts. For each qualified-company persona, search broadly enough to return up to three candidates before selecting the best one:
+4. When ICP fit is STRONG FIT, MODERATE FIT, or WEAK FIT, find current leaders for exactly these personas. For PASS, return Not Found persona objects without spending additional searches on contacts. For each FIT-company persona, search broadly enough to return up to three candidates before selecting the best one:
    - sales: current sales/revenue/commercial leader. Title must directly contain sales, revenue, commercial, growth, business development, partnerships, account executive, account management, CRO, or chief revenue. Do not use founder/CEO/president unless the title also clearly says sales/revenue/commercial.
    - cs: current customer support/customer success/customer service/client success/client services/customer advocacy leader. Title must directly contain customer support, customer service, customer success, client services, support, service, or customer care. Reject sales, operations, HR, founder, CEO, president, office/admin, generic contact, and directory-only matches unless the title clearly has one of those customer/support phrases.
    - ops: current operations/supply-chain/logistics/manufacturing/production leader. Prefer COO, operations VP/director/head/manager, supply chain, logistics, production, procurement, fulfillment, warehouse, or manufacturing. Do not use sales/support/CEO/president-only matches.
@@ -564,7 +564,8 @@ const normalizedName = String(parsed.normalizedCompanyName || original.normalize
 const rawIcp = parsed.icpQualification && typeof parsed.icpQualification === 'object' ? parsed.icpQualification : {};
 const fitText = String(rawIcp.fitScore || rawIcp.fit || '').trim().toUpperCase();
 const icpFitScore = ['STRONG FIT', 'MODERATE FIT', 'WEAK FIT', 'PASS'].includes(fitText) ? fitText : 'PASS';
-const icpQualified = icpFitScore === 'STRONG FIT' || icpFitScore === 'MODERATE FIT';
+// All graded FIT tiers belong in Pipedrive. PASS remains Smartlead-only.
+const icpQualified = ['STRONG FIT', 'MODERATE FIT', 'WEAK FIT'].includes(icpFitScore);
 const icpQualification = {
   skuEstimate: String(rawIcp.skuEstimate || '').trim(),
   salesRepEstimate: String(rawIcp.salesRepEstimate || '').trim(),
