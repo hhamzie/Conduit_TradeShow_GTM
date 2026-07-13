@@ -726,7 +726,10 @@ function contactItem(row, personaKey, clayPersona, tableId, person) {
     icpQualified: row.icpQualified === true,
     smartleadCampaignId: row.smartleadCampaignId || '',
     cadenceEnrollmentDate: row.cadenceEnrollmentDate || new Date().toISOString().slice(0, 10),
-    enableSmartlead: row.enableSmartlead === true && row.icpQualified === true,
+    // Smartlead may receive every scored, verified contact; Pipedrive remains
+    // restricted by icpQualified below. A usable first name is mandatory for
+    // email personalization.
+    enableSmartlead: row.enableSmartlead === true && Boolean(first) && /^[A-Za-z][A-Za-z'-]*$/.test(first),
   };
   base.contactDedupeKey = [
     identityPart(base.suppliedEmail || base.linkedinUrl || base.fullName),
@@ -978,7 +981,7 @@ return {
     icpFitScore: clean(fields['ICP Fit Score'] || materialized.icpFitScore || 'PASS'),
     icpRecommendation: clean(fields['ICP Recommendation'] || materialized.icpRecommendation),
     icpQualified: materialized.icpQualified === true,
-    enableSmartlead: materialized.enableSmartlead === true && materialized.icpQualified === true,
+    enableSmartlead: materialized.enableSmartlead === true,
     smartleadCampaignId: materialized.smartleadCampaignId || '',
     cadenceEnrollmentDate: materialized.cadenceEnrollmentDate || new Date().toISOString().slice(0, 10),
     airtableContactRecordId: response.id || response.recordId || '',

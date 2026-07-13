@@ -40,7 +40,8 @@ class CultivateWorkflowTests(unittest.TestCase):
         self.assertIn("performUpsert", contact_code)
         self.assertIn("scraped_trade_show_contact", contact_code)
         self.assertIn("row.scrapedContacts", contact_code)
-        self.assertIn("row.enableSmartlead === true && row.icpQualified === true", contact_code)
+        self.assertIn("row.enableSmartlead === true && Boolean(first)", contact_code)
+        self.assertIn("Pipedrive remains", contact_code)
 
         research_prompt = nodes["Build Lead Research Request"]["parameters"]["jsCode"]
         self.assertIn("Conduit Commerce's proven ICP", research_prompt)
