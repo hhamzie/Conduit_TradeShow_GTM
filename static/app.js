@@ -125,6 +125,11 @@ async function handleDirectDownloadFormSubmit(event) {
       throw new Error(message);
     }
 
+    if (response.redirected) {
+      window.location.assign(response.url);
+      return;
+    }
+
     if (!looksLikeDownload) {
       window.location.reload();
       return;
@@ -234,6 +239,24 @@ async function handleBulkDownloadFormSubmit(event) {
       typeof payload.created === "number"
         ? `Added ${payload.created} new show(s), updated ${payload.updated || 0}, skipped ${payload.skipped || 0}.`
         : "Registered shows in the dashboard.";
+    if (!payload.job_id) {
+      const queuedCount = typeof payload.queued === "number" ? payload.queued : 0;
+      const queuedMessage = payload.message || `${registeredSummary} Queued ${queuedCount} show(s) for the headless worker.`;
+      updateBulkProgress(progressUI, {
+        completed: queuedCount,
+        total: Math.max(queuedCount, 1),
+        currentShow: "Queued shows",
+        detail: queuedMessage,
+        tone: "success",
+        active: false,
+      });
+      setProgressMessage(progressTarget, `${queuedMessage} Opening the dashboard...`, "success");
+      window.setTimeout(() => {
+        window.location.assign("/shows/dashboard");
+      }, 900);
+      return;
+    }
+
     updateBulkProgress(progressUI, {
       completed: 0,
       total: 1,

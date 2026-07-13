@@ -33,7 +33,7 @@
           <form action="/shows/{{ show.id }}/launch" method="post" data-confirm-form data-confirm-title="Start email campaign?" data-confirm-copy="Confirm you want to start the email campaign for {{ show.name }}." data-confirm-button="Start campaign">
             <button class="action-menu-link action-menu-button" type="submit">Start email campaign</button>
           </form>
-          {% elif can_manage and show.status in ["waiting", "failed", "live"] %}
+          {% elif can_manage and show.status in ["waiting", "queued", "failed", "live"] %}
           <form action="/shows/{{ show.id }}/run-now" method="post" data-local-show-scrape-form data-confirm-form data-confirm-title="Refresh exhibitor list?" data-confirm-copy="Confirm you want to rerun scraping for {{ show.name }}." data-confirm-button="Refresh list" data-show-id="{{ show.id }}" data-show-name="{{ show.name }}" data-show-place="{{ show.place }}" data-show-link="{{ show.source_url }}" data-show-date="{{ show.event_date.isoformat() }}">
             <button class="action-menu-link action-menu-button" type="submit">Refresh exhibitor list</button>
           </form>
@@ -136,6 +136,136 @@
       </small>
     </div>
   </div>
+</section>
+
+<section id="outbound-pipeline" class="panel profile-card">
+  <div class="panel-head">
+    <div>
+      <h2>Outbound Pipeline</h2>
+      <p class="muted">Build-style account and contact enrichment for this show.</p>
+    </div>
+    {% if can_manage %}
+    <div class="lead-table-toolbar">
+      <a class="button secondary subtle" href="/shows/{{ show.id }}/outbound/build-source.csv">Download Clay source</a>
+      <form action="/shows/{{ show.id }}/outbound/build-flow/queue" method="post" data-confirm-form data-confirm-title="Queue Build-style flow?" data-confirm-copy="Confirm you want to queue outbound enrichment for {{ show.name }}." data-confirm-button="Queue flow">
+        <button class="button secondary subtle" type="submit">Queue Build flow</button>
+      </form>
+    </div>
+    {% endif %}
+  </div>
+
+  <div class="metric-strip">
+    <div class="metric-tile">
+      <span>Accounts</span>
+      <strong>{{ outbound_pipeline.account_count }}</strong>
+    </div>
+    <div class="metric-tile">
+      <span>Domains Ready</span>
+      <strong>{{ outbound_pipeline.domain_ready_count }}</strong>
+      <small class="muted">{{ outbound_pipeline.needs_domain_count }} need domains</small>
+    </div>
+    <div class="metric-tile">
+      <span>Audit</span>
+      <strong>{{ outbound_pipeline.included_count }}</strong>
+      <small class="muted">{{ outbound_pipeline.pending_audit_count }} pending · {{ outbound_pipeline.excluded_count }} excluded</small>
+    </div>
+    <div class="metric-tile">
+      <span>Contacts</span>
+      <strong>{{ outbound_pipeline.contact_count }}</strong>
+      <small class="muted">{{ outbound_pipeline.qualified_contact_count }} qualified</small>
+    </div>
+    <div class="metric-tile">
+      <span>Pipedrive</span>
+      <strong>{{ outbound_pipeline.pipedrive_synced_count }}</strong>
+    </div>
+    <div class="metric-tile">
+      <span>LinkedIn Tasks</span>
+      <strong>{{ outbound_pipeline.linkedin_task_count }}</strong>
+    </div>
+  </div>
+
+  {% if can_manage %}
+  <form class="section-toolbar compact" action="/shows/{{ show.id }}/outbound/leads/upload" method="post" enctype="multipart/form-data">
+    <label class="lead-search-field" aria-label="Outbound source label">
+      <input type="text" name="source_label" value="{{ show.name }} lead list" />
+    </label>
+    <input type="file" name="lead_file" accept=".csv" required />
+    <button class="button secondary" type="submit">Upload lead list</button>
+  </form>
+  {% endif %}
+
+  {% if show.outbound_accounts %}
+  <div class="table-wrap">
+    <table class="dashboard-table">
+      <thead>
+        <tr>
+          <th>Company</th>
+          <th>Domain</th>
+          <th>Audit</th>
+          <th>Stage</th>
+          <th>Contacts</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for account in show.outbound_accounts[:20] %}
+        <tr>
+          <td>
+            <strong>{{ account.company_name }}</strong>
+            <span class="muted">{{ account.booth_number or "" }}</span>
+          </td>
+          <td>
+            {% if account.website_url %}
+            <a href="{{ account.website_url }}" target="_blank" rel="noreferrer">{{ account.domain or account.website_url }}</a>
+            {% elif account.domain %}
+            {{ account.domain }}
+            {% else %}
+            -
+            {% endif %}
+          </td>
+          <td>{{ account.audit_status }}</td>
+          <td>{{ account.lifecycle_status }}</td>
+          <td>{{ account.contacts|length }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty-state">
+    <h3>No outbound accounts yet</h3>
+    <p>Upload a lead CSV to start the Build-style workflow for this show.</p>
+  </div>
+  {% endif %}
+
+  {% if recent_outbound_events %}
+  <details class="profile-details-card">
+    <summary class="profile-details-summary">Recent outbound events</summary>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>Provider</th>
+            <th>Action</th>
+            <th>Status</th>
+            <th>Message</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for event in recent_outbound_events %}
+          <tr>
+            <td>{{ event.created_at }}</td>
+            <td>{{ event.provider }}</td>
+            <td>{{ event.action }}</td>
+            <td>{{ event.status }}</td>
+            <td>{{ event.message }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </details>
+  {% endif %}
 </section>
 
 <section class="panel profile-card lead-panel" data-show-id="{{ show.id }}">

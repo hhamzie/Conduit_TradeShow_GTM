@@ -282,6 +282,25 @@ PROFILE_BOOTH_REVERSE_LABEL_RE = re.compile(
     r"(?:booth|stand|stall|space|suite|table)\b",
     re.IGNORECASE,
 )
+PROFILE_EMAIL_RE = re.compile(r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", re.IGNORECASE)
+PROFILE_PHONE_RE = re.compile(r"(?:\+?\d|\(\d{3}\))[\d\s().-]{6,}\d")
+PROFILE_CONTACT_LABEL_RE = re.compile(
+    r"\b(?P<label>trade\s*show\s*contact|tradeshow\s*contact|showroom\s*contact|"
+    r"sales\s*contact|contact(?:\s+person)?|event\s*contact)\b",
+    re.IGNORECASE,
+)
+PROFILE_CONTACT_NAME_RE = re.compile(
+    r"\b(?:trade\s*show\s*contact|tradeshow\s*contact|showroom\s*contact|"
+    r"sales\s*contact|contact(?:\s+person)?|event\s*contact)\s*[:\-]?\s*"
+    r"(?P<name>[A-Z][A-Za-z.'-]+(?:\s+[A-Z][A-Za-z.'-]+){1,2})\b"
+)
+PROFILE_PERSON_NAME_RE = re.compile(
+    r"\b([A-Z][A-Za-z.'-]+(?:\s+[A-Z][A-Za-z.'-]+){1,2})\b"
+)
+PROFILE_TITLE_LABEL_RE = re.compile(
+    r"\b(?:title|role|position)\s*[:\-]\s*(?P<title>[A-Za-z0-9/&,'() .-]{2,80})\b",
+    re.IGNORECASE,
+)
 SCRIPT_STYLE_RE = re.compile(
     r"<(?:script|style)\b[^>]*>.*?</(?:script|style)>",
     re.IGNORECASE | re.DOTALL,
@@ -431,6 +450,34 @@ LOCATION_CONTEXT_HINTS = (
     "held in",
     "city",
 )
+GENERAL_CONTACT_MARKERS = {
+    "contact",
+    "customer service",
+    "front desk",
+    "general inquiries",
+    "general inquiry",
+    "headquarters",
+    "hq",
+    "info",
+    "main office",
+    "office",
+    "sales",
+    "service",
+    "showroom",
+    "support",
+}
+NON_PERSON_CONTACT_MARKERS = {
+    "booth",
+    "conference",
+    "event",
+    "expo",
+    "exhibitor",
+    "hall",
+    "market",
+    "show",
+    "suite",
+    "team",
+}
 MYS_FILTER_PARAMS = {
     "featured",
     "alpha",
@@ -876,6 +923,44 @@ class CompanyRecord:
     profile_url: str
     website_url: str
     booth_number: str = ""
+    general_contact_email: str = ""
+    general_contact_phone: str = ""
+    contact_name: str = ""
+    contact_title: str = ""
+    contact_email: str = ""
+    contact_phone: str = ""
+    contacts: tuple[ProfileContact, ...] = ()
+
+
+@dataclass(frozen=True)
+class ProfileContact:
+    person_name: str = ""
+    job_title: str = ""
+    email: str = ""
+    phone: str = ""
+    contact_type: str = "general"
+    source_label: str = ""
+
+
+@dataclass(frozen=True)
+class ProfileScrapeResult:
+    website_url: str
+    booth_number: str = ""
+    contacts: tuple[ProfileContact, ...] = ()
+
+
+@dataclass(frozen=True)
+class ContactRecord:
+    company_name: str
+    booth_number: str
+    website_url: str
+    profile_url: str
+    person_name: str = ""
+    job_title: str = ""
+    email: str = ""
+    phone: str = ""
+    contact_type: str = "person"
+    source_label: str = ""
 
 
 @dataclass(frozen=True)
@@ -2962,23 +3047,21 @@ def display_title_from_site_slug(site_slug: str) -> str:
     return " ".join(part.capitalize() for part in site_slug.split("-") if part)
 
 
-def collect_directory_entries_dallas_market_center(
-    seed_url: str,
-    seed_html: str,
-) -> tuple[list[DirectoryEntry], str] | None:
-    if host_key(seed_url) != "dallasmarketcenter.com":
-        return None
-    if "li__exhibitor" not in seed_html or "h2__exhibitor" not in seed_html:
-        return None
-
+def extract_dallas_market_center_entries(
+    page_url: str,
+    page_html: str,
+    *,
+    directory_page: int,
+    sort_offset: int,
+    seen_profiles: set[str],
+) -> list[DirectoryEntry]:
     entries: list[DirectoryEntry] = []
-    seen_profiles: set[str] = set()
-    for item_html in DMC_EXHIBITOR_ITEM_RE.findall(seed_html):
+    for item_html in DMC_EXHIBITOR_ITEM_RE.findall(page_html):
         name_match = DMC_EXHIBITOR_NAME_RE.search(item_html)
         if not name_match:
             continue
         company_name = normalize_text(strip_tags(name_match.group("name")))
-        profile_url = normalize_http_url(urljoin(seed_url, html_unescape(name_match.group("href"))))
+        profile_url = normalize_http_url(urljoin(page_url, html_unescape(name_match.group("href"))))
         if not company_name or not profile_url or profile_url in seen_profiles:
             continue
 
@@ -2990,19 +3073,99 @@ def collect_directory_entries_dallas_market_center(
         seen_profiles.add(profile_url)
         entries.append(
             DirectoryEntry(
-                sort_index=len(entries),
-                directory_page=1,
+                sort_index=sort_offset + len(entries),
+                directory_page=directory_page,
                 company_name=company_name,
                 profile_url=profile_url,
                 booth_number=booth_number,
             )
         )
 
+    return entries
+
+
+def collect_directory_entries_dallas_market_center(
+    seed_url: str,
+    seed_html: str,
+    *,
+    start_page: int | None,
+    end_page: int | None,
+    max_pages: int,
+) -> tuple[list[DirectoryEntry], str] | None:
+    if host_key(seed_url) != "dallasmarketcenter.com":
+        return None
+    if "li__exhibitor" not in seed_html or "h2__exhibitor" not in seed_html:
+        return None
+
+    requested_start = max(start_page or 1, 1)
+    requested_end = end_page
+    if requested_end is not None and requested_start > requested_end:
+        raise ValueError("--start-page cannot be greater than --end-page.")
+
+    endpoint_url = urljoin(seed_url, "/exhibitors/filtered-exhibitor")
+    request_headers = {
+        "Accept": "text/html, */*; q=0.8",
+        "Origin": f"{urlparse(seed_url).scheme}://{urlparse(seed_url).netloc}",
+        "Referer": seed_url,
+        "X-Requested-With": "XMLHttpRequest",
+    }
+
+    entries: list[DirectoryEntry] = []
+    seen_profiles: set[str] = set()
+    if requested_start == 1:
+        entries.extend(
+            extract_dallas_market_center_entries(
+                seed_url,
+                seed_html,
+                directory_page=1,
+                sort_offset=0,
+                seen_profiles=seen_profiles,
+            )
+        )
+
+    page_number = max(requested_start, 2)
+    processed_pages = 1 if requested_start == 1 else 0
+    while processed_pages < max_pages:
+        if requested_end is not None and page_number > requested_end:
+            break
+
+        page_html = fetch_text(
+            endpoint_url,
+            extra_headers=request_headers,
+            form_data=[
+                ("pageSize", "10"),
+                ("currentPage", str(page_number)),
+                ("startingLetter", ""),
+                ("searchText", ""),
+                ("marketId", ""),
+            ],
+        )
+        page_entries = extract_dallas_market_center_entries(
+            seed_url,
+            page_html,
+            directory_page=page_number,
+            sort_offset=len(entries),
+            seen_profiles=seen_profiles,
+        )
+        processed_pages += 1
+        if not page_entries:
+            break
+
+        entries.extend(page_entries)
+        if page_number % 10 == 0:
+            print(
+                "Collected Dallas Market Center directory pages "
+                f"through page {page_number} ({len(entries)} exhibitors so far)."
+            )
+        if len(page_entries) < 10:
+            break
+        page_number += 1
+
     if not entries:
         return None
 
     print(
-        f"Collected {len(entries)} Dallas Market Center exhibitor entries from the rendered directory list."
+        f"Collected {len(entries)} Dallas Market Center exhibitor entries from the paginated directory."
     )
     return entries, "Dallas Market Center"
 
@@ -4777,7 +4940,10 @@ def collect_table_directory_entries(
 
 def is_social_url(url: str) -> bool:
     host = host_key(url)
-    return any(marker in host for marker in SOCIAL_HOST_MARKERS)
+    return any(
+        host == marker or host.endswith("." + marker)
+        for marker in SOCIAL_HOST_MARKERS
+    )
 
 
 def is_companyish_text(text: str) -> bool:
@@ -5995,6 +6161,292 @@ def extract_booth_number_from_profile(
             if booth_number:
                 return booth_number
     return ""
+
+
+def normalize_contact_phone(value: str) -> str:
+    digits = re.sub(r"\D+", "", value or "")
+    if len(digits) < 7:
+        return ""
+    return normalize_text(value)
+
+
+def profile_contact_export_path(output_path: Path) -> Path:
+    return output_path.with_name(f"{output_path.stem}_contacts{output_path.suffix}")
+
+
+def _looks_like_person_name(candidate: str, company_name: str) -> bool:
+    cleaned = normalize_text(candidate).strip(" ,:-|")
+    if not cleaned or len(cleaned) > 80:
+        return False
+    lowered = cleaned.lower()
+    if any(marker in lowered for marker in GENERAL_CONTACT_MARKERS | NON_PERSON_CONTACT_MARKERS):
+        return False
+    if cleaned.lower() == normalize_text(company_name).lower():
+        return False
+    parts = cleaned.split()
+    if len(parts) < 2 or len(parts) > 4:
+        return False
+    if not all(re.fullmatch(r"[A-Z][A-Za-z.'-]+", part) for part in parts):
+        return False
+    return True
+
+
+def _extract_contact_title(text: str, person_name: str) -> str:
+    labeled_match = PROFILE_TITLE_LABEL_RE.search(text)
+    if labeled_match:
+        return normalize_text(labeled_match.group("title")).strip(" ,:-|")
+    if not person_name:
+        return ""
+    patterns = (
+        re.compile(
+            rf"{re.escape(person_name)}\s*(?:[|,\-]\s*)([A-Za-z0-9/&,'() .-]{{2,80}})",
+            re.IGNORECASE,
+        ),
+        re.compile(
+            rf"([A-Za-z0-9/&,'() .-]{{2,80}})\s*(?:[|,\-]\s*){re.escape(person_name)}",
+            re.IGNORECASE,
+        ),
+    )
+    for pattern in patterns:
+        match = pattern.search(text)
+        if not match:
+            continue
+        candidate = normalize_text(match.group(1)).strip(" ,:-|")
+        if candidate and not _looks_like_person_name(candidate, ""):
+            return candidate
+    return ""
+
+
+def extract_profile_contacts(
+    page: ParsedPage,
+    profile_html: str,
+    company_name: str,
+) -> tuple[ProfileContact, ...]:
+    html_with_breaks = re.sub(
+        r"(?i)<(?:div|p|li|section|article|tr|td|h[1-6])\b[^>]*>|</(?:p|div|li|section|article|tr|td|h[1-6])\s*>|<br\s*/?>",
+        "\n",
+        SCRIPT_STYLE_RE.sub(" ", profile_html or ""),
+    )
+    text_blocks: list[str] = []
+    seen_blocks: set[str] = set()
+    for match in re.finditer(
+        r"<(?:div|section)[^>]*(?:class|id)=[\"'][^\"']*contact[^\"']*[\"'][^>]*>(.*?)</(?:div|section)>",
+        profile_html or "",
+        re.IGNORECASE | re.DOTALL,
+    ):
+        block = normalize_text(re.sub(r"<[^>]+>", " | ", match.group(1)))
+        if not block or len(block) > 600:
+            continue
+        if block not in seen_blocks:
+            text_blocks.append(block)
+            seen_blocks.add(block)
+    plain_html_lines = re.sub(r"<[^>]+>", " ", html_with_breaks)
+    grouped_lines: list[list[str]] = []
+    current_group: list[str] = []
+    blank_run = 0
+    for raw_line in plain_html_lines.splitlines():
+        normalized_line = normalize_text(raw_line)
+        if normalized_line:
+            current_group.append(normalized_line)
+            blank_run = 0
+            continue
+        blank_run += 1
+        if current_group and blank_run >= 2:
+            grouped_lines.append(current_group)
+            current_group = []
+            blank_run = 0
+    if current_group:
+        grouped_lines.append(current_group)
+
+    for lines in grouped_lines:
+        block = normalize_text(" | ".join(lines))
+        if not block or len(block) > 600:
+            continue
+        if (
+            PROFILE_CONTACT_LABEL_RE.search(block)
+            or PROFILE_EMAIL_RE.search(block)
+            or PROFILE_PHONE_RE.search(block)
+        ):
+            if block not in seen_blocks:
+                text_blocks.append(block)
+                seen_blocks.add(block)
+    for container in page.containers:
+        block = normalize_text(container.text)
+        if not block or len(block) > 600:
+            continue
+        if (
+            PROFILE_CONTACT_LABEL_RE.search(block)
+            or PROFILE_EMAIL_RE.search(block)
+            or PROFILE_PHONE_RE.search(block)
+        ):
+            if block not in seen_blocks:
+                text_blocks.append(block)
+                seen_blocks.add(block)
+
+    anchor_tokens: list[str] = []
+    for anchor in page.anchors:
+        href = (anchor.href or "").strip()
+        if href.lower().startswith("mailto:"):
+            anchor_tokens.append(href.split(":", 1)[1].split("?", 1)[0])
+        elif href.lower().startswith("tel:"):
+            anchor_tokens.append(href.split(":", 1)[1].split("?", 1)[0])
+    if anchor_tokens:
+        joined = " ".join(token for token in anchor_tokens if token)
+        if joined and joined not in seen_blocks:
+            text_blocks.append(joined)
+
+    contacts: list[ProfileContact] = []
+    for block in text_blocks:
+        emails = list(dict.fromkeys(match.group(0).lower() for match in PROFILE_EMAIL_RE.finditer(block)))
+        phones = list(dict.fromkeys(normalize_contact_phone(match.group(0)) for match in PROFILE_PHONE_RE.finditer(block)))
+        phones = [phone for phone in phones if phone]
+        if not emails and not phones:
+            continue
+
+        source_label_match = PROFILE_CONTACT_LABEL_RE.search(block)
+        source_label = normalize_text(source_label_match.group("label")) if source_label_match else ""
+
+        person_name = ""
+        labeled_name = PROFILE_CONTACT_NAME_RE.search(block)
+        if labeled_name:
+            candidate_name = normalize_text(labeled_name.group("name"))
+            if _looks_like_person_name(candidate_name, company_name):
+                person_name = candidate_name
+        if not person_name:
+            for candidate_name in PROFILE_PERSON_NAME_RE.findall(block):
+                normalized_candidate = normalize_text(candidate_name)
+                if _looks_like_person_name(normalized_candidate, company_name):
+                    person_name = normalized_candidate
+                    break
+
+        job_title = _extract_contact_title(block, person_name)
+        email = emails[0] if emails else ""
+        phone = phones[0] if phones else ""
+        contact_type = "person" if person_name else "general"
+        if contact_type == "general" and not (email or phone):
+            continue
+        contacts.append(
+            ProfileContact(
+                person_name=person_name,
+                job_title=job_title,
+                email=email,
+                phone=phone,
+                contact_type=contact_type,
+                source_label=source_label,
+            )
+        )
+
+    merged_contacts: list[ProfileContact] = []
+    for contact in contacts:
+        merged_index = None
+        for index, existing in enumerate(merged_contacts):
+            same_email = bool(contact.email and existing.email and contact.email == existing.email)
+            same_phone = bool(
+                contact.phone
+                and existing.phone
+                and re.sub(r"\D+", "", contact.phone) == re.sub(r"\D+", "", existing.phone)
+            )
+            same_name = bool(contact.person_name and existing.person_name and contact.person_name == existing.person_name)
+            same_general_label = (
+                contact.contact_type == "general"
+                and existing.contact_type == "general"
+                and contact.source_label == existing.source_label
+            )
+            if same_email or same_phone or same_name or same_general_label:
+                merged_index = index
+                break
+        if merged_index is None:
+            merged_contacts.append(contact)
+            continue
+        existing = merged_contacts[merged_index]
+        merged_contacts[merged_index] = ProfileContact(
+            person_name=existing.person_name or contact.person_name,
+            job_title=existing.job_title or contact.job_title,
+            email=existing.email or contact.email,
+            phone=existing.phone or contact.phone,
+            contact_type="person" if existing.person_name or contact.person_name else existing.contact_type,
+            source_label=existing.source_label or contact.source_label,
+        )
+
+    unique_contacts: list[ProfileContact] = []
+    seen_contacts: set[tuple[str, str, str, str]] = set()
+    for contact in merged_contacts:
+        key = (
+            contact.person_name.lower(),
+            contact.job_title.lower(),
+            contact.email.lower(),
+            re.sub(r"\D+", "", contact.phone),
+        )
+        if key in seen_contacts:
+            continue
+        seen_contacts.add(key)
+        unique_contacts.append(contact)
+
+    return tuple(unique_contacts)
+
+
+def select_primary_person_contact(contacts: tuple[ProfileContact, ...]) -> ProfileContact | None:
+    for contact in contacts:
+        if contact.contact_type == "person" and (contact.person_name or contact.email or contact.phone):
+            return contact
+    return None
+
+
+def select_general_contact(contacts: tuple[ProfileContact, ...]) -> ProfileContact | None:
+    for contact in contacts:
+        if contact.contact_type == "general" and (contact.email or contact.phone):
+            return contact
+    return None
+
+
+def extract_company_name_from_profile(page: ParsedPage) -> str:
+    for candidate in (
+        *(normalize_seed_company_name(text) for text in page.h1_texts),
+        *(normalize_seed_company_name(part) for part in TITLE_SPLIT_RE.split(page.title or "")),
+    ):
+        if candidate:
+            return candidate
+    return ""
+
+
+def build_contact_records(record: CompanyRecord) -> list[ContactRecord]:
+    people = [contact for contact in record.contacts if contact.contact_type == "person"]
+    if not people and any((record.contact_name, record.contact_email, record.contact_phone)):
+        people = [
+            ProfileContact(
+                person_name=record.contact_name,
+                job_title=record.contact_title,
+                email=record.contact_email,
+                phone=record.contact_phone,
+                contact_type="person",
+                source_label="trade show contact",
+            )
+        ]
+
+    records: list[ContactRecord] = []
+    seen: set[tuple[str, str, str]] = set()
+    for contact in people:
+        identity = (
+            contact.email.strip().lower(),
+            canonical_label(contact.person_name),
+            re.sub(r"\D+", "", contact.phone),
+        )
+        if identity in seen:
+            continue
+        seen.add(identity)
+        records.append(ContactRecord(
+            company_name=record.company_name,
+            booth_number=record.booth_number,
+            website_url=record.website_url,
+            profile_url=record.profile_url,
+            person_name=contact.person_name,
+            job_title=contact.job_title,
+            email=contact.email,
+            phone=contact.phone,
+            contact_type="person",
+            source_label=contact.source_label or "trade show contact",
+        ))
+    return records
 
 
 def company_name_brand_key(text: str) -> str:
@@ -7264,6 +7716,9 @@ def collect_entries_from_seed(
     dallas_entries = collect_directory_entries_dallas_market_center(
         seed_url=seed_url,
         seed_html=seed_html,
+        start_page=start_page,
+        end_page=end_page,
+        max_pages=max_pages,
     )
     if dallas_entries is not None:
         return dallas_entries
@@ -7597,14 +8052,24 @@ def run_agent_directory_csv_fallback(options: ScrapeOptions) -> ScrapeResult:
             browser_renderer.close()
 
 
-def scrape_profile_details(profile_url: str) -> tuple[str, str]:
+def scrape_profile_insights(profile_url: str) -> ProfileScrapeResult:
     profile_html = fetch_html(profile_url)
     embedded_url = extract_embedded_js_url(profile_html, MYS_WEBSITE_FIELDS)
     profile_page = parse_page(profile_url, profile_html)
     booth_number = extract_booth_number_from_profile(profile_page, profile_html)
+    contacts = extract_profile_contacts(profile_page, profile_html, extract_company_name_from_profile(profile_page))
     if embedded_url:
-        return embedded_url, booth_number
-    return extract_company_website(profile_page, profile_url), booth_number
+        return ProfileScrapeResult(website_url=embedded_url, booth_number=booth_number, contacts=contacts)
+    return ProfileScrapeResult(
+        website_url=extract_company_website(profile_page, profile_url),
+        booth_number=booth_number,
+        contacts=contacts,
+    )
+
+
+def scrape_profile_details(profile_url: str) -> tuple[str, str]:
+    insights = scrape_profile_insights(profile_url)
+    return insights.website_url, insights.booth_number
 
 
 def scrape_profile_website(profile_url: str) -> str:
@@ -7616,13 +8081,14 @@ def scrape_profile_website_with_browser(
     profile_url: str,
     browser_renderer: BrowserRenderer,
 ) -> tuple[str, str]:
-    profile_html = fetch_html(profile_url)
-    embedded_url = extract_embedded_js_url(profile_html, MYS_WEBSITE_FIELDS)
-    profile_page = parse_page(profile_url, profile_html)
-    booth_number = extract_booth_number_from_profile(profile_page, profile_html)
+    insights = scrape_profile_insights(profile_url)
+    embedded_url = insights.website_url
+    booth_number = insights.booth_number
     if embedded_url:
         return embedded_url, booth_number
 
+    profile_html = fetch_html(profile_url)
+    profile_page = parse_page(profile_url, profile_html)
     website_url = extract_company_website(profile_page, profile_url)
     if website_url and booth_number:
         return website_url, booth_number
@@ -7692,16 +8158,17 @@ def collect_company_records(
     if workers <= 1:
         for entry in pending_entries:
             try:
-                website_url, scraped_booth_number = scrape_profile_details(entry.profile_url)
+                scraped = scrape_profile_insights(entry.profile_url)
             except Exception as exc:  # noqa: BLE001
                 failures += 1
-                website_url = ""
-                scraped_booth_number = ""
+                scraped = ProfileScrapeResult(website_url="", booth_number="", contacts=())
                 print(
                     f"Profile scrape failed for {entry.profile_url}: {exc}",
                     file=sys.stderr,
                 )
-            website_url = validated_company_website_url(entry.company_name, website_url)
+            website_url = validated_company_website_url(entry.company_name, scraped.website_url)
+            general_contact = select_general_contact(scraped.contacts)
+            primary_contact = select_primary_person_contact(scraped.contacts)
 
             records.append(
                 CompanyRecord(
@@ -7710,7 +8177,14 @@ def collect_company_records(
                     company_name=entry.company_name,
                     profile_url=entry.profile_url,
                     website_url=website_url,
-                    booth_number=entry.booth_number or scraped_booth_number,
+                    booth_number=entry.booth_number or scraped.booth_number,
+                    general_contact_email=general_contact.email if general_contact else "",
+                    general_contact_phone=general_contact.phone if general_contact else "",
+                    contact_name=primary_contact.person_name if primary_contact else "",
+                    contact_title=primary_contact.job_title if primary_contact else "",
+                    contact_email=primary_contact.email if primary_contact else "",
+                    contact_phone=primary_contact.phone if primary_contact else "",
+                    contacts=scraped.contacts,
                 )
             )
 
@@ -7720,23 +8194,24 @@ def collect_company_records(
     else:
         with ThreadPoolExecutor(max_workers=workers) as executor:
             future_to_entry = {
-                executor.submit(scrape_profile_details, entry.profile_url): entry
+                executor.submit(scrape_profile_insights, entry.profile_url): entry
                 for entry in pending_entries
             }
 
             for future in as_completed(future_to_entry):
                 entry = future_to_entry[future]
                 try:
-                    website_url, scraped_booth_number = future.result()
+                    scraped = future.result()
                 except Exception as exc:  # noqa: BLE001
                     failures += 1
-                    website_url = ""
-                    scraped_booth_number = ""
+                    scraped = ProfileScrapeResult(website_url="", booth_number="", contacts=())
                     print(
                         f"Profile scrape failed for {entry.profile_url}: {exc}",
                         file=sys.stderr,
                     )
-                website_url = validated_company_website_url(entry.company_name, website_url)
+                website_url = validated_company_website_url(entry.company_name, scraped.website_url)
+                general_contact = select_general_contact(scraped.contacts)
+                primary_contact = select_primary_person_contact(scraped.contacts)
 
                 records.append(
                     CompanyRecord(
@@ -7745,7 +8220,14 @@ def collect_company_records(
                         company_name=entry.company_name,
                         profile_url=entry.profile_url,
                         website_url=website_url,
-                        booth_number=entry.booth_number or scraped_booth_number,
+                        booth_number=entry.booth_number or scraped.booth_number,
+                        general_contact_email=general_contact.email if general_contact else "",
+                        general_contact_phone=general_contact.phone if general_contact else "",
+                        contact_name=primary_contact.person_name if primary_contact else "",
+                        contact_title=primary_contact.job_title if primary_contact else "",
+                        contact_email=primary_contact.email if primary_contact else "",
+                        contact_phone=primary_contact.phone if primary_contact else "",
+                        contacts=scraped.contacts,
                     )
                 )
 
@@ -7786,6 +8268,13 @@ def collect_company_records(
                     profile_url=record.profile_url,
                     website_url=browser_url or record.website_url,
                     booth_number=resolved_booth_number,
+                    general_contact_email=record.general_contact_email,
+                    general_contact_phone=record.general_contact_phone,
+                    contact_name=record.contact_name,
+                    contact_title=record.contact_title,
+                    contact_email=record.contact_email,
+                    contact_phone=record.contact_phone,
+                    contacts=record.contacts,
                 )
 
             if position == len(pending_browser_indices) or position % 10 == 0:
@@ -7805,6 +8294,7 @@ def write_csv(
     conference_location: str,
 ) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    contact_path = profile_contact_export_path(output_path)
     with output_path.open("w", newline="", encoding="utf-8") as csv_file:
         writer = csv.DictWriter(
             csv_file,
@@ -7812,6 +8302,12 @@ def write_csv(
                 "company_name",
                 "booth_number",
                 "website_url",
+                "general_contact_email",
+                "general_contact_phone",
+                "contact_name",
+                "contact_title",
+                "contact_email",
+                "contact_phone",
                 "Location",
                 "Conference",
             ],
@@ -7823,10 +8319,53 @@ def write_csv(
                     "company_name": record.company_name,
                     "booth_number": record.booth_number,
                     "website_url": record.website_url,
+                    "general_contact_email": record.general_contact_email,
+                    "general_contact_phone": record.general_contact_phone,
+                    "contact_name": record.contact_name,
+                    "contact_title": record.contact_title,
+                    "contact_email": record.contact_email,
+                    "contact_phone": record.contact_phone,
                     "Location": conference_location,
                     "Conference": conference_name,
                 }
             )
+    with contact_path.open("w", newline="", encoding="utf-8") as csv_file:
+        writer = csv.DictWriter(
+            csv_file,
+            fieldnames=[
+                "company_name",
+                "person_name",
+                "job_title",
+                "email",
+                "phone",
+                "website_url",
+                "booth_number",
+                "source_url",
+                "contact_type",
+                "source_label",
+                "Location",
+                "Conference",
+            ],
+        )
+        writer.writeheader()
+        for record in records:
+            for contact_record in build_contact_records(record):
+                writer.writerow(
+                    {
+                        "company_name": contact_record.company_name,
+                        "person_name": contact_record.person_name,
+                        "job_title": contact_record.job_title,
+                        "email": contact_record.email,
+                        "phone": contact_record.phone,
+                        "website_url": contact_record.website_url,
+                        "booth_number": contact_record.booth_number,
+                        "source_url": contact_record.profile_url,
+                        "contact_type": contact_record.contact_type,
+                        "source_label": contact_record.source_label,
+                        "Location": conference_location,
+                        "Conference": conference_name,
+                    }
+                )
 
 
 def _write_csv_header(writer: csv.DictWriter) -> None:
@@ -7845,6 +8384,37 @@ def _write_company_record_row(
             "company_name": record.company_name,
             "booth_number": record.booth_number,
             "website_url": record.website_url,
+            "general_contact_email": record.general_contact_email,
+            "general_contact_phone": record.general_contact_phone,
+            "contact_name": record.contact_name,
+            "contact_title": record.contact_title,
+            "contact_email": record.contact_email,
+            "contact_phone": record.contact_phone,
+            "Location": conference_location,
+            "Conference": conference_name,
+        }
+    )
+
+
+def _write_contact_record_row(
+    writer: csv.DictWriter,
+    record: ContactRecord,
+    *,
+    conference_name: str,
+    conference_location: str,
+) -> None:
+    writer.writerow(
+        {
+            "company_name": record.company_name,
+            "person_name": record.person_name,
+            "job_title": record.job_title,
+            "email": record.email,
+            "phone": record.phone,
+            "website_url": record.website_url,
+            "booth_number": record.booth_number,
+            "source_url": record.profile_url,
+            "contact_type": record.contact_type,
+            "source_label": record.source_label,
             "Location": conference_location,
             "Conference": conference_name,
         }
@@ -7864,11 +8434,33 @@ def stream_company_records_to_csv(
         "company_name",
         "booth_number",
         "website_url",
+        "general_contact_email",
+        "general_contact_phone",
+        "contact_name",
+        "contact_title",
+        "contact_email",
+        "contact_phone",
+        "Location",
+        "Conference",
+    ]
+    contact_fieldnames = [
+        "company_name",
+        "person_name",
+        "job_title",
+        "email",
+        "phone",
+        "website_url",
+        "booth_number",
+        "source_url",
+        "contact_type",
+        "source_label",
         "Location",
         "Conference",
     ]
     all_path = output_path.with_suffix(output_path.suffix + ".all.tmp")
     website_path = output_path.with_suffix(output_path.suffix + ".websites.tmp")
+    contact_path = profile_contact_export_path(output_path)
+    contact_tmp_path = contact_path.with_suffix(contact_path.suffix + ".tmp")
     failures = 0
     all_count = 0
     website_count = 0
@@ -7876,11 +8468,14 @@ def stream_company_records_to_csv(
     with (
         all_path.open("w", newline="", encoding="utf-8") as all_file,
         website_path.open("w", newline="", encoding="utf-8") as website_file,
+        contact_tmp_path.open("w", newline="", encoding="utf-8") as contact_file,
     ):
         all_writer = csv.DictWriter(all_file, fieldnames=fieldnames)
         website_writer = csv.DictWriter(website_file, fieldnames=fieldnames)
+        contact_writer = csv.DictWriter(contact_file, fieldnames=contact_fieldnames)
         _write_csv_header(all_writer)
         _write_csv_header(website_writer)
+        _write_csv_header(contact_writer)
 
         completed_count = 0
         for entry in entries:
@@ -7894,17 +8489,21 @@ def stream_company_records_to_csv(
 
             if not (website_url or not entry.profile_url or has_fragment_only_reference):
                 try:
-                    website_url, scraped_booth_number = scrape_profile_details(entry.profile_url)
+                    scraped = scrape_profile_insights(entry.profile_url)
                 except Exception as exc:  # noqa: BLE001
                     failures += 1
-                    website_url = ""
-                    scraped_booth_number = ""
+                    scraped = ProfileScrapeResult(website_url="", booth_number="", contacts=())
                     print(
                         f"Profile scrape failed for {entry.profile_url}: {exc}",
                         file=sys.stderr,
                     )
-                website_url = validated_company_website_url(entry.company_name, website_url)
-                booth_number = booth_number or scraped_booth_number
+                website_url = validated_company_website_url(entry.company_name, scraped.website_url)
+                booth_number = booth_number or scraped.booth_number
+                general_contact = select_general_contact(scraped.contacts)
+                primary_contact = select_primary_person_contact(scraped.contacts)
+            else:
+                general_contact = None
+                primary_contact = None
 
             company_name = maybe_enrich_company_name(entry.company_name, website_url)
             record = CompanyRecord(
@@ -7914,6 +8513,13 @@ def stream_company_records_to_csv(
                 profile_url=entry.profile_url,
                 website_url=website_url,
                 booth_number=booth_number,
+                general_contact_email=general_contact.email if general_contact else "",
+                general_contact_phone=general_contact.phone if general_contact else "",
+                contact_name=primary_contact.person_name if primary_contact else "",
+                contact_title=primary_contact.job_title if primary_contact else "",
+                contact_email=primary_contact.email if primary_contact else "",
+                contact_phone=primary_contact.phone if primary_contact else "",
+                contacts=scraped.contacts if not (website_url or not entry.profile_url or has_fragment_only_reference) else (),
             )
             filtered_records = filter_plausible_company_records([record])
             if not filtered_records:
@@ -7938,6 +8544,13 @@ def stream_company_records_to_csv(
                     conference_location=conference_location,
                 )
                 website_count += 1
+            for contact_record in build_contact_records(kept_record):
+                _write_contact_record_row(
+                    contact_writer,
+                    contact_record,
+                    conference_name=conference_name,
+                    conference_location=conference_location,
+                )
 
             completed_count += 1
             if completed_count == len(entries) or completed_count % 25 == 0:
@@ -7949,6 +8562,7 @@ def stream_company_records_to_csv(
             "No records had a website/domain. Keeping all records because company names were still collected."
         )
     chosen_path.replace(output_path)
+    contact_tmp_path.replace(contact_path)
     for extra_path in (all_path, website_path):
         if extra_path.exists():
             extra_path.unlink()
@@ -7996,6 +8610,13 @@ def filter_plausible_company_records(records: list[CompanyRecord]) -> list[Compa
             profile_url=record.profile_url,
             website_url=record.website_url,
             booth_number=record.booth_number,
+            general_contact_email=record.general_contact_email,
+            general_contact_phone=record.general_contact_phone,
+            contact_name=record.contact_name,
+            contact_title=record.contact_title,
+            contact_email=record.contact_email,
+            contact_phone=record.contact_phone,
+            contacts=record.contacts,
         )
         if not is_plausible_company_record(normalized_record):
             dropped_count += 1

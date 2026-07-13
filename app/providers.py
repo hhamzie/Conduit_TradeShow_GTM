@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import csv
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from email.message import EmailMessage
 import hashlib
 import logging
@@ -15,7 +15,8 @@ from urllib.parse import urlparse
 import httpx
 
 from app.config import get_settings
-from app.models import Show
+from app.models import Show, ShowStatus
+from app.outreach_cadence import SMARTLEAD_STEPS
 
 
 logger = logging.getLogger(__name__)
@@ -277,7 +278,7 @@ def _extract_records(payload: object) -> list[dict[str, object]]:
 
 def _extract_count(payload: object) -> int | None:
     if isinstance(payload, dict):
-        for key in ("count", "total", "total_count", "row_count"):
+        for key in ("count", "total", "total_count", "row_count", "tableTotalRecordsCount"):
             value = payload.get(key)
             if isinstance(value, int):
                 return value
@@ -414,6 +415,89 @@ def _push_rows_to_clay_webhook(show: Show) -> ProviderResult:
     )
 
 
+def push_to_cultivate(show: Show) -> ProviderResult:
+    """Send a completed scraper export into the Airtable-first Cultivate workflow."""
+    settings = get_settings()
+    if not settings.cultivate_webhook_url:
+        return ProviderResult("airtable", "skipped", "Cultivate Airtable webhook is not configured.")
+    if not show.latest_export_path:
+        return ProviderResult("airtable", "failed", "No scraper export is available for Airtable.")
+
+    if settings.cultivate_enable_smartlead:
+        campaign_result = ensure_smartlead_campaign(show)
+        if campaign_result.status != "success" or not campaign_result.campaign_id:
+            return ProviderResult(
+                "airtable",
+                "failed",
+                f"A show-specific paused Smartlead campaign is required: {campaign_result.message}",
+            )
+        show.smartlead_campaign_id = campaign_result.campaign_id
+        show.smartlead_campaign_name = campaign_result.campaign_name
+        show.cadence_enrollment_date = show.cadence_enrollment_date or date.today()
+
+    try:
+        rows = _load_export_rows(show.latest_export_path)
+    except FileNotFoundError as exc:
+        return ProviderResult("airtable", "failed", str(exc))
+
+    export_path = Path(show.latest_export_path)
+    contacts_path = export_path.with_name(f"{export_path.stem}_contacts{export_path.suffix}")
+    contacts_by_company: dict[str, list[dict[str, str]]] = {}
+    if contacts_path.exists():
+        for contact in _load_export_rows(str(contacts_path)):
+            company_key = _normalize_key(contact.get("company_name", ""))
+            if company_key:
+                contacts_by_company.setdefault(company_key, []).append(contact)
+
+    scraped_at = datetime.now(timezone.utc).isoformat()
+    payload_rows = []
+    for index, row in enumerate(rows, start=1):
+        payload_rows.append(
+            {
+                **row,
+                **_show_payload_fields(show, scraped_at, _build_source_row_id(show, row, index)),
+                "scraped_contacts": contacts_by_company.get(_normalize_key(row.get("company_name", "")), []),
+            }
+        )
+
+    headers: dict[str, str] = {}
+    if settings.cultivate_webhook_auth_header and settings.cultivate_webhook_auth_value:
+        headers[settings.cultivate_webhook_auth_header] = settings.cultivate_webhook_auth_value
+    payload = {
+        "rows": payload_rows,
+        "show": {"id": show.id, "name": show.name, "date": show.event_date.isoformat()},
+        "enableSmartlead": settings.cultivate_enable_smartlead,
+        "smartleadCampaignId": str(show.smartlead_campaign_id or ""),
+        "smartleadCampaignName": show.smartlead_campaign_name,
+        "cadenceEnrollmentDate": (
+            show.cadence_enrollment_date.isoformat() if show.cadence_enrollment_date else date.today().isoformat()
+        ),
+    }
+    try:
+        status_code, _body = _request_json(
+            "POST",
+            settings.cultivate_webhook_url,
+            headers=headers,
+            payload=payload,
+            timeout=120.0,
+        )
+    except httpx.HTTPStatusError as exc:
+        return ProviderResult(
+            "airtable",
+            "failed",
+            f"Cultivate webhook HTTP {exc.response.status_code}: {exc.response.text[:300]}",
+        )
+    except httpx.HTTPError as exc:
+        return ProviderResult("airtable", "failed", f"Cultivate webhook network error: {exc}")
+    if not 200 <= status_code < 300:
+        return ProviderResult("airtable", "failed", f"Cultivate webhook returned {status_code}.")
+    return ProviderResult(
+        "airtable",
+        "success",
+        f"Sent {len(payload_rows)} scraper row(s) to the Cultivate Airtable workflow.",
+    )
+
+
 def _duplicate_clay_table(show: Show) -> ProviderResult:
     settings = get_settings()
     if not settings.clay_session_cookie:
@@ -522,7 +606,7 @@ def notify_ready_for_review(show: Show) -> ProviderResult:
         )
 
     message = EmailMessage()
-    message["Subject"] = f"[Trade Show Outbound] {show.name} is ready for review"
+    message["Subject"] = f"[TradeShowScraper] {show.name} is ready for review"
     message["From"] = settings.notify_from_email
     message["To"] = ", ".join(settings.notify_to_emails)
     message.set_content(
@@ -563,8 +647,76 @@ def notify_ready_for_review(show: Show) -> ProviderResult:
     )
 
 
+def notify_scrape_due(show: Show) -> ProviderResult:
+    """Alert the operator that a local exhibitor scrape is due now."""
+
+    settings = get_settings()
+    payload = {
+        "event": "trade_show_scrape_due",
+        "showId": show.id,
+        "showName": show.name,
+        "showDate": show.event_date.isoformat(),
+        "place": show.place,
+        "directoryUrl": show.source_url,
+        "runAt": show.run_at.isoformat() if show.run_at else "",
+        "dashboardAction": "Run the exhibitor scrape on the Conduit Mac dashboard.",
+    }
+    if settings.scrape_due_webhook_url:
+        try:
+            status_code, _body = _request_json(
+                "POST",
+                settings.scrape_due_webhook_url,
+                payload=payload,
+                timeout=30.0,
+            )
+        except httpx.HTTPError as exc:
+            return ProviderResult("notification", "failed", f"Scrape-due webhook failed: {exc}")
+        if not 200 <= status_code < 300:
+            return ProviderResult("notification", "failed", f"Scrape-due webhook returned {status_code}.")
+        return ProviderResult("notification", "success", "Sent the scrape-due webhook alert.")
+
+    if not settings.notify_to_emails:
+        return ProviderResult("notification", "skipped", "No scrape-due webhook or email recipients are configured.")
+    if not (settings.smtp_host and settings.notify_from_email):
+        return ProviderResult(
+            "notification",
+            "skipped",
+            "Scrape is queued in the dashboard; webhook and SMTP delivery are not configured.",
+        )
+
+    message = EmailMessage()
+    message["Subject"] = f"[Conduit] Scrape {show.name} now"
+    message["From"] = settings.notify_from_email
+    message["To"] = ", ".join(settings.notify_to_emails)
+    message.set_content(
+        "\n".join(
+            [
+                f"{show.name} is now within the {show.run_offset_days}-day pre-show window.",
+                f"Official start: {show.event_date.isoformat()}",
+                f"Place: {show.place}",
+                f"Exhibitor directory: {show.source_url}",
+                "",
+                "Open the Conduit dashboard on your Mac and run the local exhibitor scrape.",
+            ]
+        )
+    )
+    try:
+        with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=30) as smtp:
+            if settings.smtp_use_tls:
+                smtp.starttls()
+            if settings.smtp_username:
+                smtp.login(settings.smtp_username, settings.smtp_password)
+            smtp.send_message(message)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Scrape-due SMTP notification failed for show %s.", show.id)
+        return ProviderResult("notification", "failed", f"Scrape-due SMTP notification failed: {exc}")
+    return ProviderResult("notification", "success", "Sent the scrape-due email alert.")
+
+
 def push_to_clay(show: Show) -> ProviderResult:
     settings = get_settings()
+    if settings.cultivate_webhook_url:
+        return push_to_cultivate(show)
     if settings.clay_template_table_id and settings.clay_session_cookie:
         if not show.clay_table_id:
             create_result = _duplicate_clay_table(show)
@@ -957,16 +1109,11 @@ def _normalize_ai_categorisation_option_ids(raw_options: object) -> list[int]:
     return deduped
 
 
-def _extract_delay_in_days(sequence: dict[str, object]) -> int:
-    if isinstance(sequence.get("seq_delay_details"), dict):
-        details = sequence["seq_delay_details"]
-        if isinstance(details.get("delay_in_days"), int):
-            return int(details["delay_in_days"])
-    for key in ("delay_in_days", "delayInDays"):
-        value = sequence.get(key)
-        if isinstance(value, int):
-            return int(value)
-    return 0
+def _copied_sequence_delay_in_days(seq_number: int) -> int:
+    for step in SMARTLEAD_STEPS:
+        if step.email_number == seq_number:
+            return step.delay_from_previous_email_days
+    raise ValueError(f"Smartlead template sequence {seq_number} is outside the canonical three-email cadence.")
 
 
 def _apply_show_placeholders(value: str, show: Show) -> str:
@@ -1048,17 +1195,18 @@ def _clone_template_settings(target_campaign_id: int, template_campaign_id: int,
             "sequences": [
                 {
                     "id": None,
-                    "seq_number": sequence.get("seq_number") or (index + 1),
+                    "seq_number": seq_number,
                     "subject": _apply_show_sequence_subject(
                         str(sequence.get("subject", "")),
                         show,
                         template_show_name,
-                        seq_number=int(sequence.get("seq_number") or (index + 1)),
+                        seq_number=seq_number,
                     ),
                     "email_body": _apply_show_sequence_copy(str(sequence.get("email_body", "")), show, template_show_name),
-                    "seq_delay_details": {"delay_in_days": _extract_delay_in_days(sequence)},
+                    "seq_delay_details": {"delay_in_days": _copied_sequence_delay_in_days(seq_number)},
                 }
                 for index, sequence in enumerate(template_sequences)
+                for seq_number in [int(sequence.get("seq_number") or (index + 1))]
             ]
         }
         _smartlead_request("POST", f"/campaigns/{target_campaign_id}/sequences", payload=sequence_payload)
@@ -1088,6 +1236,8 @@ def ensure_smartlead_campaign(show: Show, *, force_rebuild: bool = False) -> Sma
     try:
         if show.smartlead_campaign_id and not force_rebuild:
             show.smartlead_campaign_name = show.smartlead_campaign_name or desired_name
+            if show.status != ShowStatus.live.value:
+                _update_smartlead_campaign_status(int(show.smartlead_campaign_id), "PAUSED")
             return SmartleadSyncResult(
                 "smartlead",
                 "success",
@@ -1104,6 +1254,7 @@ def ensure_smartlead_campaign(show: Show, *, force_rebuild: bool = False) -> Sma
                     existing_name = str(existing_campaign.get("name", "")).strip() or desired_name
                     show.smartlead_campaign_id = int(campaign_id)
                     show.smartlead_campaign_name = existing_name
+                    _update_smartlead_campaign_status(show.smartlead_campaign_id, "PAUSED")
                     return SmartleadSyncResult(
                         "smartlead",
                         "success",
@@ -1130,6 +1281,7 @@ def ensure_smartlead_campaign(show: Show, *, force_rebuild: bool = False) -> Sma
             _clone_template_settings(campaign_id, int(settings.smartlead_template_campaign_id), show)
         show.smartlead_campaign_id = campaign_id
         show.smartlead_campaign_name = desired_name
+        _update_smartlead_campaign_status(campaign_id, "PAUSED")
 
         return SmartleadSyncResult(
             "smartlead",

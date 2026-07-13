@@ -11,7 +11,6 @@ from starlette import status
 
 from app.config import get_settings
 from app.core.auth import can_manage, require_authenticated
-from app.core.bulk_jobs import bulk_scrape_jobs
 from app.core.templating import template_context, templates
 from app.database import get_db
 from app.guide_services import (
@@ -22,8 +21,20 @@ from app.guide_services import (
     rebuild_trade_show_guides,
     update_guide_row,
 )
-from app.models import ShowGuideRow
-from app.providers import ensure_smartlead_campaign, fetch_smartlead_campaign_option, list_smartlead_campaign_options
+from app.models import ProviderStatus, ShowGuideRow
+from app.outbound_pipeline import (
+    build_outbound_pipeline_summary,
+    ensure_build_flow_job,
+    get_show_with_outbound,
+    import_outbound_leads_from_csv,
+    write_build_source_csv,
+)
+from app.providers import (
+    ensure_smartlead_campaign,
+    fetch_smartlead_campaign_option,
+    list_smartlead_campaign_options,
+    push_to_cultivate,
+)
 from app.show_guides import build_guide_sheet_views, get_guide_sheet
 from app.show_intelligence import build_show_analysis, build_show_analyses
 from app.services import (
@@ -44,6 +55,7 @@ from app.services import (
     remove_show_from_queue,
     record_manual_trade_show_scan,
     start_outbound_campaign,
+    sync_show_to_airtable,
     sync_show_from_clay,
     update_show,
     upsert_show,
@@ -179,7 +191,9 @@ def show_dashboard(request: Request, db: Session = Depends(get_db)):
 
 @router.get("/shows/{show_id}")
 def show_detail(show_id: int, request: Request, db: Session = Depends(get_db)):
-    show = _get_show_or_404(db, show_id)
+    show = get_show_with_outbound(db, show_id)
+    if show is None:
+        raise HTTPException(status_code=404, detail="Show not found.")
     all_shows = list_shows(db)
     queue_positions, _queue_total = build_scrape_queue_positions(all_shows)
     export_path = Path(show.latest_export_path) if show.latest_export_path else None
@@ -207,6 +221,8 @@ def show_detail(show_id: int, request: Request, db: Session = Depends(get_db)):
             smartlead_campaign_options=list_smartlead_campaign_options() if can_manage(request) else [],
             smartlead_campaign_url=_smartlead_campaign_url(show.smartlead_campaign_id),
             outbound_plan=build_outbound_plan(db, show),
+            outbound_pipeline=build_outbound_pipeline_summary(show),
+            recent_outbound_events=list(show.outbound_sync_events[:8]),
         ),
     )
 
@@ -308,6 +324,77 @@ def delete_show_leads(
     return RedirectResponse(f"/shows/{show_id}", status_code=status.HTTP_303_SEE_OTHER)
 
 
+@router.post("/shows/{show_id}/outbound/leads/upload")
+async def upload_outbound_leads_route(
+    show_id: int,
+    request: Request,
+    lead_file: UploadFile = File(...),
+    source_label: str = Form("uploaded lead list"),
+    db: Session = Depends(get_db),
+):
+    require_authenticated(request)
+    show = _get_show_or_404(db, show_id)
+    filename = (lead_file.filename or "").strip().lower()
+    if not filename.endswith(".csv"):
+        raise HTTPException(status_code=400, detail="Upload a CSV lead list.")
+    payload = await lead_file.read()
+    try:
+        summary = import_outbound_leads_from_csv(
+            db,
+            show,
+            payload=payload,
+            source_label=source_label,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    request.session["flash_message"] = {
+        "tone": "success",
+        "title": "Outbound leads imported.",
+        "detail": (
+            f"Created {summary.created_accounts}, updated {summary.updated_accounts}, "
+            f"skipped {summary.skipped_rows}. {summary.domain_ready_accounts} account(s) have domains."
+        ),
+    }
+    return RedirectResponse(f"/shows/{show_id}#outbound-pipeline", status_code=status.HTTP_303_SEE_OTHER)
+
+
+@router.get("/shows/{show_id}/outbound/build-source.csv")
+def download_outbound_build_source_route(show_id: int, request: Request, db: Session = Depends(get_db)):
+    require_authenticated(request)
+    show = get_show_with_outbound(db, show_id)
+    if show is None:
+        raise HTTPException(status_code=404, detail="Show not found.")
+    content = write_build_source_csv(show)
+    filename = f"{show.name.strip().replace('/', '-').replace(' ', '-')}_build_source.csv"
+    return Response(
+        content=content,
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.post("/shows/{show_id}/outbound/build-flow/queue")
+def queue_outbound_build_flow_route(show_id: int, request: Request, db: Session = Depends(get_db)):
+    require_authenticated(request)
+    show = get_show_with_outbound(db, show_id)
+    if show is None:
+        raise HTTPException(status_code=404, detail="Show not found.")
+    if not show.outbound_accounts:
+        request.session["flash_message"] = {
+            "tone": "warning",
+            "title": "No outbound leads loaded.",
+            "detail": "Upload a lead list before queueing the Build-style enrichment flow.",
+        }
+        return RedirectResponse(f"/shows/{show_id}#outbound-pipeline", status_code=status.HTTP_303_SEE_OTHER)
+    job = ensure_build_flow_job(db, show)
+    request.session["flash_message"] = {
+        "tone": "success",
+        "title": "Build-style flow queued.",
+        "detail": f"Queued {job.record_count} account(s) for domain/contact enrichment.",
+    }
+    return RedirectResponse(f"/shows/{show_id}#outbound-pipeline", status_code=status.HTTP_303_SEE_OTHER)
+
+
 @router.post("/show-bulk/delete")
 def delete_selected_shows(
     request: Request,
@@ -403,24 +490,17 @@ def scrape_selected_shows(
         }
         return RedirectResponse(target_path, status_code=status.HTTP_303_SEE_OTHER)
 
-    queued_shows: list[QueuedBulkShow] = []
+    queued_count = 0
     skipped = 0
     for show_id in unique_ids:
         show = get_show(db, show_id)
         if show is None or show.status in {"queued", "scraping"} or not show.source_url.strip():
             skipped += 1
             continue
-        queued_shows.append(
-            QueuedBulkShow(
-                show_id=show.id,
-                show_name=show.name,
-                event_date_raw=show.event_date.isoformat(),
-                place=show.place,
-                link=show.source_url,
-            )
-        )
+        queue_show_now(db, show)
+        queued_count += 1
 
-    if not queued_shows:
+    if not queued_count:
         request.session["flash_message"] = {
             "tone": "warning",
             "title": "Nothing to scrape.",
@@ -428,15 +508,10 @@ def scrape_selected_shows(
         }
         return RedirectResponse(target_path, status_code=status.HTTP_303_SEE_OTHER)
 
-    job_id = bulk_scrape_jobs.start_job(
-        b"",
-        run_offset_days=get_settings().default_run_offset_days,
-        queued_shows=queued_shows,
-    )
     request.session["flash_message"] = {
         "tone": "success",
-        "title": "Scrape started.",
-        "detail": f"Queued {len(queued_shows)} show(s) for scraping. Skipped {skipped}. Job {job_id} is now running.",
+        "title": "Scrapes queued.",
+        "detail": f"Queued {queued_count} show(s) for the headless worker. Skipped {skipped}.",
     }
     return RedirectResponse(target_path, status_code=status.HTTP_303_SEE_OTHER)
 
@@ -570,15 +645,17 @@ def scrape_pending_shows_route(
         }
         return RedirectResponse("/shows/dashboard", status_code=status.HTTP_303_SEE_OTHER)
 
-    job_id = bulk_scrape_jobs.start_job(
-        b"",
-        run_offset_days=get_settings().default_run_offset_days,
-        queued_shows=queued_shows,
-    )
+    queued_count = 0
+    for queued_show in queued_shows:
+        show = get_show(db, queued_show.show_id)
+        if show is None:
+            continue
+        queue_show_now(db, show)
+        queued_count += 1
     request.session["flash_message"] = {
         "tone": "success",
-        "title": "Pending scrape started.",
-        "detail": f"Queued {len(queued_shows)} show(s) for scraping. Job {job_id} is now running.",
+        "title": "Pending scrapes queued.",
+        "detail": f"Queued {queued_count} show(s) for the headless worker.",
     }
     return RedirectResponse("/shows/dashboard", status_code=status.HTTP_303_SEE_OTHER)
 
@@ -731,14 +808,15 @@ def confirm_scanned_trade_shows_route(
     should_scrape = str(scrape_after_add).strip().lower() in {"1", "true", "yes"}
     request_headers = getattr(request, "headers", {})
     prefer_local_scrape = request_headers.get("x-prefer-local-scrape") == "1"
-    job_id = ""
+    queued_count = 0
     local_scrape_targets: list[dict[str, object]] = []
     if should_scrape and queued_shows and not prefer_local_scrape:
-        job_id = bulk_scrape_jobs.start_job(
-            b"",
-            run_offset_days=get_settings().default_run_offset_days,
-            queued_shows=queued_shows,
-        )
+        for queued_show in queued_shows:
+            show = get_show(db, queued_show.show_id)
+            if show is None:
+                continue
+            queue_show_now(db, show)
+            queued_count += 1
     elif should_scrape and queued_shows and prefer_local_scrape:
         local_scrape_targets = [
             {
@@ -750,19 +828,18 @@ def confirm_scanned_trade_shows_route(
             }
             for queued_show in queued_shows
         ]
+    queue_detail = f"Queued {queued_count} scrape(s) for the headless worker." if queued_count else ""
     request.session["flash_message"] = {
         "tone": "success",
         "title": "Trade show scan applied.",
-        "detail": (
-            f"Added {created}, updated {updated}, skipped {skipped}. "
-            f"{'Started scrape for selected shows.' if should_scrape and queued_shows and not prefer_local_scrape else ''}"
-        ).strip(),
+        "detail": f"Added {created}, updated {updated}, skipped {skipped}. {queue_detail}".strip(),
     }
     return JSONResponse(
         {
             "ok": True,
             "redirect": "/shows/dashboard",
-            "job_id": job_id,
+            "job_id": "",
+            "queued": queued_count,
             "local_scrape_targets": local_scrape_targets,
         }
     )
@@ -797,6 +874,13 @@ async def upload_local_scrape_result_route(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    airtable_result = sync_show_to_airtable(show, include_companies=True)
+    enrichment_result = push_to_cultivate(show)
+    show.clay_status = enrichment_result.status
+    if enrichment_result.status == ProviderStatus.failed.value:
+        show.last_error = enrichment_result.message
+    db.commit()
+
     return JSONResponse(
         {
             "ok": True,
@@ -804,6 +888,10 @@ async def upload_local_scrape_result_route(
             "company_count": result.company_count,
             "output_path": str(result.output_path),
             "status": show.status,
+            "enrichment_status": enrichment_result.status,
+            "enrichment_message": enrichment_result.message,
+            "airtable_status": airtable_result.status,
+            "airtable_message": airtable_result.message,
         }
     )
 

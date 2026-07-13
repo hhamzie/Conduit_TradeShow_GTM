@@ -1,1 +1,1 @@
-"""Trade show outbound app package."""
+"""TradeShowScraper app package."""

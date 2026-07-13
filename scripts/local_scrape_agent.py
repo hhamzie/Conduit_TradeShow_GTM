@@ -6,6 +6,7 @@ from pathlib import Path
 from tempfile import gettempdir
 from threading import Lock, Thread
 from uuid import uuid4
+import os
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request, Response
@@ -40,10 +41,19 @@ class LocalScrapeRequest(BaseModel):
     event_date_raw: str = ""
 
 
+allowed_origins = [
+    origin.strip()
+    for origin in os.getenv(
+        "LOCAL_SCRAPE_ALLOWED_ORIGINS",
+        "https://conduit-tradeshow-gtm.onrender.com,http://127.0.0.1:8000,http://localhost:8000",
+    ).split(",")
+    if origin.strip()
+]
+
 app = FastAPI(title="Local Scrape Agent")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=allowed_origins,
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -59,7 +69,10 @@ async def allow_private_network_requests(request: Request, call_next):
         response = Response(status_code=204)
     else:
         response = await call_next(request)
-    response.headers["Access-Control-Allow-Origin"] = "*"
+    origin = request.headers.get("origin", "")
+    if origin in allowed_origins:
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Vary"] = "Origin"
     response.headers["Access-Control-Allow-Methods"] = "*"
     response.headers["Access-Control-Allow-Headers"] = "*"
     response.headers["Access-Control-Allow-Private-Network"] = "true"

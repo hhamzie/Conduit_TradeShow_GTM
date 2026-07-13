@@ -8,17 +8,18 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from sqlalchemy.orm import Session
 from starlette import status
 
-from app.core.auth import require_authenticated
 from app.core.bulk_jobs import bulk_scrape_jobs
+from app.core.auth import require_authenticated
 from app.core.templating import settings, template_context, templates
 from app.database import get_db
 from app.services import (
     create_or_update_show,
+    get_show,
     import_shows_from_csv,
     list_shows,
     purge_show,
+    queue_show_now,
     register_bulk_shows,
-    run_show_scrape,
     upsert_show,
 )
 from app.web.presenters import WORKFLOW_SECTIONS, build_workflow_dashboard_view, shows_in_section
@@ -139,11 +140,11 @@ def scrape_single_show(
             run_offset_days=settings.default_run_offset_days,
         )
         db.commit()
-        result = run_show_scrape(db, show)
+        queue_show_now(db, show)
         request.session["flash_message"] = {
             "tone": "success",
-            "title": "Trade show added and scraped.",
-            "detail": f"{show.name} is now on the dashboard with {result.company_count} companies scraped.",
+            "title": "Trade show queued.",
+            "detail": f"{show.name} is on the dashboard and queued for the headless worker.",
         }
     except ValueError as exc:
         request.session["single_scrape_error"] = str(exc)
@@ -154,11 +155,7 @@ def scrape_single_show(
             return RedirectResponse(f"/shows/{show.id}", status_code=status.HTTP_303_SEE_OTHER)
         return RedirectResponse("/workflow", status_code=status.HTTP_303_SEE_OTHER)
 
-    return FileResponse(
-        result.output_path,
-        filename=result.output_path.name,
-        media_type="text/csv",
-    )
+    return RedirectResponse("/shows/dashboard", status_code=status.HTTP_303_SEE_OTHER)
 
 
 @router.post("/scrape/bulk")
@@ -178,17 +175,21 @@ async def scrape_many_shows(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    job_id = bulk_scrape_jobs.start_job(
-        payload,
-        run_offset_days=settings.default_run_offset_days,
-        queued_shows=queued_shows,
-    )
+    queued_count = 0
+    for queued_show in queued_shows:
+        show = get_show(db, queued_show.show_id)
+        if show is None:
+            continue
+        queue_show_now(db, show)
+        queued_count += 1
     return JSONResponse(
         {
-            "job_id": job_id,
+            "job_id": "",
+            "queued": queued_count,
             "created": summary.created,
             "updated": summary.updated,
             "skipped": summary.skipped,
+            "message": f"Queued {queued_count} show(s) for the headless worker.",
         }
     )
 

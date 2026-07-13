@@ -114,6 +114,13 @@ def build_show_notice(show: Show, now: datetime) -> ShowNotice | None:
             detail=summarize_show_error(show.last_error) or "The latest scrape attempt failed.",
         )
 
+    if show.status == "queued" and (show.scrape_execution_mode or "worker") == "local":
+        return ShowNotice(
+            tone="warning",
+            title="Local scrape ready to run",
+            detail="This show is inside the 14-day window. Click Run now on this Mac to scrape and upload exhibitors.",
+        )
+
     if not _has_recent_successful_scrape(show, now):
         return None
 
@@ -124,11 +131,11 @@ def build_show_notice(show: Show, now: datetime) -> ShowNotice | None:
 
         if show.clay_status == "failed":
             tone = "warning"
-            title = "Clay upload needs retry"
-            details.append("The export finished, but Clay throttled or rejected the row push.")
+            title = "Airtable upload needs retry"
+            details.append("The export finished, but the Cultivate Airtable workflow rejected the row push.")
         elif show.clay_status == "polling":
             tone = "warning" if show.status == "approved" else "success"
-            title = "Clay enrichment in progress"
+            title = "Legacy enrichment in progress"
             details.append(
                 f"Clay has {show.clay_ready_rows}/{show.clay_total_rows or show.company_count} rows ready so far."
             )
@@ -137,7 +144,7 @@ def build_show_notice(show: Show, now: datetime) -> ShowNotice | None:
                 f"Clay resolved all {show.clay_total_rows} rows. Ready: {show.clay_ready_rows}, failed: {show.clay_failed_rows}, skipped: {show.clay_skipped_rows}."
             )
         elif show.clay_status == "success":
-            details.append("Rows were sent to Clay.")
+            details.append("Rows were sent to the Cultivate Airtable workflow.")
 
         if show.notification_status == "failed":
             tone = "warning"
@@ -152,7 +159,7 @@ def build_show_notice(show: Show, now: datetime) -> ShowNotice | None:
         elif show.smartlead_status == "ready_to_launch":
             tone = "success"
             title = "Smartlead campaign ready"
-            details.append("All Clay rows are resolved and the Smartlead campaign is ready to launch.")
+            details.append("All Airtable rows are resolved and the Smartlead campaign is ready to launch.")
         elif show.smartlead_status == "active":
             title = "Smartlead campaign live"
             details.append("This show's Smartlead campaign is currently active.")
@@ -163,7 +170,7 @@ def build_show_notice(show: Show, now: datetime) -> ShowNotice | None:
         elif show.smartlead_status == "failed":
             tone = "warning"
             title = "Smartlead sync needs retry"
-            details.append("The Clay pull succeeded, but the latest Smartlead sync failed.")
+            details.append("The Airtable handoff succeeded, but the latest Smartlead sync failed.")
 
         if not details:
             details.append(f"{show.company_count} companies were exported and the show is populated.")
@@ -256,10 +263,10 @@ def provider_status_summary(show: Show) -> str:
     if show.smartlead_status == "active":
         return "Smartlead campaign is active."
     if show.clay_status == "failed":
-        return "Clay push needs a retry."
+        return "Airtable push needs a retry."
     if show.company_count > 0:
-        return "Clay has not received this export yet."
-    return "Clay has nothing to send yet."
+        return "Airtable has not received this export yet."
+    return "Airtable has nothing to send yet."
 
 
 def describe_show_flow(show: Show, now: datetime, *, queue_position: int | None = None, queue_total: int = 0) -> dict[str, str]:
@@ -271,6 +278,12 @@ def describe_show_flow(show: Show, now: datetime, *, queue_position: int | None 
         }
 
     if show.status == "queued":
+        if (show.scrape_execution_mode or "worker") == "local":
+            return {
+                "section": "in_progress",
+                "step": "Waiting for your Mac",
+                "next_action": "Click Run now to start the local exhibitor scrape; Render will not scrape this show.",
+            }
         position_label = f"Queue position {queue_position} of {queue_total}" if queue_position else "Queued for scraping"
         return {
             "section": "in_progress",
@@ -282,7 +295,7 @@ def describe_show_flow(show: Show, now: datetime, *, queue_position: int | None 
         return {
             "section": "in_progress",
             "step": "Scraping now",
-            "next_action": "Wait for the export and Clay handoff to finish.",
+            "next_action": "Wait for the export and Airtable handoff to finish.",
         }
 
     if show.status == "ready_for_review":
@@ -308,7 +321,7 @@ def describe_show_flow(show: Show, now: datetime, *, queue_position: int | None 
         return {
             "section": "completed",
             "step": "Approved",
-            "next_action": "Clay and Smartlead are still preparing the campaign.",
+            "next_action": "Airtable and Smartlead are still preparing the campaign.",
         }
 
     if show.status == "live":

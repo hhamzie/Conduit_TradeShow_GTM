@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: hpointscraper
+    name: tradeshowscraper
     runtime: docker
     plan: starter
     branch: main
@@ -13,11 +13,91 @@ services:
     envVars:
       - key: EXPORT_DIR
         value: /app/data/exports
+      - key: TRADE_SHOW_INGESTION_DIR
+        value: /app/data/exports/TradeShowIngestion
+      - key: DEFAULT_BROWSER_MODE
+        value: prefer
+      - key: DEFAULT_SCRAPER_WORKERS
+        value: "1"
+      - key: BULK_SCRAPER_WORKERS
+        value: "1"
+      - key: SCRAPE_EXECUTION_MODE
+        value: local
+      - key: AIRTABLE_TOKEN
+        sync: false
+      - key: AIRTABLE_BASE_ID
+        value: appfBCKnwzWr26p8R
+      - key: AIRTABLE_SHOWS_TABLE_ID
+        value: tblneSplTxPpRcJun
+      - key: AIRTABLE_COMPANIES_TABLE_ID
+        value: tblNQrSab6MmUI98s
+      - key: AIRTABLE_CONTACTS_TABLE_ID
+        value: tbl3eQqwTAsVAf5vr
+      - key: AIRTABLE_CAMPAIGN_PUSHES_TABLE_ID
+        value: tbleK9abvfJaetm7o
+      - key: CULTIVATE_WEBHOOK_URL
+        sync: false
+      - key: CULTIVATE_ENABLE_SMARTLEAD
+        value: "true"
+      - key: SMARTLEAD_API_KEY
+        sync: false
+      - key: SMARTLEAD_TEMPLATE_CAMPAIGN_ID
+        sync: false
       - key: DATABASE_URL
         fromDatabase:
-          name: hpointscraper-db
+          name: tradeshowscraper-db
+          property: connectionString
+  - type: worker
+    name: tradeshowscraper-worker
+    runtime: docker
+    plan: starter
+    branch: main
+    autoDeploy: true
+    dockerCommand: python -m app.worker
+    envVars:
+      - key: EXPORT_DIR
+        value: /app/data/exports
+      - key: TRADE_SHOW_INGESTION_DIR
+        value: /app/data/exports/TradeShowIngestion
+      - key: DEFAULT_BROWSER_MODE
+        value: prefer
+      - key: DEFAULT_SCRAPER_WORKERS
+        value: "1"
+      - key: BULK_SCRAPER_WORKERS
+        value: "1"
+      - key: SCRAPE_EXECUTION_MODE
+        value: local
+      - key: WEEKLY_SHOW_SYNC_ENABLED
+        value: "true"
+      - key: WEEKLY_SHOW_SYNC_WEEKDAY
+        value: "6"
+      - key: WEEKLY_SHOW_SYNC_HOUR
+        value: "10"
+      - key: WEEKLY_SHOW_SYNC_TIMEZONE
+        value: America/New_York
+      - key: WEEKLY_SHOW_SYNC_LOOKAHEAD_DAYS
+        value: "100"
+      - key: NOTION_API_TOKEN
+        sync: false
+      - key: NOTION_DATABASE_ID
+        value: 356127477edb804d89e7c406ad08975b
+      - key: NOTION_DATA_SOURCE_ID
+        value: 356127477edb8094b75f000bbd6766d8
+      - key: SCRAPE_DUE_WEBHOOK_URL
+        sync: false
+      - key: AIRTABLE_TOKEN
+        sync: false
+      - key: AIRTABLE_BASE_ID
+        value: appfBCKnwzWr26p8R
+      - key: AIRTABLE_SHOWS_TABLE_ID
+        value: tblneSplTxPpRcJun
+      - key: AIRTABLE_COMPANIES_TABLE_ID
+        value: tblNQrSab6MmUI98s
+      - key: DATABASE_URL
+        fromDatabase:
+          name: tradeshowscraper-db
           property: connectionString
 
 databases:
-  - name: hpointscraper-db
+  - name: tradeshowscraper-db
     plan: starter

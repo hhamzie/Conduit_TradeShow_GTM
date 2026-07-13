@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from app.application import create_app
+from app.web.routes.clay_webhooks import clay_tradeshow_completed
 from app.web.routes.auth import login_page, login_submit, logout
 from app.web.routes.health import healthz
 from app.web.routes.shows import (
@@ -18,7 +19,9 @@ from app.web.routes.shows import (
     download_guide_workbook,
     download_smartlead_export,
     launch_show_route,
+    download_outbound_build_source_route,
     pause_show_route,
+    queue_outbound_build_flow_route,
     rebuild_smartlead_campaign_route,
     remove_show_from_queue_route,
     run_show_now,
@@ -29,6 +32,7 @@ from app.web.routes.shows import (
     show_dashboard,
     show_detail,
     sync_show_from_clay_route,
+    upload_outbound_leads_route,
     upload_local_scrape_result_route,
     upload_guide_workbook_route,
     update_guide_row_route,
@@ -55,6 +59,7 @@ __all__ = [
     "login_page",
     "login_submit",
     "logout",
+    "clay_tradeshow_completed",
     "dashboard",
     "show_dashboard",
     "show_guide",
@@ -83,6 +88,9 @@ __all__ = [
     "approve_show_route",
     "sync_show_from_clay_route",
     "launch_show_route",
+    "download_outbound_build_source_route",
+    "upload_outbound_leads_route",
+    "queue_outbound_build_flow_route",
     "configure_smartlead_route",
     "create_smartlead_campaign_route",
     "pause_show_route",

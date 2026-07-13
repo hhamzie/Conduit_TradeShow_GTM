@@ -18,7 +18,8 @@ from sqlalchemy.orm import sessionmaker
 
 from app.config import get_settings
 from app.database import Base
-from app.models import AutomationCheckpoint, CampaignRun, ClaySyncRow, RunStatus, Show, ShowGuideRow, ShowStatus
+from app.models import AutomationCheckpoint, CampaignRun, ClaySyncRow, OutboundAccount, RunStatus, Show, ShowGuideRow, ShowStatus
+from app.outbound_pipeline import build_outbound_pipeline_summary, import_outbound_leads_from_csv, write_build_source_csv
 from app.providers import ClayPollResult, ClayRecord, ProviderResult, SmartleadSyncResult, ensure_smartlead_campaign
 from app.services import _build_prepared_lead, backfill_queued_runs, BulkDirectScrapeResult, DirectScrapeResult, launch_show, list_shows, register_bulk_shows, remove_show_from_queue, run_bulk_direct_scrape, run_next_campaign, run_show_scrape, run_weekly_show_sync, start_outbound_campaign, sync_show_from_clay, upsert_show
 from app.trade_show_feeder import (
@@ -159,6 +160,73 @@ class AutomationTests(unittest.TestCase):
             {"email": "hi@example.com", "company": "No Domain Inc"},
         )
         self.assertIsNone(missing_domain)
+
+    def test_import_outbound_leads_from_csv_creates_dashboard_pipeline_rows(self) -> None:
+        with self.Session() as session:
+            show = make_show()
+            session.add(show)
+            session.commit()
+
+            payload = (
+                "Company Name,Booth Number,Website,Contact Name,Contact Email,Contact Title\n"
+                "Acme Growers,101,www.acmegrowers.com,Ada Lovelace,ada@acmegrowers.com,VP Sales\n"
+                "No Domain Co,102,,Grace Hopper,,Director\n"
+            ).encode("utf-8")
+
+            summary = import_outbound_leads_from_csv(
+                session,
+                show,
+                payload=payload,
+                source_label="Cultivate test list",
+            )
+
+            self.assertEqual(summary.created_accounts, 2)
+            self.assertEqual(summary.updated_accounts, 0)
+            self.assertEqual(summary.domain_ready_accounts, 1)
+            self.assertEqual(summary.needs_domain_accounts, 1)
+            self.assertEqual(summary.created_contacts, 2)
+
+            pipeline = build_outbound_pipeline_summary(show)
+            self.assertEqual(pipeline.account_count, 2)
+            self.assertEqual(pipeline.contact_count, 2)
+            self.assertEqual(pipeline.domain_ready_count, 1)
+
+            account = session.scalar(
+                select(OutboundAccount).where(OutboundAccount.company_name == "Acme Growers")
+            )
+            self.assertIsNotNone(account)
+            assert account is not None
+            self.assertEqual(account.domain, "acmegrowers.com")
+            self.assertEqual(account.website_url, "https://www.acmegrowers.com")
+            self.assertEqual(account.lifecycle_status, "domain_ready")
+
+    def test_import_outbound_leads_from_csv_updates_existing_account_and_exports_build_source(self) -> None:
+        with self.Session() as session:
+            show = make_show(name="Nashville Build Expo")
+            session.add(show)
+            session.commit()
+
+            first_payload = (
+                "Company Name,Booth Number,Website\n"
+                "Acme Growers,101,https://acmegrowers.com\n"
+            ).encode("utf-8")
+            second_payload = (
+                "Company Name,Booth Number,Website\n"
+                "Acme Growers,201,https://acmegrowers.com\n"
+            ).encode("utf-8")
+
+            import_outbound_leads_from_csv(session, show, payload=first_payload)
+            summary = import_outbound_leads_from_csv(session, show, payload=second_payload)
+
+            self.assertEqual(summary.created_accounts, 0)
+            self.assertEqual(summary.updated_accounts, 1)
+            self.assertEqual(summary.total_accounts, 1)
+
+            content = write_build_source_csv(show).decode("utf-8")
+            self.assertIn("Official Company Domain (2)", content)
+            self.assertIn("Nashville Build Expo", content)
+            self.assertIn("acmegrowers.com", content)
+            self.assertIn("201", content)
 
     def test_sync_show_from_clay_imports_ready_rows_only_once(self) -> None:
         with self.Session() as session, tempfile.TemporaryDirectory() as tmp_dir:
@@ -390,7 +458,7 @@ class AutomationTests(unittest.TestCase):
             self.assertEqual(len(show.runs), 1)
             self.assertEqual(show.runs[0].status, RunStatus.queued.value)
 
-    def test_upsert_show_immediately_queues_future_show(self) -> None:
+    def test_upsert_show_waits_until_future_show_is_within_offset_window(self) -> None:
         with self.Session() as session:
             show, created = upsert_show(
                 session,
@@ -403,9 +471,9 @@ class AutomationTests(unittest.TestCase):
             session.commit()
             session.refresh(show)
             self.assertTrue(created)
-            self.assertEqual(show.status, ShowStatus.queued.value)
-            self.assertEqual(len(show.runs), 1)
-            self.assertEqual(show.runs[0].status, RunStatus.queued.value)
+            self.assertEqual(show.run_at, datetime(2026, 7, 28, 0, 0))
+            self.assertEqual(show.status, ShowStatus.waiting.value)
+            self.assertEqual(len(show.runs), 0)
 
     def test_backfill_queued_runs_restores_missing_worker_job(self) -> None:
         with self.Session() as session:
@@ -996,7 +1064,7 @@ class AutomationTests(unittest.TestCase):
             shows = session.scalars(select(Show)).all()
             self.assertEqual(len(shows), 1)
 
-    def test_bulk_scrape_route_starts_background_job(self) -> None:
+    def test_bulk_scrape_route_queues_registered_shows(self) -> None:
         async def run_test() -> None:
             try:
                 from fastapi import UploadFile
@@ -1012,20 +1080,19 @@ class AutomationTests(unittest.TestCase):
             )
             request = type("Req", (), {"session": {}})()
 
-            with (
-                patch("app.web.routes.workflow.require_authenticated"),
-                patch("app.web.routes.workflow.bulk_scrape_jobs.start_job", return_value="job-123") as start_job_mock,
-            ):
+            with patch("app.web.routes.workflow.require_authenticated"):
                 with self.Session() as session:
                     response = await scrape_many_shows(request=request, file=upload, db=session)
+                    show = session.scalar(select(Show))
+                    runs = session.scalars(select(CampaignRun)).all()
 
             self.assertEqual(response.status_code, 200)
-            self.assertIn(b'"job_id":"job-123"', response.body)
+            self.assertIn(b'"job_id":""', response.body)
+            self.assertIn(b'"queued":1', response.body)
             self.assertIn(b'"created":1', response.body)
-            self.assertEqual(start_job_mock.call_count, 1)
-            self.assertIn(b"Luxe Pack", start_job_mock.call_args.args[0])
-            self.assertEqual(start_job_mock.call_args.kwargs["run_offset_days"], 14)
-            self.assertEqual(len(start_job_mock.call_args.kwargs["queued_shows"]), 1)
+            assert show is not None
+            self.assertEqual(show.status, ShowStatus.queued.value)
+            self.assertEqual([run.status for run in runs], [RunStatus.queued.value])
 
         import asyncio
 
@@ -1049,6 +1116,30 @@ class AutomationTests(unittest.TestCase):
             self.assertEqual(response.status_code, 303)
             self.assertEqual(response.headers["location"], "/shows/dashboard")
             self.assertEqual(request.session["flash_message"]["title"], "Trade show saved.")
+
+    def test_single_scrape_route_queues_show_for_worker(self) -> None:
+        from app.main import scrape_single_show
+
+        request = type("Req", (), {"session": {}})()
+        with self.Session() as session:
+            with patch("app.web.routes.workflow.require_authenticated"):
+                response = scrape_single_show(
+                    request=request,
+                    show_name="ICFF",
+                    event_date="2026-05-17",
+                    place="New York, NY",
+                    link="https://example.com/icff",
+                    db=session,
+                )
+                show = session.scalar(select(Show))
+                runs = session.scalars(select(CampaignRun)).all()
+
+            self.assertEqual(response.status_code, 303)
+            self.assertEqual(response.headers["location"], "/shows/dashboard")
+            assert show is not None
+            self.assertEqual(show.status, ShowStatus.queued.value)
+            self.assertEqual([run.status for run in runs], [RunStatus.queued.value])
+            self.assertEqual(request.session["flash_message"]["title"], "Trade show queued.")
 
     def test_import_shows_redirects_to_dashboard_with_flash(self) -> None:
         async def run_test() -> None:
@@ -1200,7 +1291,17 @@ class AutomationTests(unittest.TestCase):
                 session.add(show)
                 session.commit()
 
-                with patch("app.web.routes.shows.require_authenticated"):
+                with (
+                    patch("app.web.routes.shows.require_authenticated"),
+                    patch(
+                        "app.web.routes.shows.push_to_cultivate",
+                        return_value=ProviderResult("airtable", "success", "Queued enrichment."),
+                    ),
+                    patch(
+                        "app.web.routes.shows.sync_show_to_airtable",
+                        return_value=ProviderResult("airtable", "success", "Synced raw exhibitors."),
+                    ),
+                ):
                     response = await upload_local_scrape_result_route(
                         show_id=show.id,
                         request=request,
@@ -1351,6 +1452,7 @@ class AutomationTests(unittest.TestCase):
         sequence_payload = next(payload for _method, path, payload in request_calls if path == "/campaigns/654/sequences")
         self.assertEqual(sequence_payload["sequences"][0]["subject"], "meet us at car wash show")
         self.assertEqual(sequence_payload["sequences"][0]["email_body"], "We are heading to Car Wash Show.")
+        self.assertEqual(sequence_payload["sequences"][0]["seq_delay_details"]["delay_in_days"], 0)
 
         webhook_payload = next(payload for _method, path, payload in request_calls if path == "/campaigns/654/webhooks")
         self.assertEqual(webhook_payload["id"], None)
@@ -1459,6 +1561,12 @@ class AutomationTests(unittest.TestCase):
                                 "email_body": "Still thinking about Car Wash Show.",
                                 "seq_delay_details": {"delay_in_days": 3},
                             },
+                            {
+                                "seq_number": 3,
+                                "subject": "last note on Car Wash Show",
+                                "email_body": "Final Car Wash Show follow-up.",
+                                "seq_delay_details": {"delay_in_days": 3},
+                            },
                         ],
                     ),
                     patch("app.providers._get_smartlead_email_accounts", return_value=[{"id": 77}]),
@@ -1475,8 +1583,13 @@ class AutomationTests(unittest.TestCase):
             sequence_payload["sequences"][0]["email_body"],
             "{{first_name}}, are you attending the Pack Expo with {{company_name}}?",
         )
+        self.assertEqual(sequence_payload["sequences"][0]["seq_delay_details"]["delay_in_days"], 0)
         self.assertEqual(sequence_payload["sequences"][1]["subject"], "following up on Pack Expo")
         self.assertEqual(sequence_payload["sequences"][1]["email_body"], "Still thinking about Pack Expo.")
+        self.assertEqual(sequence_payload["sequences"][1]["seq_delay_details"]["delay_in_days"], 2)
+        self.assertEqual(sequence_payload["sequences"][2]["subject"], "last note on Pack Expo")
+        self.assertEqual(sequence_payload["sequences"][2]["email_body"], "Final Pack Expo follow-up.")
+        self.assertEqual(sequence_payload["sequences"][2]["seq_delay_details"]["delay_in_days"], 4)
 
     def test_ensure_smartlead_campaign_force_rebuild_skips_existing_linked_campaign(self) -> None:
         show = make_show(smartlead_campaign_id=111, smartlead_campaign_name="Old", name="Car Wash Show", event_date=date(2026, 5, 11))
@@ -1543,7 +1656,11 @@ class AutomationTests(unittest.TestCase):
         self.assertEqual(result.status, "success")
         self.assertEqual(result.campaign_id, 4321)
         self.assertEqual(result.campaign_name, "Sweets & Snacks Expo - May 19th 2026")
-        request_mock.assert_not_called()
+        request_mock.assert_called_once_with(
+            "POST",
+            "/campaigns/4321/status",
+            payload={"status": "PAUSED"},
+        )
 
     def test_scan_upcoming_trade_shows_route_returns_candidates(self) -> None:
         from app.main import scan_upcoming_trade_shows_route
@@ -2031,7 +2148,7 @@ class AutomationTests(unittest.TestCase):
             self.assertEqual(shows[0].name, "High Point Market")
             self.assertEqual(request.session["flash_message"]["title"], "Trade show scan applied.")
 
-    def test_confirm_scanned_trade_shows_route_can_start_scrape_job(self) -> None:
+    def test_confirm_scanned_trade_shows_route_can_queue_scrape_job(self) -> None:
         from app.main import confirm_scanned_trade_shows_route
 
         request = type("Req", (), {"session": {}})()
@@ -2047,21 +2164,23 @@ class AutomationTests(unittest.TestCase):
             ]
         )
         with self.Session() as session:
-            with (
-                patch("app.web.routes.shows.require_authenticated"),
-                patch("app.web.routes.shows.bulk_scrape_jobs.start_job", return_value="job-123") as start_job_mock,
-            ):
+            with patch("app.web.routes.shows.require_authenticated"):
                 response = confirm_scanned_trade_shows_route(
                     request=request,
                     candidates_json=payload,
                     scrape_after_add="true",
                     db=session,
                 )
+                show = session.scalar(select(Show))
+                runs = session.scalars(select(CampaignRun)).all()
 
             self.assertEqual(response.status_code, 200)
-            self.assertIn(b'"job_id":"job-123"', response.body)
-            self.assertIn("Started scrape", request.session["flash_message"]["detail"])
-            self.assertEqual(start_job_mock.call_count, 1)
+            self.assertIn(b'"job_id":""', response.body)
+            self.assertIn(b'"queued":1', response.body)
+            self.assertIn("Queued 1 scrape", request.session["flash_message"]["detail"])
+            assert show is not None
+            self.assertEqual(show.status, ShowStatus.queued.value)
+            self.assertEqual([run.status for run in runs], [RunStatus.queued.value])
 
     def test_confirm_scanned_trade_shows_route_returns_local_targets_when_preferred(self) -> None:
         from app.main import confirm_scanned_trade_shows_route
@@ -2079,10 +2198,7 @@ class AutomationTests(unittest.TestCase):
             ]
         )
         with self.Session() as session:
-            with (
-                patch("app.web.routes.shows.require_authenticated"),
-                patch("app.web.routes.shows.bulk_scrape_jobs.start_job") as start_job_mock,
-            ):
+            with patch("app.web.routes.shows.require_authenticated"):
                 response = confirm_scanned_trade_shows_route(
                     request=request,
                     candidates_json=payload,
@@ -2093,7 +2209,6 @@ class AutomationTests(unittest.TestCase):
             self.assertEqual(response.status_code, 200)
             self.assertIn(b'"local_scrape_targets":[', response.body)
             self.assertIn(b'"show_name":"Las Vegas Market"', response.body)
-            start_job_mock.assert_not_called()
 
     def test_scrape_pending_shows_route_only_queues_unpopulated_shows(self) -> None:
         from app.main import scrape_pending_shows_route
@@ -2140,18 +2255,21 @@ class AutomationTests(unittest.TestCase):
             session.add_all([show_needs_scrape, show_ready, show_under_threshold, show_already_queued])
             session.commit()
 
-            with (
-                patch("app.web.routes.shows.require_authenticated"),
-                patch("app.web.routes.shows.bulk_scrape_jobs.start_job", return_value="job-123") as start_job_mock,
-            ):
+            with patch("app.web.routes.shows.require_authenticated"):
                 response = scrape_pending_shows_route(request=request, db=session)
+                queued_runs = session.scalars(
+                    select(CampaignRun).where(CampaignRun.status == RunStatus.queued.value)
+                ).all()
 
             self.assertEqual(response.status_code, 303)
             self.assertEqual(response.headers["location"], "/shows/dashboard")
-            self.assertEqual(request.session["flash_message"]["title"], "Pending scrape started.")
-            self.assertEqual(start_job_mock.call_count, 1)
-            queued_shows = start_job_mock.call_args.kwargs["queued_shows"]
-            self.assertEqual([item.show_name for item in queued_shows], ["Atlanta Market"])
+            self.assertEqual(request.session["flash_message"]["title"], "Pending scrapes queued.")
+            self.assertEqual(show_needs_scrape.status, ShowStatus.queued.value)
+            self.assertEqual(show_ready.status, ShowStatus.ready_for_review.value)
+            self.assertEqual(show_under_threshold.status, ShowStatus.failed.value)
+            self.assertEqual(show_already_queued.status, ShowStatus.queued.value)
+            self.assertEqual(len(queued_runs), 1)
+            self.assertEqual(queued_runs[0].show_id, show_needs_scrape.id)
 
     def test_scrape_selected_shows_route_queues_checked_shows(self) -> None:
         from app.main import scrape_selected_shows
@@ -2173,21 +2291,22 @@ class AutomationTests(unittest.TestCase):
             session.add_all([first, second])
             session.commit()
 
-            with (
-                patch("app.web.routes.shows.require_authenticated"),
-                patch("app.web.routes.shows.bulk_scrape_jobs.start_job", return_value="job-456") as start_job_mock,
-            ):
+            with patch("app.web.routes.shows.require_authenticated"):
                 response = scrape_selected_shows(
                     request=request,
                     show_ids=[first.id, second.id],
                     db=session,
                 )
+                queued_runs = session.scalars(
+                    select(CampaignRun).where(CampaignRun.status == RunStatus.queued.value)
+                ).all()
 
             self.assertEqual(response.status_code, 303)
             self.assertEqual(response.headers["location"], "/shows/dashboard")
-            self.assertEqual(start_job_mock.call_count, 1)
-            queued_shows = start_job_mock.call_args.kwargs["queued_shows"]
-            self.assertEqual([item.show_name for item in queued_shows], ["Atlanta Market"])
+            self.assertEqual(first.status, ShowStatus.queued.value)
+            self.assertEqual(second.status, ShowStatus.scraping.value)
+            self.assertEqual(len(queued_runs), 1)
+            self.assertEqual(queued_runs[0].show_id, first.id)
 
     def test_delete_show_route_purges_related_show_data(self) -> None:
         from app.main import delete_show

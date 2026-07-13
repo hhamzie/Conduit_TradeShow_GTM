@@ -57,11 +57,24 @@ class Settings:
     clay_webhook_url: str
     clay_webhook_auth_header: str
     clay_webhook_auth_value: str
+    cultivate_webhook_url: str
+    cultivate_webhook_auth_header: str
+    cultivate_webhook_auth_value: str
+    cultivate_enable_smartlead: bool
+    trade_show_ingestion_dir: Path
+    pipedrive_api_token: str
+    pipedrive_base_url: str
     clay_session_cookie: str
     clay_row_status_column: str
     clay_ready_status_value: str
     clay_failed_status_value: str
     clay_skipped_status_value: str
+    trade_show_clay_table_id: str
+    trade_show_clay_view_id: str
+    trade_show_clay_ready_column: str
+    trade_show_clay_ready_value: str
+    trade_show_clay_ready_any_value: bool
+    trade_show_completed_webhook_secret: str
     heyreach_api_key: str
     smartlead_api_key: str
     smartlead_base_url: str
@@ -76,6 +89,17 @@ class Settings:
     weekly_show_sync_hour: int
     weekly_show_sync_timezone: str
     weekly_show_sync_lookahead_days: int
+    notion_api_token: str
+    notion_database_id: str
+    notion_data_source_id: str
+    scrape_execution_mode: str
+    scrape_due_webhook_url: str
+    airtable_token: str
+    airtable_base_id: str
+    airtable_shows_table_id: str
+    airtable_companies_table_id: str
+    airtable_contacts_table_id: str
+    airtable_campaign_pushes_table_id: str
 
 
 @lru_cache(maxsize=1)
@@ -90,7 +114,7 @@ def get_settings() -> Settings:
         if part.strip()
     )
     return Settings(
-        app_name=os.getenv("APP_NAME", "Trade Show Outbound"),
+        app_name=os.getenv("APP_NAME", "TradeShowScraper"),
         database_url=database_url,
         export_dir=export_dir,
         default_run_offset_days=int(os.getenv("DEFAULT_RUN_OFFSET_DAYS", "14")),
@@ -126,11 +150,35 @@ def get_settings() -> Settings:
         clay_webhook_url=os.getenv("CLAY_WEBHOOK_URL", ""),
         clay_webhook_auth_header=os.getenv("CLAY_WEBHOOK_AUTH_HEADER", ""),
         clay_webhook_auth_value=os.getenv("CLAY_WEBHOOK_AUTH_VALUE", ""),
+        cultivate_webhook_url=(
+            os.getenv("CULTIVATE_WEBHOOK_URL", "").strip()
+            or (
+                f"{os.getenv('N8N_BASE_URL', '').rstrip('/')}/webhook/cultivate-airtable-loop"
+                if os.getenv("N8N_BASE_URL", "").strip()
+                else ""
+            )
+        ),
+        cultivate_webhook_auth_header=os.getenv("CULTIVATE_WEBHOOK_AUTH_HEADER", "").strip(),
+        cultivate_webhook_auth_value=os.getenv("CULTIVATE_WEBHOOK_AUTH_VALUE", "").strip(),
+        cultivate_enable_smartlead=os.getenv("CULTIVATE_ENABLE_SMARTLEAD", "true").lower()
+        in {"1", "true", "yes"},
+        trade_show_ingestion_dir=Path(
+            os.getenv("TRADE_SHOW_INGESTION_DIR", str(Path.home() / "TradeShowIngestion"))
+        ).expanduser(),
+        pipedrive_api_token=os.getenv("PIPEDRIVE_API_TOKEN", ""),
+        pipedrive_base_url=os.getenv("PIPEDRIVE_BASE_URL", "https://api.pipedrive.com/v1").rstrip("/"),
         clay_session_cookie=os.getenv("CLAY_SESSION_COOKIE", ""),
         clay_row_status_column=os.getenv("CLAY_ROW_STATUS_COLUMN", "enriched_status"),
         clay_ready_status_value=os.getenv("CLAY_READY_STATUS_VALUE", "ready"),
         clay_failed_status_value=os.getenv("CLAY_FAILED_STATUS_VALUE", "failed"),
         clay_skipped_status_value=os.getenv("CLAY_SKIPPED_STATUS_VALUE", "skip"),
+        trade_show_clay_table_id=os.getenv("TRADE_SHOW_CLAY_TABLE_ID", "").strip(),
+        trade_show_clay_view_id=os.getenv("TRADE_SHOW_CLAY_VIEW_ID", "").strip(),
+        trade_show_clay_ready_column=os.getenv("TRADE_SHOW_CLAY_READY_COLUMN", "").strip(),
+        trade_show_clay_ready_value=os.getenv("TRADE_SHOW_CLAY_READY_VALUE", "").strip(),
+        trade_show_clay_ready_any_value=os.getenv("TRADE_SHOW_CLAY_READY_ANY_VALUE", "false").lower()
+        in {"1", "true", "yes"},
+        trade_show_completed_webhook_secret=os.getenv("TRADE_SHOW_COMPLETED_WEBHOOK_SECRET", "").strip(),
         heyreach_api_key=os.getenv("HEYREACH_API_KEY", ""),
         smartlead_api_key=os.getenv("SMARTLEAD_API_KEY", ""),
         smartlead_base_url=os.getenv("SMARTLEAD_BASE_URL", "https://server.smartlead.ai/api/v1").rstrip("/"),
@@ -145,4 +193,24 @@ def get_settings() -> Settings:
         weekly_show_sync_hour=int(os.getenv("WEEKLY_SHOW_SYNC_HOUR", "10")),
         weekly_show_sync_timezone=os.getenv("WEEKLY_SHOW_SYNC_TIMEZONE", "America/New_York").strip() or "America/New_York",
         weekly_show_sync_lookahead_days=max(1, int(os.getenv("WEEKLY_SHOW_SYNC_LOOKAHEAD_DAYS", "100"))),
+        notion_api_token=os.getenv("NOTION_API_TOKEN", "").strip(),
+        notion_database_id=os.getenv(
+            "NOTION_DATABASE_ID",
+            "356127477edb804d89e7c406ad08975b",
+        ).strip(),
+        notion_data_source_id=os.getenv(
+            "NOTION_DATA_SOURCE_ID",
+            "356127477edb8094b75f000bbd6766d8",
+        ).strip(),
+        scrape_execution_mode=(os.getenv("SCRAPE_EXECUTION_MODE", "worker").strip().lower() or "worker"),
+        scrape_due_webhook_url=os.getenv("SCRAPE_DUE_WEBHOOK_URL", "").strip(),
+        airtable_token=os.getenv("AIRTABLE_TOKEN", "").strip(),
+        airtable_base_id=os.getenv("AIRTABLE_BASE_ID", "appfBCKnwzWr26p8R").strip(),
+        airtable_shows_table_id=os.getenv("AIRTABLE_SHOWS_TABLE_ID", "tblneSplTxPpRcJun").strip(),
+        airtable_companies_table_id=os.getenv("AIRTABLE_COMPANIES_TABLE_ID", "tblNQrSab6MmUI98s").strip(),
+        airtable_contacts_table_id=os.getenv("AIRTABLE_CONTACTS_TABLE_ID", "tbl3eQqwTAsVAf5vr").strip(),
+        airtable_campaign_pushes_table_id=os.getenv(
+            "AIRTABLE_CAMPAIGN_PUSHES_TABLE_ID",
+            "tbleK9abvfJaetm7o",
+        ).strip(),
     )

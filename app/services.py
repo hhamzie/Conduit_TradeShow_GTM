@@ -18,22 +18,27 @@ import httpx
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
+from app.airtable_sync import AirtableSyncClient, AirtableSyncError, deterministic_company_source_row_id
 from app.config import get_settings
 from app.models import AutomationCheckpoint, CampaignRun, ClaySyncRow, ProviderStatus, RunStatus, Show, ShowStatus
 from app.providers import (
     ClayPollResult,
+    ProviderResult,
     SmartleadSyncResult,
     ensure_smartlead_campaign,
     import_ready_rows_to_smartlead,
     launch_smartlead_campaign,
+    notify_scrape_due,
     notify_ready_for_review,
     pause_smartlead_campaign,
     poll_clay_table,
-    push_to_clay,
+    push_to_cultivate,
     push_to_heyreach,
 )
 from app.show_intelligence import _company_row_key
+from app.notion_trade_shows import fetch_notion_trade_shows
 from app.trade_show_feeder import is_b2b_physical_goods_show, scan_upcoming_trade_shows
+from app.trade_show_verification import verify_trade_show_date
 from scraper import ScrapeOptions, run_agent_directory_csv_fallback, run_scrape
 
 
@@ -164,6 +169,96 @@ def _parse_bulk_csv_payload(payload: bytes) -> tuple[list[dict[str, str]], dict[
     return rows, headers
 
 
+AIRTABLE_SHOW_STATUS = {
+    ShowStatus.waiting.value: "New",
+    ShowStatus.queued.value: "Scraping",
+    ShowStatus.scraping.value: "Scraping",
+    ShowStatus.ready_for_review.value: "Ready Review",
+    ShowStatus.approved.value: "Approved",
+    ShowStatus.live.value: "Pushed",
+    ShowStatus.failed.value: "Failed",
+}
+
+
+def sync_show_to_airtable(show: Show, *, include_companies: bool = False) -> ProviderResult:
+    """Mirror the dashboard show and optional raw exhibitors into the Conduit base."""
+
+    settings = get_settings()
+    if not settings.airtable_token or not settings.airtable_base_id:
+        return ProviderResult("airtable", "skipped", "Airtable token/base is not configured.")
+    show_dates = show.event_date.isoformat()
+    if show.event_end_date:
+        show_dates = f"{show_dates} – {show.event_end_date.isoformat()}"
+    show_fields = {
+        "Show Name": show.name,
+        "Dashboard Show ID": str(show.id),
+        "Event URL": show.source_url,
+        "Show Dates": show_dates,
+        "Venue / Market": show.place,
+        "Workflow Status": AIRTABLE_SHOW_STATUS.get(show.status, "New"),
+        "Smartlead Campaign Name": show.smartlead_campaign_name,
+        "Smartlead Campaign ID": str(show.smartlead_campaign_id or ""),
+        "Pipedrive Context": f"{show.name} | enrollment {show.cadence_enrollment_date or 'pending'}",
+        "Notes": show.date_verification_message,
+    }
+    company_fields: list[dict[str, object]] = []
+    if include_companies and show.latest_export_path:
+        path = Path(show.latest_export_path)
+        if not path.exists():
+            return ProviderResult("airtable", "failed", f"Scraper export is missing: {path}")
+        with path.open(newline="", encoding="utf-8-sig") as source_file:
+            for row in csv.DictReader(source_file):
+                company_name = str(row.get("company_name") or row.get("company") or "").strip()
+                if not company_name:
+                    continue
+                website = str(row.get("website_url") or row.get("website") or "").strip()
+                booth_number = str(row.get("booth_number") or row.get("booth") or "").strip()
+                domain = (urlparse(website if "://" in website else f"https://{website}").hostname or "").removeprefix("www.")
+                source_row_id = deterministic_company_source_row_id(
+                    show_identifier=show.id,
+                    source_identifier=show.source_url,
+                    company_name=company_name,
+                    website=website,
+                    booth_number=booth_number,
+                )
+                company_fields.append(
+                    {
+                        "Company Name": company_name,
+                        "Show Name": show.name,
+                        "Source Row ID": source_row_id,
+                        "Booth Number": booth_number,
+                        "Location": str(row.get("location") or row.get("address") or "").strip(),
+                        "Website": website or None,
+                        "Domain": domain,
+                        "Normalized Company Name": normalize_show_identity_name(company_name),
+                        "Audit Status": "Unaudited",
+                        "Domain Status": "Domain Ready" if domain else "Needs Domain",
+                        "Enrichment Status": "Not Started",
+                    }
+                )
+    try:
+        with AirtableSyncClient(token=settings.airtable_token, base_id=settings.airtable_base_id) as client:
+            show_result = client.upsert_shows(
+                table_id=settings.airtable_shows_table_id,
+                records=[show_fields],
+                typecast=False,
+            )
+            if show_result.records:
+                show.airtable_show_record_id = str(show_result.records[0].get("id") or "")
+            company_result = client.upsert_companies(
+                table_id=settings.airtable_companies_table_id,
+                records=company_fields,
+                typecast=False,
+            )
+    except (AirtableSyncError, httpx.HTTPError, ValueError) as exc:
+        return ProviderResult("airtable", "failed", f"Conduit Airtable sync failed: {exc}")
+    return ProviderResult(
+        "airtable",
+        "success",
+        f"Synced the show and {len(company_result.records)} exhibitor row(s) to Conduit Airtable.",
+    )
+
+
 def normalize_show_identity_name(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", " ", value.strip().lower()).strip()
 
@@ -207,6 +302,7 @@ SHOW_NAME_PHRASE_OVERRIDES = {
     "B2B": "B2B",
     "Icff": "ICFF",
     "Infocomm": "InfoComm",
+    "Jck": "JCK",
     "Nacs": "NACS",
     "Nra": "NRA",
     "Usa": "USA",
@@ -474,6 +570,15 @@ def upsert_show(
     place: str,
     link: str,
     run_offset_days: int,
+    event_end_date: date | None = None,
+    tracker_event_date: date | None = None,
+    tracker_event_end_date: date | None = None,
+    official_source_url: str = "",
+    notion_page_id: str = "",
+    notion_page_url: str = "",
+    date_verification_status: str = "unverified",
+    date_verification_message: str = "",
+    scrape_execution_mode: str | None = None,
 ) -> tuple[Show, bool]:
     normalized_name = normalize_show_display_name(show_name)
     normalized_place = place.strip()
@@ -483,6 +588,9 @@ def upsert_show(
 
     event_date = parse_show_date(event_date_raw)
     run_at = compute_run_at(event_date, run_offset_days)
+    execution_mode = (scrape_execution_mode or get_settings().scrape_execution_mode).strip().lower()
+    if execution_mode not in {"local", "worker"}:
+        raise ValueError("Scrape execution mode must be 'local' or 'worker'.")
 
     existing = _find_matching_show(
         db,
@@ -494,10 +602,19 @@ def upsert_show(
         show = Show(
             name=normalized_name,
             event_date=event_date,
+            event_end_date=event_end_date,
+            tracker_event_date=tracker_event_date,
+            tracker_event_end_date=tracker_event_end_date,
             place=normalized_place,
             source_url=normalized_link,
+            official_source_url=official_source_url.strip(),
+            notion_page_id=notion_page_id.strip(),
+            notion_page_url=notion_page_url.strip(),
+            date_verification_status=date_verification_status.strip() or "unverified",
+            date_verification_message=date_verification_message.strip(),
             run_offset_days=run_offset_days,
             run_at=run_at,
+            scrape_execution_mode=execution_mode,
             status=ShowStatus.waiting.value,
         )
         db.add(show)
@@ -506,10 +623,20 @@ def upsert_show(
         return show, True
 
     existing.name = normalized_name
+    existing.event_date = event_date
+    existing.event_end_date = event_end_date
+    existing.tracker_event_date = tracker_event_date or existing.tracker_event_date
+    existing.tracker_event_end_date = tracker_event_end_date or existing.tracker_event_end_date
     existing.place = normalized_place
     existing.source_url = normalized_link
+    existing.official_source_url = official_source_url.strip() or existing.official_source_url
+    existing.notion_page_id = notion_page_id.strip() or existing.notion_page_id
+    existing.notion_page_url = notion_page_url.strip() or existing.notion_page_url
+    existing.date_verification_status = date_verification_status.strip() or existing.date_verification_status
+    existing.date_verification_message = date_verification_message.strip()
     existing.run_offset_days = run_offset_days
     existing.run_at = run_at
+    existing.scrape_execution_mode = execution_mode
     db.flush()
     _queue_show_if_due(db, existing)
     return existing, False
@@ -553,7 +680,7 @@ def parse_show_date(raw_value: str, today: date | None = None) -> date:
 
 
 def compute_run_at(event_date: date, run_offset_days: int) -> datetime:
-    return datetime.now()
+    return datetime.combine(event_date - timedelta(days=max(0, run_offset_days)), time.min)
 
 
 def _queue_show_if_due(db: Session, show: Show, *, now: datetime | None = None) -> bool:
@@ -565,7 +692,14 @@ def _queue_show_if_due(db: Session, show: Show, *, now: datetime | None = None) 
     if any(run.status in {RunStatus.queued.value, RunStatus.running.value} for run in show.runs):
         return False
     show.status = ShowStatus.queued.value
-    db.add(CampaignRun(show=show, status=RunStatus.queued.value))
+    if (show.scrape_execution_mode or "worker").strip().lower() == "local":
+        alert_result = notify_scrape_due(show)
+        show.notification_status = alert_result.status
+        if alert_result.status == ProviderStatus.failed.value:
+            show.last_error = alert_result.message
+        show.scrape_due_alerted_at = now
+    else:
+        db.add(CampaignRun(show=show, status=RunStatus.queued.value))
     return True
 
 
@@ -970,7 +1104,7 @@ def run_single_show_scrape(
         link=normalized_link,
         output_path=output_path,
         require_website=True,
-        browser_mode="off",
+        browser_mode=get_settings().default_browser_mode,
     )
 
 
@@ -1007,7 +1141,7 @@ def run_show_scrape(db: Session, show: Show, *, workers: int | None = None) -> D
             link=show.source_url,
             output_path=export_path_for_show(show),
             require_website=True,
-            browser_mode="off",
+            browser_mode=settings.default_browser_mode,
             workers=scrape_workers,
         )
     except Exception as exc:  # noqa: BLE001
@@ -1121,7 +1255,7 @@ def _run_bulk_direct_scrape_rows(
                     link=link,
                     output_path=output_path,
                     require_website=True,
-                    browser_mode="off",
+                    browser_mode=settings.default_browser_mode,
                     workers=1,
                 )
                 relative_name = output_path.name
@@ -1606,31 +1740,59 @@ def run_weekly_show_sync(db: Session, now: datetime | None = None) -> WeeklyShow
     start_date = current_local.date()
     end_date = start_date + timedelta(days=settings.weekly_show_sync_lookahead_days)
 
-    if settings.weekly_show_sync_source_url or settings.weekly_show_sync_source_path:
+    source_label = ""
+    if settings.notion_api_token and settings.notion_database_id:
+        notion_candidates = fetch_notion_trade_shows(
+            token=settings.notion_api_token,
+            database_id=settings.notion_database_id,
+            data_source_id=settings.notion_data_source_id,
+        )
+        candidate_rows = [
+            {
+                "show_name": candidate.show_name,
+                "event_date_raw": candidate.event_date.isoformat(),
+                "event_end_date": candidate.event_end_date,
+                "place": candidate.place,
+                "link": candidate.link,
+                "notion_page_id": candidate.notion_page_id,
+                "notion_page_url": candidate.notion_page_url,
+            }
+            for candidate in notion_candidates
+        ]
+        source_label = f"notion:{settings.notion_database_id}"
+    elif settings.weekly_show_sync_source_url or settings.weekly_show_sync_source_path:
         payload = _load_weekly_show_sync_payload(settings)
         rows, headers = _parse_bulk_csv_payload(payload)
         candidate_rows = [
             {
                 "show_name": (row.get(headers["show"]) or "").strip(),
                 "event_date_raw": (row.get(headers["date"]) or "").strip(),
+                "event_end_date": None,
                 "place": (row.get(headers["place"]) or "").strip(),
                 "link": (row.get(headers["link"]) or "").strip(),
+                "notion_page_id": "",
+                "notion_page_url": "",
             }
             for row in rows
         ]
+        source_label = settings.weekly_show_sync_source_url or settings.weekly_show_sync_source_path
     else:
         candidate_rows = [
             {
                 "show_name": candidate.show_name,
                 "event_date_raw": candidate.event_date_raw,
+                "event_end_date": None,
                 "place": candidate.place,
                 "link": candidate.link,
+                "notion_page_id": "",
+                "notion_page_url": "",
             }
             for candidate in scan_upcoming_trade_shows(
                 today=start_date,
                 lookahead_days=settings.weekly_show_sync_lookahead_days,
             )
         ]
+        source_label = "verified_scan"
 
     for row in candidate_rows:
         show_name = row["show_name"]
@@ -1641,7 +1803,18 @@ def run_weekly_show_sync(db: Session, now: datetime | None = None) -> WeeklyShow
             skipped += 1
             continue
 
-        event_date = parse_show_date(event_date_raw, today=start_date)
+        tracker_event_date = parse_show_date(event_date_raw, today=start_date)
+        notion_page_id = str(row.get("notion_page_id") or "")
+        verification = (
+            verify_trade_show_date(
+                show_name=show_name,
+                tracker_start_date=tracker_event_date,
+                fallback_url=link,
+            )
+            if notion_page_id
+            else None
+        )
+        event_date = verification.effective_start_date if verification else tracker_event_date
         if event_date < start_date or event_date > end_date:
             filtered_out += 1
             continue
@@ -1666,7 +1839,20 @@ def run_weekly_show_sync(db: Session, now: datetime | None = None) -> WeeklyShow
             place=place,
             link=link,
             run_offset_days=settings.default_run_offset_days,
+            event_end_date=row.get("event_end_date") if isinstance(row.get("event_end_date"), date) else None,
+            tracker_event_date=tracker_event_date,
+            tracker_event_end_date=row.get("event_end_date") if isinstance(row.get("event_end_date"), date) else None,
+            official_source_url=verification.official_url if verification else link,
+            notion_page_id=notion_page_id,
+            notion_page_url=str(row.get("notion_page_url") or ""),
+            date_verification_status=verification.status if verification else "source_provided",
+            date_verification_message=verification.message if verification else "Source date accepted without Notion triangulation.",
+            scrape_execution_mode=settings.scrape_execution_mode,
         )
+        if notion_page_id:
+            airtable_result = sync_show_to_airtable(show)
+            if airtable_result.status == ProviderStatus.failed.value:
+                show.last_error = airtable_result.message
         if created_now:
             created += 1
         else:
@@ -1676,7 +1862,7 @@ def run_weekly_show_sync(db: Session, now: datetime | None = None) -> WeeklyShow
     checkpoint.meta_json = json.dumps(
         {
             "lookahead_days": settings.weekly_show_sync_lookahead_days,
-            "source": settings.weekly_show_sync_source_url or settings.weekly_show_sync_source_path,
+            "source": source_label,
             "scheduled_window": scheduled_window.isoformat(),
         },
         sort_keys=True,
@@ -1799,20 +1985,20 @@ def queue_due_shows(db: Session, now: datetime | None = None) -> int:
     now = now or datetime.now()
     due_shows = list(
         db.scalars(
-            select(Show).where(
+            select(Show)
+            .options(selectinload(Show.runs))
+            .where(
                 Show.status == ShowStatus.waiting.value,
                 Show.run_at <= now,
             )
         )
     )
 
-    for show in due_shows:
-        show.status = ShowStatus.queued.value
-        db.add(CampaignRun(show=show, status=RunStatus.queued.value))
+    queued_count = sum(1 for show in due_shows if _queue_show_if_due(db, show, now=now))
 
-    if due_shows:
+    if queued_count:
         db.commit()
-    return len(due_shows)
+    return queued_count
 
 
 def backfill_queued_runs(db: Session, now: datetime | None = None) -> int:
@@ -1827,6 +2013,8 @@ def backfill_queued_runs(db: Session, now: datetime | None = None) -> int:
 
     repaired = 0
     for show in queued_shows:
+        if (show.scrape_execution_mode or "worker").strip().lower() == "local":
+            continue
         has_live_run = any(run.status in {RunStatus.queued.value, RunStatus.running.value} for run in show.runs)
         if has_live_run:
             continue
@@ -2216,6 +2404,8 @@ def _shows_for_background_sync(db: Session) -> list[Show]:
 
 
 def run_next_campaign(db: Session) -> CampaignRun | None:
+    if get_settings().scrape_execution_mode == "local":
+        return None
     backfill_queued_runs(db)
     existing_running = db.scalar(
         select(CampaignRun.id)
@@ -2249,7 +2439,7 @@ def run_next_campaign(db: Session) -> CampaignRun | None:
             link=show.source_url,
             output_path=export_path_for_show(show),
             require_website=True,
-            browser_mode="off",
+            browser_mode=get_settings().default_browser_mode,
             workers=1,
         )
     except Exception as exc:  # noqa: BLE001
@@ -2272,7 +2462,7 @@ def run_next_campaign(db: Session) -> CampaignRun | None:
     show.status = ShowStatus.ready_for_review.value
     show.last_error = ""
 
-    clay_result = push_to_clay(show)
+    clay_result = push_to_cultivate(show)
     notify_result = notify_ready_for_review(show)
 
     if clay_result.status == ProviderStatus.success.value:
@@ -2337,7 +2527,7 @@ def sync_approved_shows(db: Session) -> int:
     touched = 0
     for show in _shows_for_background_sync(db):
         if show.latest_export_path and not show.clay_table_id and show.clay_status == ProviderStatus.pending.value:
-            clay_result = push_to_clay(show)
+            clay_result = push_to_cultivate(show)
             if clay_result.status == ProviderStatus.success.value:
                 show.clay_status = CLAY_STATUS_POLLING if show.clay_table_id else ProviderStatus.success.value
                 db.commit()

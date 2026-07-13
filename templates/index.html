@@ -45,7 +45,7 @@
           </svg>
         </summary>
         <div class="action-menu-panel">
-          {% if show.status in ["waiting", "failed", "ready_for_review", "approved", "live"] %}
+          {% if show.status in ["waiting", "queued", "failed", "ready_for_review", "approved", "live"] %}
           <form action="/shows/{{ show.id }}/run-now" method="post" data-local-show-scrape-form data-confirm-form data-confirm-title="Refresh exhibitor list?" data-confirm-copy="Confirm you want to rerun scraping for {{ show.name }}." data-confirm-button="Refresh list" data-show-id="{{ show.id }}" data-show-name="{{ show.name }}" data-show-place="{{ show.place }}" data-show-link="{{ show.source_url }}" data-show-date="{{ show.event_date.isoformat() }}">
             <button class="action-menu-link action-menu-button" type="submit">Run now</button>
           </form>
@@ -87,7 +87,7 @@
       </div>
       <h2>Single</h2>
     </div>
-    <p class="lane-copy">Paste one show link. It saves the show first, then returns one CSV.</p>
+    <p class="lane-copy">Paste one show link. It saves the show first, then queues a headless scrape.</p>
     <div class="lane-chip-row">
       <span class="lane-chip" data-tooltip="Creates or updates the show in the dashboard before scraping.">Saved first</span>
       <span class="lane-chip" data-tooltip="Best for one-off scrapes that should still become a show record.">Fastest path</span>
@@ -101,7 +101,7 @@
       method="post"
       data-direct-download-form
       data-progress-target="single-scrape-status"
-      data-loading-label="Scraping..."
+      data-loading-label="Queueing..."
     >
       <label>
         <span>Show name</span>
@@ -119,7 +119,7 @@
         <span>Directory or show link</span>
         <input type="url" name="link" placeholder="https://example.com/exhibitors" required />
       </label>
-      <button type="submit">Scrape and Download CSV</button>
+      <button type="submit">Queue Scrape</button>
     </form>
     <p id="single-scrape-status" class="inline-status" hidden></p>
   </article>
@@ -152,13 +152,13 @@
       data-progress-count-target="bulk-scrape-progress-count"
       data-progress-current-show-target="bulk-scrape-current-show"
       data-progress-detail-target="bulk-scrape-progress-detail"
-      data-loading-label="Building ZIP..."
+      data-loading-label="Queueing..."
     >
       <label class="lane-form-wide">
         <span>Trade show CSV</span>
         <input type="file" name="file" accept=".csv" required />
       </label>
-      <button type="submit">Run Bulk Scrape and Download ZIP</button>
+      <button type="submit">Queue Bulk Scrapes</button>
     </form>
     <section id="bulk-scrape-progress-panel" class="bulk-progress-panel" hidden aria-live="polite">
       <div class="bulk-progress-head">

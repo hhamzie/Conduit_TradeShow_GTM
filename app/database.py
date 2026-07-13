@@ -49,7 +49,19 @@ def _ensure_show_columns(inspector) -> None:
     existing_columns = {column["name"] for column in inspector.get_columns("shows")}
     is_postgres = engine.dialect.name == "postgresql"
     datetime_type = "TIMESTAMP" if is_postgres else "DATETIME"
+    date_type = "DATE"
     required_columns = {
+        "event_end_date": date_type,
+        "tracker_event_date": date_type,
+        "tracker_event_end_date": date_type,
+        "official_source_url": "TEXT NOT NULL DEFAULT ''",
+        "notion_page_id": "TEXT NOT NULL DEFAULT ''",
+        "notion_page_url": "TEXT NOT NULL DEFAULT ''",
+        "date_verification_status": "TEXT NOT NULL DEFAULT 'unverified'",
+        "date_verification_message": "TEXT NOT NULL DEFAULT ''",
+        "scrape_execution_mode": "TEXT NOT NULL DEFAULT 'worker'",
+        "scrape_due_alerted_at": datetime_type,
+        "cadence_enrollment_date": date_type,
         "enriched_export_path": "TEXT NOT NULL DEFAULT ''",
         "smartlead_ready_export_path": "TEXT NOT NULL DEFAULT ''",
         "clay_table_id": "TEXT NOT NULL DEFAULT ''",
@@ -65,6 +77,7 @@ def _ensure_show_columns(inspector) -> None:
         "smartlead_campaign_name": "TEXT NOT NULL DEFAULT ''",
         "smartlead_imported_at": datetime_type,
         "smartlead_imported_rows": "INTEGER NOT NULL DEFAULT 0",
+        "airtable_show_record_id": "TEXT NOT NULL DEFAULT ''",
     }
     missing = {
         name: definition
