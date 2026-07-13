@@ -1550,11 +1550,26 @@ function isExplicitInvalid(value) {
 
 const source = $('Merge Final Email').item.json;
 const raw = item.json || {};
+const trustedDirectoryEmail = Boolean(
+  source.finalWorkEmail
+  && source.finalProvider === 'Scraped Contact'
+  && String(source.contactSourceType || '').trim() === 'scraped_trade_show_contact'
+);
+const validated = isValid(raw);
+const invalid = isExplicitInvalid(raw);
 return {
   json: {
     ...source,
-    finalEmailValidationRaw: raw,
-    finalEmailValidationStatus: isValid(raw) ? 'valid' : isExplicitInvalid(raw) ? 'invalid' : 'unknown',
+    finalEmailValidationRaw: trustedDirectoryEmail && !validated && !invalid
+      ? { ...raw, trustedDirectorySourceFallback: true }
+      : raw,
+    finalEmailValidationStatus: validated
+      ? 'valid'
+      : invalid
+      ? 'invalid'
+      : trustedDirectoryEmail
+      ? 'valid'
+      : 'unknown',
   }
 };
 """

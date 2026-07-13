@@ -71,6 +71,9 @@ class CultivateWorkflowTests(unittest.TestCase):
         self.assertIn("Missing required show-specific Smartlead campaign ID", validation_code)
         self.assertIn("row.smartleadCampaignId", validation_code)
         self.assertIn("row.finalEmailValidationStatus === 'valid'", validation_code)
+        parse_validation_code = nodes["Parse Final Email Validation"]["parameters"]["jsCode"]
+        self.assertIn("trustedDirectorySourceFallback", parse_validation_code)
+        self.assertIn("scraped_trade_show_contact", parse_validation_code)
 
         smartlead_node = nodes["Add Lead to Smartlead"]
         self.assertEqual(
