@@ -7,19 +7,6 @@
       <p class="hero-kicker">Trade Show Dashboard</p>
       <h1>Trade Shows</h1>
     </div>
-    <div class="hero-dashboard-actions">
-      {% if can_manage %}
-      <button class="icon-button scan-trigger-button" type="button" data-scan-open data-tooltip="Trade show scan" aria-label="Trade show scan">
-        <svg viewBox="0 0 24 24" aria-hidden="true" class="icon-mark scan-icon-mark">
-          <circle cx="12" cy="12" r="2.2" fill="currentColor"/>
-          <path d="M12 4.5a7.5 7.5 0 0 1 7.5 7.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
-          <path d="M12 1.75A10.25 10.25 0 0 1 22.25 12" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" opacity="0.72"/>
-          <path d="M12 19.5A7.5 7.5 0 0 1 4.5 12" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
-          <path d="M12 22.25A10.25 10.25 0 0 1 1.75 12" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" opacity="0.72"/>
-        </svg>
-      </button>
-      {% endif %}
-    </div>
   </div>
   <div class="dashboard-mini-stats">
     <article class="mini-stat-card">
@@ -40,31 +27,10 @@
 {% if analyses or finished_analyses %}
 {% if analyses %}
 <section class="panel">
-  {% if can_manage %}
-  <form id="bulk-form-dashboard" class="section-toolbar compact bulk-select-bar dashboard-bulk-bar" action="/show-bulk/delete" method="post" data-multi-select-form data-dashboard-bulk-form>
-    <input type="hidden" name="next_path" value="/shows/dashboard" />
-    <div class="bulk-select-anchor">
-      <label class="selector-control bulk-select-control" aria-label="Select all trade shows">
-        <input type="checkbox" data-select-all />
-        <span></span>
-        <em class="bulk-select-label">Select all</em>
-      </label>
-      <span class="bulk-select-count" data-selection-controls data-select-count>0 selected</span>
-    </div>
-    <div class="bulk-select-actions" data-selection-controls>
-      <button class="button secondary subtle" type="submit" formaction="/show-bulk/scrape" data-requires-selection data-confirm-title="Queue selected scrapes?" data-confirm-copy="Confirm you want to queue scrapes for the selected trade shows." data-confirm-button="Scrape" disabled>Scrape</button>
-      <button class="button secondary subtle" type="submit" formaction="/show-bulk/smartlead" data-requires-selection data-confirm-title="Create email campaigns?" data-confirm-copy="Confirm you want to create Smartlead campaigns for the selected trade shows. This does not launch sending." data-confirm-button="Create campaigns" disabled>Start outbound</button>
-      <button class="button danger subtle" type="submit" data-requires-selection data-confirm-title="Delete selected shows?" data-confirm-copy="Confirm you want to delete the selected trade shows and all of their saved data." data-confirm-button="Delete" data-confirm-tone="danger" disabled>Delete</button>
-    </div>
-  </form>
-  {% endif %}
   <div class="table-wrap">
     <table class="dashboard-table">
       <thead>
         <tr>
-          {% if can_manage %}
-          <th class="selection-col"></th>
-          {% endif %}
           <th>Show</th>
           <th>Relevant Companies</th>
           <th>Complexity</th>
@@ -75,14 +41,6 @@
         {% for analysis in analyses %}
         {% set outbound_plan = outbound_plans.get(analysis.show.id) %}
         <tr class="dashboard-row-link{% if analysis.has_running_campaign %} dashboard-row-live{% elif analysis.is_past_event %} dashboard-row-past{% endif %}" data-row-href="/shows/{{ analysis.show.id }}" data-show-row-id="{{ analysis.show.id }}" title="Open show profile">
-          {% if can_manage %}
-          <td class="selection-col">
-            <label class="selector-control" aria-label="Select {{ analysis.show.name }}">
-              <input type="checkbox" name="show_ids" value="{{ analysis.show.id }}" form="bulk-form-dashboard" data-select-item data-show-name="{{ analysis.show.name }}" data-show-place="{{ analysis.show.place }}" data-show-link="{{ analysis.show.source_url }}" data-show-date="{{ analysis.show.event_date.isoformat() }}" />
-              <span></span>
-            </label>
-          </td>
-          {% endif %}
           <td>
             <div class="dashboard-show-cell">
               <strong>{{ analysis.show.name }}</strong>
@@ -101,26 +59,6 @@
           </td>
           <td class="actions-col">
             <div class="dashboard-icon-rail">
-              {% if can_manage %}
-              <button
-                class="icon-button smartlead-icon{% if analysis.show.smartlead_campaign_id %}{% if analysis.has_running_campaign %} smartlead-icon-live{% endif %}{% else %} smartlead-icon-missing{% endif %}"
-                type="button"
-                data-tooltip="{% if analysis.show.smartlead_campaign_id %}Smartlead campaign options{% else %}Create Smartlead campaign{% endif %}"
-                data-outbound-trigger
-                data-show-id="{{ analysis.show.id }}"
-                data-show-name="{{ analysis.show.name }}"
-                data-has-campaign="{{ 'true' if analysis.show.smartlead_campaign_id else 'false' }}"
-                data-campaign-name="{{ analysis.show.smartlead_campaign_name or '' }}"
-                data-campaign-active="{{ 'true' if analysis.has_running_campaign else 'false' }}"
-              >
-                <img src="/static/smartlead-logo.svg" alt="" class="smartlead-mark-image" />
-              </button>
-              {% else %}
-              <span class="icon-button smartlead-icon smartlead-icon-missing" data-tooltip="No outbound campaign">
-                <img src="/static/smartlead-logo.svg" alt="" class="smartlead-mark-image" />
-              </span>
-              {% endif %}
-
               {% if analysis.guide_company_count > 0 %}
               <a class="icon-button guide-icon guide-icon-ready" href="/shows/{{ analysis.show.id }}/guide" data-tooltip="Open guide" aria-label="Open guide">
                 <svg viewBox="0 0 24 24" aria-hidden="true" class="icon-mark">
@@ -230,26 +168,6 @@
           </td>
           <td class="actions-col">
             <div class="dashboard-icon-rail">
-              {% if can_manage %}
-              <button
-                class="icon-button smartlead-icon{% if analysis.show.smartlead_campaign_id %}{% if analysis.has_running_campaign %} smartlead-icon-live{% endif %}{% else %} smartlead-icon-missing{% endif %}"
-                type="button"
-                data-tooltip="{% if analysis.show.smartlead_campaign_id %}Smartlead campaign options{% else %}Create Smartlead campaign{% endif %}"
-                data-outbound-trigger
-                data-show-id="{{ analysis.show.id }}"
-                data-show-name="{{ analysis.show.name }}"
-                data-has-campaign="{{ 'true' if analysis.show.smartlead_campaign_id else 'false' }}"
-                data-campaign-name="{{ analysis.show.smartlead_campaign_name or '' }}"
-                data-campaign-active="{{ 'true' if analysis.has_running_campaign else 'false' }}"
-              >
-                <img src="/static/smartlead-logo.svg" alt="" class="smartlead-mark-image" />
-              </button>
-              {% else %}
-              <span class="icon-button smartlead-icon smartlead-icon-missing" data-tooltip="No outbound campaign">
-                <img src="/static/smartlead-logo.svg" alt="" class="smartlead-mark-image" />
-              </span>
-              {% endif %}
-
               {% if analysis.guide_company_count > 0 %}
               <a class="icon-button guide-icon guide-icon-ready" href="/shows/{{ analysis.show.id }}/guide" data-tooltip="Open guide" aria-label="Open guide">
                 <svg viewBox="0 0 24 24" aria-hidden="true" class="icon-mark">
@@ -318,76 +236,11 @@
   </div>
 </section>
 {% endif %}
-{% if can_manage %}
-<div class="confirm-modal-backdrop" data-outbound-modal hidden>
-  <section class="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="outbound-modal-title">
-    <button class="flash-modal-close" type="button" aria-label="Close Smartlead campaign modal" data-outbound-close>&times;</button>
-    <h2 id="outbound-modal-title">Smartlead campaign</h2>
-    <p class="confirm-modal-copy" data-outbound-copy></p>
-    <p class="confirm-modal-copy muted" data-outbound-capacity-copy></p>
-    <form action="" method="post" data-outbound-form>
-      <div class="confirm-modal-actions">
-        <button class="button secondary" type="button" data-outbound-close>Cancel</button>
-        <button class="button" type="submit" data-outbound-confirm>Create campaign</button>
-      </div>
-    </form>
-  </section>
-</div>
-
-<div class="confirm-modal-backdrop" data-scan-modal data-scan-auto-open="false" hidden>
-  <section class="confirm-modal scan-modal" role="dialog" aria-modal="true" aria-labelledby="scan-modal-title">
-    <button class="flash-modal-close" type="button" aria-label="Close scan modal" data-scan-close>&times;</button>
-    <h2 id="scan-modal-title">Scan shows in the next 100 days</h2>
-    <form class="scan-form" action="/shows/scan-upcoming" method="post" data-scan-form>
-      <p class="confirm-modal-copy">Look for new B2B physical-goods trade shows happening in the next 100 days.</p>
-      <div class="confirm-modal-actions">
-        <button class="button secondary" type="button" data-scan-close>Cancel</button>
-        <button class="button" type="submit" data-scan-submit>Start scan</button>
-      </div>
-    </form>
-    <div class="scan-progress" data-scan-progress hidden>
-      <div class="scan-progress-head">
-        <div class="scan-beacon" aria-hidden="true">
-          <span class="scan-beacon-ring scan-beacon-ring-one"></span>
-          <span class="scan-beacon-ring scan-beacon-ring-two"></span>
-          <span class="scan-beacon-core"></span>
-        </div>
-        <div>
-          <strong class="scan-progress-title">Scanning the next 100 days</strong>
-          <p class="scan-progress-copy">Checking for new B2B physical-goods trade shows.</p>
-        </div>
-      </div>
-      <div class="scan-progress-track" aria-hidden="true">
-        <div class="scan-progress-fill"></div>
-      </div>
-      <span class="scan-progress-time" data-scan-elapsed>0s elapsed</span>
-    </div>
-    <div class="scan-results" data-scan-results hidden>
-      <p class="confirm-modal-copy" data-scan-message></p>
-      <p class="scan-selection-copy" data-scan-selection-count hidden></p>
-      <div class="scan-result-list" data-scan-list></div>
-      <form action="/shows/scan-upcoming/confirm" method="post" data-scan-confirm-form>
-        <input type="hidden" name="candidates_json" value="" data-scan-payload />
-        <div class="confirm-modal-actions">
-          <button class="button secondary" type="button" data-scan-close>Close</button>
-          <button class="button secondary subtle" type="submit" name="scrape_after_add" value="false" data-scan-confirm>Add selected</button>
-          <button class="button" type="submit" name="scrape_after_add" value="true" data-scan-confirm-scrape>Add + scrape selected</button>
-        </div>
-      </form>
-    </div>
-    <p class="confirm-modal-copy" data-scan-empty hidden></p>
-    <details class="scan-debug-panel" data-scan-debug hidden>
-      <summary>Scan details</summary>
-      <div class="scan-debug-body" data-scan-debug-body></div>
-    </details>
-  </section>
-</div>
-{% endif %}
 {% else %}
 <section class="panel">
   <div class="empty-state">
     <h3>No trade shows loaded</h3>
-    <p>Add one show or import a CSV, then this dashboard will rank them.</p>
+    <p>The weekday Codex check-in will surface the next eligible show.</p>
   </div>
 </section>
 {% endif %}

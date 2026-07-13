@@ -2356,7 +2356,7 @@ class AutomationTests(unittest.TestCase):
             remaining_statuses = sorted(run.status for run in show.runs)
             self.assertEqual(remaining_statuses, [RunStatus.success.value])
 
-    def test_remove_show_from_queue_route_keeps_show_and_redirects_workflow(self) -> None:
+    def test_remove_show_from_queue_route_keeps_show_and_redirects_dashboard(self) -> None:
         from app.main import remove_show_from_queue_route
 
         request = type("Req", (), {"session": {}})()
@@ -2374,7 +2374,7 @@ class AutomationTests(unittest.TestCase):
                 response = remove_show_from_queue_route(show_id=show.id, request=request, db=session)
 
             self.assertEqual(response.status_code, 303)
-            self.assertEqual(response.headers["location"], "/workflow")
+            self.assertEqual(response.headers["location"], "/shows/dashboard")
             refreshed = session.get(Show, show.id)
             assert refreshed is not None
             self.assertEqual(refreshed.status, ShowStatus.waiting.value)

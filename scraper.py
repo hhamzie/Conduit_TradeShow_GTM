@@ -913,6 +913,13 @@ class DirectoryEntry:
     profile_url: str
     website_url_hint: str = ""
     booth_number: str = ""
+    general_contact_email: str = ""
+    general_contact_phone: str = ""
+    contact_name: str = ""
+    contact_title: str = ""
+    contact_email: str = ""
+    contact_phone: str = ""
+    contacts: tuple[ProfileContact, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -3034,6 +3041,98 @@ def extract_andmore_company_website(detail: object) -> str:
     )
 
 
+def extract_andmore_directory_contacts(
+    detail: object,
+) -> tuple[str, str, tuple[ProfileContact, ...]]:
+    """Preserve first-party contact cards returned by the ANDMORE directory API."""
+    if not isinstance(detail, dict):
+        return "", "", ()
+    contact_info = detail.get("directoryContactInfo")
+    if not isinstance(contact_info, dict):
+        contact_info = {}
+    company_information = detail.get("companyInformation")
+    if not isinstance(company_information, dict):
+        company_information = {}
+
+    description = normalize_text(
+        " ".join(
+            str(company_information.get(key) or "")
+            for key in ("briefDescription", "completeDescription")
+        )
+    )
+    description_emails = [
+        match.group(0).lower()
+        for match in PROFILE_EMAIL_RE.finditer(description)
+    ]
+    description_phones = [
+        normalize_contact_phone(match.group(0))
+        for match in PROFILE_PHONE_RE.finditer(description)
+    ]
+    description_phones = [phone for phone in description_phones if phone]
+
+    def email_value(*keys: str) -> str:
+        for key in keys:
+            candidate = normalize_text(str(contact_info.get(key) or "")).lower()
+            match = PROFILE_EMAIL_RE.fullmatch(candidate)
+            if match:
+                return match.group(0).lower()
+        return ""
+
+    def phone_value(*keys: str) -> str:
+        for key in keys:
+            candidate = normalize_contact_phone(str(contact_info.get(key) or ""))
+            if candidate:
+                return candidate
+        return ""
+
+    general_email = email_value("companyEmail1", "companyEmail2")
+    if not general_email and description_emails:
+        general_email = description_emails[0]
+    general_phone = phone_value(
+        "primaryPhoneNo",
+        "showroomPhoneNo",
+        "tollFreePhoneNo",
+        "smsNumber",
+    )
+    if not general_phone and description_phones:
+        general_phone = description_phones[0]
+
+    first_name = normalize_text(str(contact_info.get("directoryContactFirstName") or ""))
+    last_name = normalize_text(str(contact_info.get("directoryContactLastName") or ""))
+    person_name = normalize_text(f"{first_name} {last_name}")
+    person_email = email_value("directoryContactEmail")
+    person_phone = phone_value("showroomPhoneNo", "primaryPhoneNo", "smsNumber")
+
+    contacts: list[ProfileContact] = []
+    if person_name or person_email or person_phone:
+        contacts.append(
+            ProfileContact(
+                person_name=person_name,
+                job_title="",
+                email=person_email,
+                phone=person_phone,
+                contact_type="person" if person_name else "general",
+                source_label="directory contact",
+            )
+        )
+    return general_email, general_phone, tuple(contacts)
+
+
+def is_andmore_test_record(detail: object) -> bool:
+    if not isinstance(detail, dict):
+        return False
+    company_information = detail.get("companyInformation")
+    if not isinstance(company_information, dict):
+        return False
+    description = " ".join(
+        str(company_information.get(key) or "")
+        for key in ("briefDescription", "completeDescription")
+    ).lower()
+    return "test account" in description and (
+        "not a real account" in description or "please ignore" in description
+    )
+
+
 def detail_preference_rank(result_type: str) -> int:
     normalized = normalize_text(result_type).lower()
     if normalized == "exhibitor":
@@ -3301,6 +3400,8 @@ def collect_directory_entries_andmore_imc(
     entries: list[DirectoryEntry] = []
     for exhibitor_id in ordered_exhibitor_ids:
         detail = detail_by_exhibitor_id[exhibitor_id]
+        if is_andmore_test_record(detail):
+            continue
         company_name = extract_andmore_company_name(detail)
         if not company_name:
             continue
@@ -3311,6 +3412,8 @@ def collect_directory_entries_andmore_imc(
             site_slug=config.site_slug,
         )
         website_url_hint = extract_andmore_company_website(detail)
+        general_email, general_phone, directory_contacts = extract_andmore_directory_contacts(detail)
+        primary_contact = select_primary_person_contact(directory_contacts)
         entries.append(
             DirectoryEntry(
                 sort_index=len(entries),
@@ -3319,6 +3422,13 @@ def collect_directory_entries_andmore_imc(
                 profile_url="",
                 website_url_hint=website_url_hint,
                 booth_number=booth_number,
+                general_contact_email=general_email,
+                general_contact_phone=general_phone,
+                contact_name=primary_contact.person_name if primary_contact else "",
+                contact_title=primary_contact.job_title if primary_contact else "",
+                contact_email=primary_contact.email if primary_contact else "",
+                contact_phone=primary_contact.phone if primary_contact else "",
+                contacts=directory_contacts,
             )
         )
 
@@ -8146,6 +8256,13 @@ def collect_company_records(
                     profile_url=entry.profile_url,
                     website_url=website_url_hint,
                     booth_number=entry.booth_number,
+                    general_contact_email=entry.general_contact_email,
+                    general_contact_phone=entry.general_contact_phone,
+                    contact_name=entry.contact_name,
+                    contact_title=entry.contact_title,
+                    contact_email=entry.contact_email,
+                    contact_phone=entry.contact_phone,
+                    contacts=entry.contacts,
                 )
             )
         else:

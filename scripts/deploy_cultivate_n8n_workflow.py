@@ -1681,6 +1681,84 @@ return {
 """
 
 
+DEDUPE_FINAL_CONTACTS_JS = r"""
+function clean(value) {
+  return String(value || '').trim();
+}
+
+function cleanEmail(value) {
+  const email = clean(value).toLowerCase();
+  return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email) ? email : '';
+}
+
+function cleanPhone(value) {
+  const digits = clean(value).replace(/\D/g, '');
+  return digits.length >= 7 ? digits : '';
+}
+
+function cleanLinkedIn(value) {
+  const match = clean(value).match(/linkedin\.com\/in\/([A-Za-z0-9_%.-]+)/i);
+  return match ? match[1].toLowerCase() : '';
+}
+
+function identityKey(row) {
+  const email = cleanEmail(row.finalWorkEmail || row.suppliedEmail);
+  if (email) return `email:${email}`;
+  const phone = cleanPhone(row.finalPhone || row.suppliedPhone || row.contactPhone || row.phone);
+  if (phone) return `phone:${phone}`;
+  const linkedin = cleanLinkedIn(row.linkedinUrl);
+  if (linkedin) return `linkedin:${linkedin}`;
+  const company = clean(row.domain || row.normalizedName || row.companyName).toLowerCase();
+  const name = clean(row.fullName).toLowerCase();
+  return company && name ? `name:${company}|${name}` : `row:${clean(row.airtableContactRecordId || row.contactDedupeKey || row.sourceRecordId)}`;
+}
+
+function qualityScore(row) {
+  let score = 0;
+  if (cleanEmail(row.finalWorkEmail || row.suppliedEmail)) score += 50;
+  if (clean(row.finalEmailValidationStatus).toLowerCase() === 'valid') score += 20;
+  if (clean(row.contactSourceType).includes('scraped_trade_show_contact')) score += 15;
+  if (clean(row.fullName).split(/\s+/).filter(Boolean).length >= 2) score += 10;
+  if (clean(row.jobTitle)) score += 5;
+  if (cleanLinkedIn(row.linkedinUrl)) score += 5;
+  return score;
+}
+
+function mergeMissing(preferred, fallback) {
+  const merged = { ...preferred };
+  for (const [key, value] of Object.entries(fallback || {})) {
+    if ((merged[key] === undefined || merged[key] === null || merged[key] === '') && value !== undefined && value !== null && value !== '') {
+      merged[key] = value;
+    }
+  }
+  return merged;
+}
+
+const deduped = new Map();
+for (const entry of $input.all()) {
+  const row = entry.json || {};
+  const key = identityKey(row);
+  const existing = deduped.get(key);
+  if (!existing) {
+    deduped.set(key, { ...row, finalContactIdentity: key, duplicateSuppressedCount: 0 });
+    continue;
+  }
+  const preferred = qualityScore(row) > qualityScore(existing) ? row : existing;
+  const fallback = preferred === row ? existing : row;
+  const merged = mergeMissing(preferred, fallback);
+  merged.finalContactIdentity = key;
+  merged.duplicateSuppressedCount = Number(existing.duplicateSuppressedCount || 0) + 1;
+  merged.sourceContactMatched = Boolean(
+    clean(row.contactSourceType).includes('scraped_trade_show_contact')
+    || clean(existing.contactSourceType).includes('scraped_trade_show_contact')
+  );
+  deduped.set(key, merged);
+}
+
+return Array.from(deduped.values()).map((row) => ({ json: row }));
+"""
+
+
 PARSE_SMARTLEAD_JS = r"""
 const source = $('Need Smartlead?').item.json;
 return {
@@ -2898,6 +2976,7 @@ def build_workflow(credentials_by_name: dict[str, dict[str, str]]) -> dict[str, 
             json_body="={{$json.airtableContactUpdateBody}}",
         ),
         code_node("After Email Airtable Update", (8600, 120), AFTER_EMAIL_AIRTABLE_UPDATE_JS),
+        code_node("Dedupe Final Contacts", (8730, 300), DEDUPE_FINAL_CONTACTS_JS, mode="runOnceForAllItems"),
         if_node("Need Smartlead?", (8860, 120), "={{$json.shouldPushSmartlead}}"),
         http_node(
             "Add Lead to Smartlead",
@@ -2911,7 +2990,7 @@ def build_workflow(credentials_by_name: dict[str, dict[str, str]]) -> dict[str, 
                 '"company_name": $json.normalizedName || $json.companyName, "custom_fields": { '
                 '"persona": $json.persona, "show_name": $json.conference, "source_lead_record_id": $json.sourceLeadRecordId, '
                 '"airtable_contact_record_id": $json.airtableContactRecordId } }], '
-                '"settings": { "ignore_duplicate_leads_in_other_campaign": false, '
+                '"settings": { "ignore_duplicate_leads_in_other_campaign": true, '
                 '"ignore_global_block_list": false, "ignore_unsubscribe_list": false, '
                 '"ignore_community_bounce_list": false, "return_lead_ids": true } } }}'
             ),
@@ -3268,7 +3347,8 @@ def build_workflow(credentials_by_name: dict[str, dict[str, str]]) -> dict[str, 
     connect(connections, "Merge After Final Email Validation", "Apply Final Email Validation")
     connect(connections, "Apply Final Email Validation", "Update Contact Email Fields")
     connect(connections, "Update Contact Email Fields", "After Email Airtable Update")
-    connect(connections, "After Email Airtable Update", "Need Smartlead?")
+    connect(connections, "After Email Airtable Update", "Dedupe Final Contacts")
+    connect(connections, "Dedupe Final Contacts", "Need Smartlead?")
     connect(connections, "Need Smartlead?", "Add Lead to Smartlead", source_output=0)
     connect(connections, "Need Smartlead?", "Merge After Smartlead", source_output=1, target_input=1)
     connect(connections, "Add Lead to Smartlead", "Parse Smartlead")

@@ -10,7 +10,7 @@ from starlette import status
 
 from app.core.bulk_jobs import bulk_scrape_jobs
 from app.core.auth import require_authenticated
-from app.core.templating import settings, template_context, templates
+from app.core.templating import settings
 from app.database import get_db
 from app.services import (
     create_or_update_show,
@@ -22,7 +22,7 @@ from app.services import (
     register_bulk_shows,
     upsert_show,
 )
-from app.web.presenters import WORKFLOW_SECTIONS, build_workflow_dashboard_view, shows_in_section
+from app.web.presenters import WORKFLOW_SECTIONS, shows_in_section
 
 
 router = APIRouter()
@@ -36,32 +36,7 @@ def home():
 @router.get("/workflow")
 def dashboard(request: Request, db: Session = Depends(get_db)):
     require_authenticated(request)
-    shows = list_shows(db)
-    view = build_workflow_dashboard_view(shows, datetime.now())
-    return templates.TemplateResponse(
-        "index.html",
-        template_context(
-            request,
-            current_page="workflow",
-            can_manage=True,
-            single_scrape_error=request.session.pop("single_scrape_error", ""),
-            bulk_scrape_error=request.session.pop("bulk_scrape_error", ""),
-            automation_error=request.session.pop("automation_error", ""),
-            title="Workflow",
-            weekly_sync_enabled=settings.weekly_show_sync_enabled,
-            weekly_sync_source=(settings.weekly_show_sync_source_url or settings.weekly_show_sync_source_path),
-            weekly_sync_mode=(
-                "CSV feed"
-                if (settings.weekly_show_sync_source_url or settings.weekly_show_sync_source_path)
-                else "AI scan"
-            ),
-            weekly_sync_weekday=settings.weekly_show_sync_weekday,
-            weekly_sync_hour=settings.weekly_show_sync_hour,
-            weekly_sync_timezone=settings.weekly_show_sync_timezone,
-            weekly_sync_lookahead_days=settings.weekly_show_sync_lookahead_days,
-            **view.__dict__,
-        ),
-    )
+    return RedirectResponse("/shows/dashboard", status_code=status.HTTP_303_SEE_OTHER)
 
 
 @router.post("/shows/import")
@@ -78,7 +53,7 @@ async def import_shows(
         summary = import_shows_from_csv(db, payload, settings.default_run_offset_days)
     except ValueError as exc:
         request.session["automation_error"] = str(exc)
-        return RedirectResponse("/workflow", status_code=status.HTTP_303_SEE_OTHER)
+        return RedirectResponse("/shows/dashboard", status_code=status.HTTP_303_SEE_OTHER)
 
     request.session["flash_message"] = {
         "tone": "success",
@@ -109,7 +84,7 @@ def add_single_show(
         )
     except ValueError as exc:
         request.session["automation_error"] = str(exc)
-        return RedirectResponse("/workflow", status_code=status.HTTP_303_SEE_OTHER)
+        return RedirectResponse("/shows/dashboard", status_code=status.HTTP_303_SEE_OTHER)
     db.commit()
     request.session["flash_message"] = {
         "tone": "success",
@@ -148,12 +123,12 @@ def scrape_single_show(
         }
     except ValueError as exc:
         request.session["single_scrape_error"] = str(exc)
-        return RedirectResponse("/workflow", status_code=status.HTTP_303_SEE_OTHER)
+        return RedirectResponse("/shows/dashboard", status_code=status.HTTP_303_SEE_OTHER)
     except Exception as exc:  # noqa: BLE001
         request.session["single_scrape_error"] = str(exc)
         if show is not None:
             return RedirectResponse(f"/shows/{show.id}", status_code=status.HTTP_303_SEE_OTHER)
-        return RedirectResponse("/workflow", status_code=status.HTTP_303_SEE_OTHER)
+        return RedirectResponse("/shows/dashboard", status_code=status.HTTP_303_SEE_OTHER)
 
     return RedirectResponse("/shows/dashboard", status_code=status.HTTP_303_SEE_OTHER)
 
@@ -168,7 +143,7 @@ async def scrape_many_shows(
     payload = await file.read()
     if not payload:
         request.session["bulk_scrape_error"] = "The uploaded CSV was empty."
-        return RedirectResponse("/workflow", status_code=status.HTTP_303_SEE_OTHER)
+        return RedirectResponse("/shows/dashboard", status_code=status.HTTP_303_SEE_OTHER)
 
     try:
         summary, queued_shows = register_bulk_shows(db, payload, settings.default_run_offset_days)
@@ -237,4 +212,4 @@ def delete_all_shows(
     for show in targets:
         purge_show(db, show)
     db.commit()
-    return RedirectResponse("/workflow", status_code=status.HTTP_303_SEE_OTHER)
+    return RedirectResponse("/shows/dashboard", status_code=status.HTTP_303_SEE_OTHER)

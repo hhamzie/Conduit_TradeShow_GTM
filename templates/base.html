@@ -14,9 +14,6 @@
           <a class="brand" href="/shows/dashboard">{{ app_name if app_name else "TradeShowScraper" }}</a>
           <nav class="topnav">
             <a class="topnav-link{% if current_page == 'show_dashboard' %} is-active{% endif %}" href="/shows/dashboard">Trade Shows</a>
-            {% if request.session.get("authenticated") %}
-            <a class="topnav-link{% if current_page == 'workflow' %} is-active{% endif %}" href="/workflow">Workflow</a>
-            {% endif %}
             {% if context_tab_label and context_tab_href %}
             <a class="topnav-link is-active is-context-tab" href="{{ context_tab_href }}">{{ context_tab_label }}</a>
             {% endif %}

@@ -1365,7 +1365,7 @@ def import_ready_rows_to_smartlead(show: Show, lead_rows: list[dict[str, object]
             payload = {
                 "lead_list": batch,
                 "settings": {
-                    "ignore_duplicate_leads_in_other_campaign": False,
+                    "ignore_duplicate_leads_in_other_campaign": True,
                     "return_lead_ids": True,
                 },
             }

@@ -435,11 +435,11 @@ def delete_selected_shows(
 def remove_selected_shows_from_queue(
     request: Request,
     show_ids: list[int] = Form(default_factory=list),
-    next_path: str = Form("/workflow"),
+    next_path: str = Form("/shows/dashboard"),
     db: Session = Depends(get_db),
 ):
     require_authenticated(request)
-    target_path = _sanitize_next_path(next_path, fallback="/workflow")
+    target_path = _sanitize_next_path(next_path, fallback="/shows/dashboard")
     unique_ids = list(dict.fromkeys(show_ids))
     if not unique_ids:
         request.session["flash_message"] = {
@@ -603,7 +603,7 @@ def remove_show_from_queue_route(show_id: int, request: Request, db: Session = D
             else f"{show.name} is already scraping and cannot be removed right now."
         ),
     }
-    return RedirectResponse("/workflow", status_code=status.HTTP_303_SEE_OTHER)
+    return RedirectResponse("/shows/dashboard", status_code=status.HTTP_303_SEE_OTHER)
 
 
 @router.post("/shows/{show_id}/smartlead/rebuild")

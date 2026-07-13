@@ -27,7 +27,7 @@ class CultivateWorkflowTests(unittest.TestCase):
         self.assertIn("airtableContactBody", contact_write["jsonBody"])
 
         smartlead_body = nodes["Add Lead to Smartlead"]["parameters"]["jsonBody"]
-        self.assertIn('"ignore_duplicate_leads_in_other_campaign": false', smartlead_body)
+        self.assertIn('"ignore_duplicate_leads_in_other_campaign": true', smartlead_body)
         self.assertIn('"ignore_unsubscribe_list": false', smartlead_body)
         self.assertNotIn("allow_duplicate_leads_in_another_campaign", smartlead_body)
 
@@ -39,6 +39,14 @@ class CultivateWorkflowTests(unittest.TestCase):
         self.assertIn("performUpsert", contact_code)
         self.assertIn("scraped_trade_show_contact", contact_code)
         self.assertIn("row.scrapedContacts", contact_code)
+
+        final_dedupe = nodes["Dedupe Final Contacts"]
+        self.assertEqual(final_dedupe["parameters"]["mode"], "runOnceForAllItems")
+        final_dedupe_code = final_dedupe["parameters"]["jsCode"]
+        self.assertIn("finalWorkEmail || row.suppliedEmail", final_dedupe_code)
+        self.assertIn("sourceContactMatched", final_dedupe_code)
+        self.assertIn("duplicateSuppressedCount", final_dedupe_code)
+        self.assertIn("Dedupe Final Contacts", workflow["connections"])
 
         pipedrive_code = nodes["Build Pipedrive Sync"]["parameters"]["jsCode"]
         self.assertIn("Lea Skoumbakis", pipedrive_code)
