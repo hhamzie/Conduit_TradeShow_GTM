@@ -116,7 +116,10 @@ class CultivateWorkflowTests(unittest.TestCase):
         pipedrive_code = nodes["Build Pipedrive Sync"]["parameters"]["jsCode"]
         self.assertIn("finalWorkEmail || finalPhone || linkedinUrl", pipedrive_code)
         self.assertIn("Missing a valid final email, phone, or LinkedIn profile", pipedrive_code)
-        self.assertIn("row.icpQualified === true", pipedrive_code)
+        self.assertIn("['STRONG FIT', 'MODERATE FIT'].includes(fitScore)", pipedrive_code)
+        self.assertIn("50 - strongModerateKeys.length", pipedrive_code)
+        self.assertIn("fitScore === 'WEAK FIT' && weakRank >= 0 && weakRank < weakSlots", pipedrive_code)
+        self.assertIn("pipedriveFitEligible", pipedrive_code)
         self.assertIn("ICP gate excluded", pipedrive_code)
         self.assertNotIn("linkedinUrl && clean(row.linkedinActive) === 'YES'", pipedrive_code)
 

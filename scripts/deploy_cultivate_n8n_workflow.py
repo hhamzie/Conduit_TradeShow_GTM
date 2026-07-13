@@ -2113,6 +2113,22 @@ const pipedriveRowIdentity = [
 ].filter(Boolean).join(':');
 const currentKey = keyFor(row);
 const completedIndex = completedRows.findIndex((candidate) => keyFor(candidate) === currentKey);
+const normalizeFit = (value) => clean(value).toUpperCase();
+const uniqueKeysForFits = (fits) => [...new Set(
+  completedRows
+    .filter((candidate) => fits.includes(normalizeFit(candidate.icpFitScore)))
+    .map((candidate) => keyFor(candidate))
+    .filter(Boolean)
+)];
+const strongModerateKeys = uniqueKeysForFits(['STRONG FIT', 'MODERATE FIT']);
+const weakKeys = uniqueKeysForFits(['WEAK FIT']);
+const weakSlots = Math.max(0, 50 - strongModerateKeys.length);
+const weakRank = weakKeys.indexOf(currentKey);
+const fitScore = normalizeFit(row.icpFitScore);
+const pipedriveFitEligible = Boolean(
+  ['STRONG FIT', 'MODERATE FIT'].includes(fitScore)
+  || (fitScore === 'WEAK FIT' && weakRank >= 0 && weakRank < weakSlots)
+);
 const n8nItemIndex = typeof $itemIndex === 'undefined' ? null : finiteIndex($itemIndex);
 const sourceRowIndex = finiteIndex(row.sourceRowIndex);
 const assignmentIndex = completedIndex >= 0 ? completedIndex : (n8nItemIndex ?? sourceRowIndex ?? 0);
@@ -2128,14 +2144,16 @@ const shouldSyncPipedrive = Boolean(
   && companyName
   && hasReachableChannel
   && !invalidPerson
-  && row.icpQualified === true
+  && pipedriveFitEligible
 );
 
 let skipReason = '';
 if (!shouldSyncPipedrive) {
   if (!fullName) skipReason = 'Missing completed contact name.';
   else if (!companyName) skipReason = 'Missing completed company name.';
-  else if (row.icpQualified !== true) skipReason = `ICP gate excluded ${row.icpFitScore || 'unscored'} company.`;
+  else if (!pipedriveFitEligible) skipReason = fitScore === 'WEAK FIT' && weakSlots === 0
+    ? 'Weak Fit excluded because Strong + Moderate already reached 50 contacts.'
+    : `ICP gate excluded ${row.icpFitScore || 'unscored'} company.`;
   else if (isBadPlaceholder(fullName) || isBadPlaceholder(row.jobTitle)) skipReason = 'Contact contains unresolved placeholder text.';
   else if (!hasReachableChannel) skipReason = 'Missing a valid final email, phone, or LinkedIn profile.';
   else skipReason = 'Contact is not complete enough for Pipedrive.';
