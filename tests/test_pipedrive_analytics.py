@@ -758,82 +758,127 @@ class OpenPhoneAnalyticsTests(unittest.TestCase):
         self.db.commit()
         self.assertIsNone(get_latest_pipedrive_analytics(self.db))
 
-    def test_if_due_refreshes_once_per_calendar_month(self) -> None:
+    def test_if_due_refreshes_at_each_daily_slot(self) -> None:
         client = FakeOpenPhoneAnalyticsClient()
         before_due = refresh_pipedrive_analytics_if_due(
             self.db,
             client=client,
-            now=datetime(2026, 8, 1, 5, 59, tzinfo=EASTERN),
-            refresh_hour=6,
-            refresh_day=1,
+            now=datetime(2026, 8, 1, 8, 59, tzinfo=EASTERN),
+            refresh_hours=(9, 13, 17),
             api_token="mock-only-token",
         )
         self.assertIsNone(before_due)
         self.assertEqual(client.calls, [])
 
-        first = refresh_pipedrive_analytics_if_due(
+        morning = refresh_pipedrive_analytics_if_due(
             self.db,
             client=client,
-            now=datetime(2026, 8, 1, 6, 0, tzinfo=EASTERN),
-            refresh_hour=6,
-            refresh_day=1,
+            now=datetime(2026, 8, 1, 9, 0, tzinfo=EASTERN),
+            refresh_hours=(9, 13, 17),
             api_token="mock-only-token",
         )
-        request_count = len(client.calls)
-        same_month = refresh_pipedrive_analytics_if_due(
+        morning_request_count = len(client.calls)
+        after_morning = refresh_pipedrive_analytics_if_due(
             self.db,
             client=client,
-            now=datetime(2026, 8, 31, 12, 0, tzinfo=EASTERN),
-            refresh_hour=6,
-            refresh_day=1,
+            now=datetime(2026, 8, 1, 12, 59, tzinfo=EASTERN),
+            refresh_hours=(9, 13, 17),
             api_token="mock-only-token",
         )
-        next_month_before_due = refresh_pipedrive_analytics_if_due(
+        afternoon = refresh_pipedrive_analytics_if_due(
             self.db,
             client=client,
-            now=datetime(2026, 9, 1, 5, 59, tzinfo=EASTERN),
-            refresh_hour=6,
-            refresh_day=1,
+            now=datetime(2026, 8, 1, 13, 0, tzinfo=EASTERN),
+            refresh_hours=(9, 13, 17),
             api_token="mock-only-token",
         )
-        next_month = refresh_pipedrive_analytics_if_due(
+        afternoon_request_count = len(client.calls)
+        before_evening = refresh_pipedrive_analytics_if_due(
             self.db,
             client=client,
-            now=datetime(2026, 9, 1, 6, 0, tzinfo=EASTERN),
-            refresh_hour=6,
-            refresh_day=1,
+            now=datetime(2026, 8, 1, 16, 59, tzinfo=EASTERN),
+            refresh_hours=(9, 13, 17),
+            api_token="mock-only-token",
+        )
+        evening = refresh_pipedrive_analytics_if_due(
+            self.db,
+            client=client,
+            now=datetime(2026, 8, 1, 17, 0, tzinfo=EASTERN),
+            refresh_hours=(9, 13, 17),
+            api_token="mock-only-token",
+        )
+        evening_request_count = len(client.calls)
+        after_evening = refresh_pipedrive_analytics_if_due(
+            self.db,
+            client=client,
+            now=datetime(2026, 8, 2, 8, 59, tzinfo=EASTERN),
+            refresh_hours=(9, 13, 17),
+            api_token="mock-only-token",
+        )
+        next_morning = refresh_pipedrive_analytics_if_due(
+            self.db,
+            client=client,
+            now=datetime(2026, 8, 2, 9, 0, tzinfo=EASTERN),
+            refresh_hours=(9, 13, 17),
             api_token="mock-only-token",
         )
         missing_token = refresh_pipedrive_analytics_if_due(
             self.db,
             client=client,
-            now=datetime(2026, 10, 1, 12, 0, tzinfo=EASTERN),
-            refresh_hour=6,
-            refresh_day=1,
+            now=datetime(2026, 8, 2, 13, 0, tzinfo=EASTERN),
+            refresh_hours=(9, 13, 17),
             api_token="",
         )
 
-        self.assertIsNotNone(first)
-        self.assertIsNone(same_month)
-        self.assertIsNone(next_month_before_due)
-        self.assertIsNotNone(next_month)
+        self.assertIsNotNone(morning)
+        self.assertIsNone(after_morning)
+        self.assertIsNotNone(afternoon)
+        self.assertIsNone(before_evening)
+        self.assertIsNotNone(evening)
+        self.assertIsNone(after_evening)
+        self.assertIsNotNone(next_morning)
         self.assertIsNone(missing_token)
-        self.assertGreater(len(client.calls), request_count)
+        self.assertGreater(afternoon_request_count, morning_request_count)
+        self.assertGreater(evening_request_count, afternoon_request_count)
+        self.assertGreater(len(client.calls), evening_request_count)
+        self.assertEqual(
+            self.db.scalar(select(func.count(PipedriveAnalyticsSnapshot.id))),
+            2,
+        )
+        self.assertEqual(
+            evening["report"]["generated_at"],
+            "2026-08-01T17:00:00-04:00",
+        )
 
-    def test_monthly_refresh_catches_up_after_scheduled_day(self) -> None:
+    def test_daily_refresh_catches_up_after_missed_slot(self) -> None:
         client = FakeOpenPhoneAnalyticsClient()
 
-        payload = refresh_pipedrive_analytics_if_due(
+        catch_up = refresh_pipedrive_analytics_if_due(
             self.db,
             client=client,
-            now=datetime(2026, 8, 3, 10, 0, tzinfo=EASTERN),
-            refresh_hour=6,
-            refresh_day=1,
+            now=datetime(2026, 8, 3, 14, 0, tzinfo=EASTERN),
+            refresh_hours="9,13,17",
+            api_token="mock-only-token",
+        )
+        before_next_slot = refresh_pipedrive_analytics_if_due(
+            self.db,
+            client=client,
+            now=datetime(2026, 8, 3, 16, 59, tzinfo=EASTERN),
+            refresh_hours="9,13,17",
+            api_token="mock-only-token",
+        )
+        evening = refresh_pipedrive_analytics_if_due(
+            self.db,
+            client=client,
+            now=datetime(2026, 8, 3, 17, 1, tzinfo=EASTERN),
+            refresh_hours="9,13,17",
             api_token="mock-only-token",
         )
 
-        self.assertIsNotNone(payload)
-        self.assertEqual(payload["report"]["date"], "2026-08-03")
+        self.assertIsNotNone(catch_up)
+        self.assertEqual(catch_up["report"]["date"], "2026-08-03")
+        self.assertIsNone(before_next_slot)
+        self.assertIsNotNone(evening)
 
     def test_sparse_buckets_require_fifteen_for_kpis_not_charts(self) -> None:
         raw_calls = [

@@ -175,7 +175,7 @@ class PipedriveAnalyticsRouteTests(unittest.TestCase):
         ):
             response = client.get("/analytics")
         self.assertEqual(response.status_code, 200)
-        self.assertIn("first monthly snapshot is not ready", response.text)
+        self.assertIn("first scheduled snapshot is not ready", response.text)
         self.assertNotIn("Synthetic Rep", response.text)
 
     def test_authenticated_dashboard_renders_snapshot_and_local_assets(self) -> None:
@@ -194,7 +194,7 @@ class PipedriveAnalyticsRouteTests(unittest.TestCase):
         self.assertIn("6.2K", response.text)
         self.assertIn("779 connected", response.text)
         self.assertIn("6210 source calls", response.text)
-        self.assertIn("Monthly read-only OpenPhone snapshot", response.text)
+        self.assertIn("Updated daily at 9am, 1pm &amp; 5pm ET", response.text)
         self.assertIn("Rep leaderboard — this week by day", response.text)
         self.assertIn("Connected % by weekday — blended, last 4 weeks", response.text)
         self.assertIn("Connection rate by hour of day (30-day)", response.text)

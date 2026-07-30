@@ -19,8 +19,7 @@ from app.database import Base
 
 
 DEFAULT_TIMEZONE = "America/New_York"
-DEFAULT_REFRESH_HOUR = 6
-DEFAULT_REFRESH_DAY = 1
+DEFAULT_REFRESH_HOURS = (9, 13, 17)
 DEFAULT_OPENPHONE_BASE_URL = "https://api.openphone.com"
 LOOKBACK_DAYS = 30
 BLENDED_LOOKBACK_DAYS = 28
@@ -506,8 +505,9 @@ def refresh_pipedrive_analytics(
     base_url: str | None = None,
     lookback_days: int | None = None,
     minimum_sample: int | None = None,
+    replace_existing: bool = False,
 ) -> dict[str, Any]:
-    """Fetch and persist one schema-current snapshot for the local report date."""
+    """Fetch and persist a schema-current snapshot for the local report date."""
 
     token = (
         os.getenv("OPENPHONE_API_KEY", "").strip()
@@ -538,7 +538,11 @@ def refresh_pipedrive_analytics(
     )
 
     existing = _get_snapshot_for_date(db, report_date)
-    if existing is not None and _snapshot_has_current_schema(existing):
+    if (
+        existing is not None
+        and _snapshot_has_current_schema(existing)
+        and not replace_existing
+    ):
         return existing.payload()
 
     window_end = datetime.combine(report_date, time.min, tzinfo=tz)
@@ -598,16 +602,8 @@ def refresh_pipedrive_analytics(
 def get_latest_pipedrive_analytics(
     db: Session,
 ) -> dict[str, Any] | None:
-    snapshots = db.execute(
-        select(PipedriveAnalyticsSnapshot).order_by(
-            PipedriveAnalyticsSnapshot.report_date.desc(),
-            PipedriveAnalyticsSnapshot.generated_at.desc(),
-        )
-    ).scalars()
-    for snapshot in snapshots:
-        if _snapshot_has_current_schema(snapshot):
-            return snapshot.payload()
-    return None
+    snapshot = _get_latest_current_schema_snapshot(db)
+    return snapshot.payload() if snapshot is not None else None
 
 
 def refresh_pipedrive_analytics_if_due(
@@ -616,14 +612,13 @@ def refresh_pipedrive_analytics_if_due(
     client: Any | None = None,
     now: datetime | None = None,
     timezone_name: str | None = None,
-    refresh_hour: int | None = None,
-    refresh_day: int | None = None,
+    refresh_hours: Sequence[int] | str | None = None,
     api_token: str | None = None,
     base_url: str | None = None,
     lookback_days: int | None = None,
     minimum_sample: int | None = None,
 ) -> dict[str, Any] | None:
-    """Refresh once per calendar month after the configured local day/hour."""
+    """Refresh once after each configured local-time slot."""
 
     token = (
         os.getenv("OPENPHONE_API_KEY", "").strip()
@@ -635,16 +630,24 @@ def refresh_pipedrive_analytics_if_due(
 
     tz_name, tz = _resolve_timezone(timezone_name)
     local_now = _coerce_now(now, tz)
-    month_start = local_now.date().replace(day=1)
-    existing = _get_current_schema_snapshot_for_month(db, month_start)
-    if existing is not None:
-        return None
-    scheduled_at = datetime.combine(
-        month_start.replace(day=_resolve_refresh_day(refresh_day)),
-        time(hour=_resolve_refresh_hour(refresh_hour)),
+    resolved_refresh_hours = _resolve_refresh_hours(refresh_hours)
+    existing = _get_latest_current_schema_snapshot(db)
+    first_slot_today = datetime.combine(
+        local_now.date(),
+        time(hour=resolved_refresh_hours[0]),
         tzinfo=tz,
     )
-    if local_now < scheduled_at:
+    if existing is None and local_now < first_slot_today:
+        return None
+    scheduled_at = _latest_due_refresh(
+        local_now,
+        resolved_refresh_hours,
+        tz,
+    )
+    if (
+        existing is not None
+        and _snapshot_generated_at(existing, tz) >= scheduled_at
+    ):
         return None
 
     return refresh_pipedrive_analytics(
@@ -656,6 +659,7 @@ def refresh_pipedrive_analytics_if_due(
         base_url=base_url,
         lookback_days=lookback_days,
         minimum_sample=minimum_sample,
+        replace_existing=True,
     )
 
 
@@ -981,48 +985,64 @@ def _resolve_timezone(
         ) from exc
 
 
-def _resolve_refresh_hour(refresh_hour: int | None) -> int:
-    raw: Any = (
-        refresh_hour
-        if refresh_hour is not None
-        else os.getenv(
-            "OPENPHONE_ANALYTICS_REFRESH_HOUR",
-            str(DEFAULT_REFRESH_HOUR),
-        )
-    )
-    try:
-        hour = int(raw)
-    except (TypeError, ValueError) as exc:
+def _resolve_refresh_hours(
+    refresh_hours: Sequence[int] | str | None,
+) -> tuple[int, ...]:
+    raw_values: Sequence[Any]
+    if refresh_hours is None:
+        raw_values = os.getenv(
+            "OPENPHONE_ANALYTICS_REFRESH_HOURS",
+            ",".join(str(hour) for hour in DEFAULT_REFRESH_HOURS),
+        ).split(",")
+    elif isinstance(refresh_hours, str):
+        raw_values = refresh_hours.split(",")
+    else:
+        raw_values = refresh_hours
+
+    parsed: list[int] = []
+    for raw in raw_values:
+        if isinstance(raw, bool):
+            raise PipedriveAnalyticsError(
+                "OPENPHONE_ANALYTICS_REFRESH_HOURS must contain hours from 0 to 23"
+            )
+        try:
+            hour = int(str(raw).strip())
+        except (TypeError, ValueError) as exc:
+            raise PipedriveAnalyticsError(
+                "OPENPHONE_ANALYTICS_REFRESH_HOURS must be a comma-separated "
+                "list of hours from 0 to 23"
+            ) from exc
+        if hour < 0 or hour > 23:
+            raise PipedriveAnalyticsError(
+                "OPENPHONE_ANALYTICS_REFRESH_HOURS must contain hours from 0 to 23"
+            )
+        parsed.append(hour)
+
+    if not parsed:
         raise PipedriveAnalyticsError(
-            "OPENPHONE_ANALYTICS_REFRESH_HOUR must be an integer from 0 to 23"
-        ) from exc
-    if hour < 0 or hour > 23:
-        raise PipedriveAnalyticsError(
-            "OPENPHONE_ANALYTICS_REFRESH_HOUR must be from 0 to 23"
+            "OPENPHONE_ANALYTICS_REFRESH_HOURS must contain at least one hour"
         )
-    return hour
+    return tuple(sorted(set(parsed)))
 
 
-def _resolve_refresh_day(refresh_day: int | None) -> int:
-    raw: Any = (
-        refresh_day
-        if refresh_day is not None
-        else os.getenv(
-            "OPENPHONE_ANALYTICS_REFRESH_DAY",
-            str(DEFAULT_REFRESH_DAY),
+def _latest_due_refresh(
+    local_now: datetime,
+    refresh_hours: Sequence[int],
+    tz: ZoneInfo,
+) -> datetime:
+    for hour in reversed(refresh_hours):
+        candidate = datetime.combine(
+            local_now.date(),
+            time(hour=hour),
+            tzinfo=tz,
         )
+        if candidate <= local_now:
+            return candidate
+    return datetime.combine(
+        local_now.date() - timedelta(days=1),
+        time(hour=refresh_hours[-1]),
+        tzinfo=tz,
     )
-    try:
-        day = int(raw)
-    except (TypeError, ValueError) as exc:
-        raise PipedriveAnalyticsError(
-            "OPENPHONE_ANALYTICS_REFRESH_DAY must be an integer from 1 to 28"
-        ) from exc
-    if day < 1 or day > 28:
-        raise PipedriveAnalyticsError(
-            "OPENPHONE_ANALYTICS_REFRESH_DAY must be from 1 to 28"
-        )
-    return day
 
 
 def _resolve_positive_setting(
@@ -1063,27 +1083,30 @@ def _get_snapshot_for_date(
     ).scalar_one_or_none()
 
 
-def _get_current_schema_snapshot_for_month(
+def _get_latest_current_schema_snapshot(
     db: Session,
-    month_start: date,
 ) -> PipedriveAnalyticsSnapshot | None:
-    next_month = (
-        date(month_start.year + 1, 1, 1)
-        if month_start.month == 12
-        else date(month_start.year, month_start.month + 1, 1)
-    )
     snapshots = db.execute(
         select(PipedriveAnalyticsSnapshot)
-        .where(
-            PipedriveAnalyticsSnapshot.report_date >= month_start,
-            PipedriveAnalyticsSnapshot.report_date < next_month,
+        .order_by(
+            PipedriveAnalyticsSnapshot.report_date.desc(),
+            PipedriveAnalyticsSnapshot.generated_at.desc(),
         )
-        .order_by(PipedriveAnalyticsSnapshot.report_date.desc())
     ).scalars()
     for snapshot in snapshots:
         if _snapshot_has_current_schema(snapshot):
             return snapshot
     return None
+
+
+def _snapshot_generated_at(
+    snapshot: PipedriveAnalyticsSnapshot,
+    tz: ZoneInfo,
+) -> datetime:
+    generated_at = snapshot.generated_at
+    if generated_at.tzinfo is None:
+        generated_at = generated_at.replace(tzinfo=timezone.utc)
+    return generated_at.astimezone(tz)
 
 
 def _snapshot_has_current_schema(

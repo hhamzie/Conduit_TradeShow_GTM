@@ -47,11 +47,12 @@ No Pipedrive deal or activity proxy is used for these call metrics.
 
 ## Worker configuration
 
-The Render worker refreshes the snapshot at most once per calendar month. It
-runs on or after `OPENPHONE_ANALYTICS_REFRESH_DAY` (default 1) at
-`OPENPHONE_ANALYTICS_REFRESH_HOUR` (default 6) in the analytics timezone. If
-the worker is unavailable at the scheduled time, its next successful poll
-later that month catches up automatically.
+The Render worker refreshes the snapshot three times per day at the local
+hours in `OPENPHONE_ANALYTICS_REFRESH_HOURS` (default `9,13,17`) in the
+analytics timezone. These defaults correspond to 9:00 AM, 1:00 PM, and
+5:00 PM Eastern. Each slot runs at most once. If the worker is unavailable at
+a scheduled time, its next successful poll catches up only the latest missed
+slot instead of replaying every missed refresh.
 
 Required worker environment:
 
@@ -65,8 +66,7 @@ Optional worker environment:
 ```text
 OPENPHONE_BASE_URL=https://api.openphone.com
 OPENPHONE_ANALYTICS_TIMEZONE=America/New_York
-OPENPHONE_ANALYTICS_REFRESH_DAY=1
-OPENPHONE_ANALYTICS_REFRESH_HOUR=6
+OPENPHONE_ANALYTICS_REFRESH_HOURS=9,13,17
 OPENPHONE_ANALYTICS_LOOKBACK_DAYS=30
 OPENPHONE_ANALYTICS_MIN_SAMPLE=15
 ```
