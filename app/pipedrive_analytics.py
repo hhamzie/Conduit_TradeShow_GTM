@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import time as time_module
 from collections import Counter
@@ -36,6 +37,11 @@ _RETRYABLE_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
 _OUTBOUND_DIRECTIONS = frozenset({"outgoing", "outbound"})
 _INBOUND_DIRECTIONS = frozenset({"incoming", "inbound"})
 _DAY_LABELS = ("Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat")
+
+# HTTPX logs full query URLs at INFO, including the participant number required
+# by OpenPhone's calls endpoint. Keep those transient lookup values out of
+# application and Render logs.
+logging.getLogger("httpx").setLevel(logging.WARNING)
 
 
 class PipedriveAnalyticsError(RuntimeError):
