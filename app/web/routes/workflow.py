@@ -30,7 +30,7 @@ router = APIRouter()
 
 @router.get("/")
 def home():
-    return RedirectResponse("/shows/dashboard", status_code=status.HTTP_303_SEE_OTHER)
+    return RedirectResponse("/analytics", status_code=status.HTTP_303_SEE_OTHER)
 
 
 @router.get("/workflow")

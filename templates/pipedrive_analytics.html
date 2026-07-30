@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{{ title }}</title>
+    <link rel="stylesheet" href="/static/pipedrive-analytics.css" />
+    <script src="/static/pipedrive-analytics.js" defer></script>
+  </head>
+  <body>
+    <main class="analytics-shell">
+      <nav class="analytics-nav" aria-label="Dashboard navigation">
+        <a class="analytics-nav-link is-current" href="/analytics" aria-current="page">Pipedrive analytics</a>
+        <a class="analytics-nav-link" href="/shows/dashboard">Trade shows</a>
+        <a class="analytics-nav-link" href="/workflow">Workflow</a>
+        <form action="/logout" method="post">
+          <button class="analytics-nav-link analytics-nav-button" type="submit">Log out</button>
+        </form>
+      </nav>
+
+      {% if analytics %}
+      <header class="analytics-header">
+        <h1>Pipedrive Sales Analytics</h1>
+        <p>
+          Report date: {{ analytics.report.date }}
+          <span aria-hidden="true">·</span>
+          Followed up = deal has at least one linked activity
+          <span aria-hidden="true">·</span>
+          {{ analytics.report.lookback_days }}-day window
+          <span aria-hidden="true">·</span>
+          {{ analytics.report.timezone }}
+        </p>
+      </header>
+
+      <section class="kpi-grid" aria-label="Pipedrive headline metrics">
+        <article class="kpi-card">
+          <h2>Total deals (30d)</h2>
+          <strong>{{ analytics.kpis.total_deals.display }}</strong>
+          <p>{{ analytics.kpis.total_deals.followed_up }} followed up</p>
+        </article>
+        <article class="kpi-card">
+          <h2>Follow-up coverage (30d)</h2>
+          <strong>{{ analytics.kpis.coverage.display }}</strong>
+          <p>Deals with a linked activity</p>
+        </article>
+        <article class="kpi-card">
+          <h2>Best hour to create</h2>
+          {% if analytics.kpis.best_hour.label %}
+          <strong>{{ analytics.kpis.best_hour.label }} · {{ analytics.kpis.best_hour.coverage|round|int }}%</strong>
+          <p>min {{ analytics.report.minimum_sample }} deals in window</p>
+          {% else %}
+          <strong>—</strong>
+          <p>Not enough volume yet</p>
+          {% endif %}
+        </article>
+        <article class="kpi-card">
+          <h2>Best day to create</h2>
+          {% if analytics.kpis.best_day.label %}
+          <strong>{{ analytics.kpis.best_day.label }} · {{ analytics.kpis.best_day.coverage|round|int }}%</strong>
+          <p>min {{ analytics.report.minimum_sample }} deals in window</p>
+          {% else %}
+          <strong>—</strong>
+          <p>Not enough volume yet</p>
+          {% endif %}
+        </article>
+        <article class="kpi-card">
+          <h2>Top owner (30d)</h2>
+          {% if analytics.kpis.top_owner.label %}
+          <strong class="kpi-card-owner">{{ analytics.kpis.top_owner.label }} · {{ analytics.kpis.top_owner.coverage|round|int }}%</strong>
+          <p>min {{ analytics.report.minimum_sample }} deals in window</p>
+          {% else %}
+          <strong>—</strong>
+          <p>Not enough volume yet</p>
+          {% endif %}
+        </article>
+      </section>
+
+      <section class="analytics-panel leaderboard-panel">
+        <h2>Owner leaderboard — this week by day</h2>
+        <div class="table-scroll" tabindex="0" aria-label="Scrollable owner leaderboard">
+          <table class="analytics-table">
+            <thead>
+              <tr>
+                <th rowspan="2" scope="col">Owner</th>
+                {% for day in analytics.leaderboard.days %}
+                <th colspan="2" scope="colgroup">{{ day.label }}</th>
+                {% endfor %}
+                <th rowspan="2" scope="col">30d %</th>
+              </tr>
+              <tr>
+                {% for day in analytics.leaderboard.days %}
+                <th scope="col">Deals</th>
+                <th scope="col">%</th>
+                {% endfor %}
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in analytics.leaderboard.rows %}
+              <tr>
+                <th scope="row">{{ row.owner }}</th>
+                {% for day in row.days %}
+                <td>{{ day.deals }}</td>
+                <td class="rate-cell{% if day.coverage is none %} rate-empty{% elif day.coverage >= 40 %} rate-high{% elif day.coverage >= 20 %} rate-mid{% else %} rate-low{% endif %}">
+                  {{ (day.coverage|round|int ~ "%") if day.coverage is not none else "—" }}
+                </td>
+                {% endfor %}
+                <td class="rate-cell{% if row.period_coverage is none %} rate-empty{% elif row.period_coverage >= 40 %} rate-high{% elif row.period_coverage >= 20 %} rate-mid{% else %} rate-low{% endif %}">
+                  {{ (row.period_coverage|round|int ~ "%") if row.period_coverage is not none else "—" }}
+                </td>
+              </tr>
+              {% else %}
+              <tr>
+                <td colspan="{{ 2 + (analytics.leaderboard.days|length * 2) }}">No deals were created in this reporting window.</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="analytics-panel chart-panel">
+        <h2>Follow-up coverage by weekday — blended, last 4 weeks</h2>
+        <div class="chart-frame">
+          <canvas
+            data-analytics-chart="weekday-blended"
+            role="img"
+            aria-label="Follow-up coverage and average new deals per day from Monday through Friday"
+          ></canvas>
+        </div>
+      </section>
+
+      <section class="analytics-panel chart-panel">
+        <h2>Follow-up coverage by hour created (30-day)</h2>
+        <div class="chart-frame">
+          <canvas
+            data-analytics-chart="hourly"
+            role="img"
+            aria-label="Follow-up coverage by hour the deal was created"
+          ></canvas>
+        </div>
+      </section>
+
+      <section class="analytics-panel chart-panel">
+        <h2>Follow-up coverage by day created (30-day)</h2>
+        <div class="chart-frame chart-frame-compact">
+          <canvas
+            data-analytics-chart="weekday"
+            role="img"
+            aria-label="Follow-up coverage by day the deal was created"
+          ></canvas>
+        </div>
+      </section>
+
+      <section class="analytics-panel heatmap-panel">
+        <h2>Follow-up coverage heatmap — hour × day, blended last 4 weeks</h2>
+        <div class="heatmap-scroll" tabindex="0" aria-label="Scrollable follow-up coverage heatmap">
+          <div class="heatmap-frame">
+            <canvas
+              data-analytics-chart="heatmap"
+              role="img"
+              aria-label="Follow-up coverage by hour and weekday"
+            ></canvas>
+          </div>
+        </div>
+        <div class="heatmap-legend" aria-label="Follow-up coverage legend from zero to one hundred percent">
+          <span>Follow-up coverage:</span>
+          <i class="legend-swatch legend-low"></i>
+          <i class="legend-swatch legend-low-mid"></i>
+          <i class="legend-swatch legend-mid"></i>
+          <i class="legend-swatch legend-mid-high"></i>
+          <i class="legend-swatch legend-high"></i>
+          <span>0% → 100%</span>
+          <span class="legend-note">Gray = no deals</span>
+        </div>
+      </section>
+
+      <footer class="analytics-footer">
+        <p>
+          Refreshed {{ analytics.report.generated_at_display or analytics.report.generated_at }}
+          <span aria-hidden="true">·</span>
+          {{ analytics.report.source_count }} source deals
+          <span aria-hidden="true">·</span>
+          Daily read-only Pipedrive snapshot
+        </p>
+      </footer>
+
+      <script id="pipedrive-analytics-data" type="application/json">{{ analytics|tojson }}</script>
+      {% else %}
+      <section class="analytics-empty" role="status">
+        <p class="analytics-eyebrow">Pipedrive Sales Analytics</p>
+        <h1>The first daily snapshot is not ready yet.</h1>
+        <p>
+          The Render worker will populate this dashboard after its next successful
+          Pipedrive refresh. No sample or fabricated values are shown.
+        </p>
+        <a class="analytics-empty-link" href="/shows/dashboard">Open the trade show dashboard</a>
+      </section>
+      {% endif %}
+    </main>
+    <div class="chart-tooltip" data-chart-tooltip hidden></div>
+  </body>
+</html>

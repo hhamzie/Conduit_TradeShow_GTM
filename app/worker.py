@@ -5,6 +5,7 @@ import time
 
 from app.config import get_settings
 from app.database import SessionLocal, init_db
+from app.pipedrive_analytics import refresh_pipedrive_analytics_if_due
 from app.services import backfill_queued_runs, queue_due_shows, run_next_campaign, run_weekly_show_sync, sync_approved_shows
 
 
@@ -53,6 +54,20 @@ def run_worker_loop() -> None:
                         logger.info("Touched %s approved show(s) for provider sync.", synced)
         except Exception:  # noqa: BLE001
             logger.exception("Worker loop iteration failed. Continuing after backoff.")
+
+        try:
+            with SessionLocal() as db:
+                analytics = refresh_pipedrive_analytics_if_due(db)
+                if analytics is not None:
+                    logger.info(
+                        "Pipedrive analytics snapshot refreshed. report_date=%s source_count=%s",
+                        analytics["report"]["date"],
+                        analytics["report"]["source_count"],
+                    )
+        except Exception:  # noqa: BLE001
+            logger.exception(
+                "Pipedrive analytics refresh failed. Other worker jobs will continue."
+            )
 
         time.sleep(poll_seconds)
 

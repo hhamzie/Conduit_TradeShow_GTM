@@ -30,6 +30,7 @@ def get_db() -> Generator[Session, None, None]:
         db.close()
 def init_db() -> None:
     from app import models  # noqa: F401
+    from app import pipedrive_analytics  # noqa: F401
 
     settings.export_dir.mkdir(parents=True, exist_ok=True)
     Base.metadata.create_all(bind=engine)

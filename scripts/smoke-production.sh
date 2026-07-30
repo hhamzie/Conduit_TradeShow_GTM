@@ -6,6 +6,7 @@ SMOKE_DIR="$(mktemp -d "${TMP_ROOT}/hpointscraper-smoke.XXXXXX")"
 PORT="${PORT:-8011}"
 SERVER_LOG="${SMOKE_DIR}/server.log"
 SERVER_PID=""
+PYTHON_BIN="${PYTHON_BIN:-python}"
 
 cleanup() {
   if [ -n "${SERVER_PID}" ]; then
@@ -24,7 +25,7 @@ export DASHBOARD_PASSWORD="${DASHBOARD_PASSWORD:-change-me-now}"
 export DATABASE_URL="${DATABASE_URL:-sqlite:///${SMOKE_DIR}/trade_show_app.db}"
 export EXPORT_DIR="${EXPORT_DIR:-${SMOKE_DIR}/exports}"
 
-python -m uvicorn app.main:app --host 127.0.0.1 --port "${PORT}" >"${SERVER_LOG}" 2>&1 &
+"${PYTHON_BIN}" -m uvicorn app.main:app --host 127.0.0.1 --port "${PORT}" >"${SERVER_LOG}" 2>&1 &
 SERVER_PID="$!"
 
 attempt=0
@@ -39,14 +40,18 @@ until curl -fsS "http://127.0.0.1:${PORT}/healthz" >/dev/null 2>&1; do
 done
 
 HEALTH_RESPONSE="$(curl -fsS "http://127.0.0.1:${PORT}/healthz")"
-if [ "${HEALTH_RESPONSE}" != '{"status":"ok"}' ]; then
+if ! printf '%s' "${HEALTH_RESPONSE}" | grep -q '"status":"ok"'; then
   echo "Unexpected /healthz response: ${HEALTH_RESPONSE}" >&2
   exit 1
 fi
 
 ROOT_HEADERS="$(curl -sS -D - -o /dev/null "http://127.0.0.1:${PORT}/")"
 printf '%s' "${ROOT_HEADERS}" | grep -q "303 See Other"
-printf '%s' "${ROOT_HEADERS}" | grep -qi "^location: /shows/dashboard"
+printf '%s' "${ROOT_HEADERS}" | grep -qi "^location: /analytics"
+
+ANALYTICS_HEADERS="$(curl -sS -D - -o /dev/null "http://127.0.0.1:${PORT}/analytics")"
+printf '%s' "${ANALYTICS_HEADERS}" | grep -q "303 See Other"
+printf '%s' "${ANALYTICS_HEADERS}" | grep -qi "^location: /login"
 
 DASHBOARD_HTML="$(curl -fsS "http://127.0.0.1:${PORT}/shows/dashboard")"
 printf '%s' "${DASHBOARD_HTML}" | grep -q "<title>Show Dashboard</title>"

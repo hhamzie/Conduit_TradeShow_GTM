@@ -13,6 +13,7 @@
         <div class="topbar-main">
           <a class="brand" href="/shows/dashboard">{{ app_name if app_name else "TradeShowScraper" }}</a>
           <nav class="topnav">
+            <a class="topnav-link{% if current_page == 'pipedrive_analytics' %} is-active{% endif %}" href="/analytics">Pipedrive Analytics</a>
             <a class="topnav-link{% if current_page == 'show_dashboard' %} is-active{% endif %}" href="/shows/dashboard">Trade Shows</a>
             {% if context_tab_label and context_tab_href %}
             <a class="topnav-link is-active is-context-tab" href="{{ context_tab_href }}">{{ context_tab_label }}</a>
