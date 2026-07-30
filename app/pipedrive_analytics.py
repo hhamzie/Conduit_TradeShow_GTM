@@ -20,6 +20,7 @@ from app.database import Base
 
 DEFAULT_TIMEZONE = "America/New_York"
 DEFAULT_REFRESH_HOUR = 6
+DEFAULT_REFRESH_DAY = 1
 DEFAULT_OPENPHONE_BASE_URL = "https://api.openphone.com"
 LOOKBACK_DAYS = 30
 BLENDED_LOOKBACK_DAYS = 28
@@ -616,12 +617,13 @@ def refresh_pipedrive_analytics_if_due(
     now: datetime | None = None,
     timezone_name: str | None = None,
     refresh_hour: int | None = None,
+    refresh_day: int | None = None,
     api_token: str | None = None,
     base_url: str | None = None,
     lookback_days: int | None = None,
     minimum_sample: int | None = None,
 ) -> dict[str, Any] | None:
-    """Refresh after the configured local hour, once per schema and local date."""
+    """Refresh once per calendar month after the configured local day/hour."""
 
     token = (
         os.getenv("OPENPHONE_API_KEY", "").strip()
@@ -633,10 +635,16 @@ def refresh_pipedrive_analytics_if_due(
 
     tz_name, tz = _resolve_timezone(timezone_name)
     local_now = _coerce_now(now, tz)
-    existing = _get_snapshot_for_date(db, local_now.date())
-    if existing is not None and _snapshot_has_current_schema(existing):
+    month_start = local_now.date().replace(day=1)
+    existing = _get_current_schema_snapshot_for_month(db, month_start)
+    if existing is not None:
         return None
-    if local_now.hour < _resolve_refresh_hour(refresh_hour):
+    scheduled_at = datetime.combine(
+        month_start.replace(day=_resolve_refresh_day(refresh_day)),
+        time(hour=_resolve_refresh_hour(refresh_hour)),
+        tzinfo=tz,
+    )
+    if local_now < scheduled_at:
         return None
 
     return refresh_pipedrive_analytics(
@@ -995,6 +1003,28 @@ def _resolve_refresh_hour(refresh_hour: int | None) -> int:
     return hour
 
 
+def _resolve_refresh_day(refresh_day: int | None) -> int:
+    raw: Any = (
+        refresh_day
+        if refresh_day is not None
+        else os.getenv(
+            "OPENPHONE_ANALYTICS_REFRESH_DAY",
+            str(DEFAULT_REFRESH_DAY),
+        )
+    )
+    try:
+        day = int(raw)
+    except (TypeError, ValueError) as exc:
+        raise PipedriveAnalyticsError(
+            "OPENPHONE_ANALYTICS_REFRESH_DAY must be an integer from 1 to 28"
+        ) from exc
+    if day < 1 or day > 28:
+        raise PipedriveAnalyticsError(
+            "OPENPHONE_ANALYTICS_REFRESH_DAY must be from 1 to 28"
+        )
+    return day
+
+
 def _resolve_positive_setting(
     value: int | None,
     *,
@@ -1031,6 +1061,29 @@ def _get_snapshot_for_date(
             PipedriveAnalyticsSnapshot.report_date == report_date
         )
     ).scalar_one_or_none()
+
+
+def _get_current_schema_snapshot_for_month(
+    db: Session,
+    month_start: date,
+) -> PipedriveAnalyticsSnapshot | None:
+    next_month = (
+        date(month_start.year + 1, 1, 1)
+        if month_start.month == 12
+        else date(month_start.year, month_start.month + 1, 1)
+    )
+    snapshots = db.execute(
+        select(PipedriveAnalyticsSnapshot)
+        .where(
+            PipedriveAnalyticsSnapshot.report_date >= month_start,
+            PipedriveAnalyticsSnapshot.report_date < next_month,
+        )
+        .order_by(PipedriveAnalyticsSnapshot.report_date.desc())
+    ).scalars()
+    for snapshot in snapshots:
+        if _snapshot_has_current_schema(snapshot):
+            return snapshot
+    return None
 
 
 def _snapshot_has_current_schema(

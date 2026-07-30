@@ -101,6 +101,8 @@ services:
         value: https://api.openphone.com
       - key: OPENPHONE_ANALYTICS_TIMEZONE
         value: America/New_York
+      - key: OPENPHONE_ANALYTICS_REFRESH_DAY
+        value: "1"
       - key: OPENPHONE_ANALYTICS_REFRESH_HOUR
         value: "6"
       - key: OPENPHONE_ANALYTICS_LOOKBACK_DAYS
