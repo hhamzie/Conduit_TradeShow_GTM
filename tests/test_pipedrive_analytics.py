@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 import os
 from pathlib import Path
 import tempfile
+import traceback
 from typing import Any
 from urllib.parse import urlsplit
 import unittest
@@ -12,7 +13,7 @@ from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
 
-_TMP_ROOT = Path(tempfile.mkdtemp(prefix="pipedrive-analytics-tests-"))
+_TMP_ROOT = Path(tempfile.mkdtemp(prefix="openphone-analytics-tests-"))
 os.environ["DATABASE_URL"] = f"sqlite:///{_TMP_ROOT / 'test.db'}"
 os.environ["EXPORT_DIR"] = str(_TMP_ROOT / "exports")
 
@@ -21,45 +22,55 @@ from sqlalchemy.orm import sessionmaker
 
 from app.database import Base
 from app.pipedrive_analytics import (
-    DEAL_INCLUDE_FIELDS,
+    MINIMUM_SAMPLE,
+    PAYLOAD_SCHEMA_VERSION,
     PipedriveAnalyticsError,
     PipedriveAnalyticsSnapshot,
+    _OpenPhoneReadApi,
     build_payload,
+    get_latest_pipedrive_analytics,
     refresh_pipedrive_analytics,
     refresh_pipedrive_analytics_if_due,
 )
 
 
 EASTERN = ZoneInfo("America/New_York")
+UTC = ZoneInfo("UTC")
 
 
-class FakePipedriveAnalyticsClient:
+class FakeOpenPhoneAnalyticsClient:
     def __init__(
         self,
         *,
-        deal_pages: dict[str | None, dict[str, Any]] | None = None,
-        users_response: dict[str, Any] | None = None,
+        user_pages: dict[str | None, dict[str, Any]] | None = None,
+        conversation_pages: dict[str | None, dict[str, Any]] | None = None,
+        call_pages: dict[tuple[str, str, str | None], dict[str, Any]] | None = None,
     ) -> None:
-        self.deal_pages = deepcopy(
-            deal_pages
+        self.user_pages = deepcopy(
+            user_pages
             or {
                 None: {
-                    "success": True,
-                    "data": [],
-                    "additional_data": {"next_cursor": None},
+                    "data": [
+                        {
+                            "id": "US-lea",
+                            "firstName": "Lea",
+                            "lastName": "Skoumbakis",
+                        },
+                        {
+                            "id": "US-john",
+                            "firstName": "John",
+                            "lastName": "Yoon",
+                        },
+                    ],
+                    "nextPageToken": None,
                 }
             }
         )
-        self.users_response = deepcopy(
-            users_response
-            or {
-                "success": True,
-                "data": [
-                    {"id": 1, "name": "Lea Skoumbakis", "active_flag": True},
-                    {"id": 2, "name": "John Yoon", "active_flag": True},
-                ],
-            }
+        self.conversation_pages = deepcopy(
+            conversation_pages
+            or {None: {"data": [], "nextPageToken": None}}
         )
+        self.call_pages = deepcopy(call_pages or {})
         self.calls: list[dict[str, Any]] = []
 
     def request(
@@ -70,43 +81,118 @@ class FakePipedriveAnalyticsClient:
         params: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         path = urlsplit(url).path
-        call = {
-            "method": method,
-            "path": path,
-            "params": deepcopy(params or {}),
-        }
-        self.calls.append(call)
+        request_params = deepcopy(params or {})
+        self.calls.append(
+            {
+                "method": method,
+                "path": path,
+                "params": request_params,
+            }
+        )
+        page_token = request_params.get("pageToken")
         if method == "GET" and path == "/v1/users":
-            return deepcopy(self.users_response)
-        if method == "GET" and path == "/api/v2/deals":
-            cursor = (params or {}).get("cursor")
-            if cursor not in self.deal_pages:
-                raise AssertionError(f"Unexpected deal cursor {cursor!r}")
-            return deepcopy(self.deal_pages[cursor])
+            return deepcopy(self.user_pages[page_token])
+        if method == "GET" and path == "/v1/conversations":
+            return deepcopy(self.conversation_pages[page_token])
+        if method == "GET" and path == "/v1/calls":
+            participants = request_params.get("participants")
+            if not isinstance(participants, list) or len(participants) != 1:
+                raise AssertionError("Calls request must contain one participant")
+            key = (
+                str(request_params.get("phoneNumberId")),
+                str(participants[0]),
+                page_token,
+            )
+            if key not in self.call_pages:
+                raise AssertionError(f"Unexpected calls page {key!r}")
+            return deepcopy(self.call_pages[key])
         raise AssertionError(f"Unexpected fake request: {method} {path}")
 
 
-def deal(
-    added_at: datetime,
+def call(
+    call_id: str,
+    created_at: datetime,
     *,
-    owner_id: int = 1,
-    followed_up: bool = False,
+    user_id: str = "US-lea",
+    direction: str = "outgoing",
+    status: str = "completed",
+    duration: int | float | str = 120,
 ) -> dict[str, Any]:
     return {
-        "add_time": added_at.isoformat(),
-        "owner_id": owner_id,
-        "activities_count": 1 if followed_up else 0,
-        # These values deliberately disagree in one direction: the analytics
-        # definition is activities_count > 0, not either done/undone field.
-        "done_activities_count": 0,
-        "undone_activities_count": 0,
-        "next_activity_id": None,
-        "title": "Must never be persisted",
-        "person_name": "Must never be persisted",
+        "id": call_id,
+        "createdAt": created_at.isoformat(),
+        "direction": direction,
+        "status": status,
+        "duration": duration,
+        "userId": user_id,
+        "phoneNumberId": "must-not-persist",
+        "participants": ["+12025550199"],
     }
 
 
-class PipedriveAnalyticsTests(unittest.TestCase):
+def conversation(
+    phone_number_id: str,
+    *participants: str,
+) -> dict[str, Any]:
+    return {
+        "id": f"CN-{phone_number_id}",
+        "phoneNumberId": phone_number_id,
+        "participants": list(participants),
+        "name": "Must not persist",
+    }
+
+
+class FakeClock:
+    def __init__(self) -> None:
+        self.value = 0.0
+        self.sleeps: list[float] = []
+
+    def monotonic(self) -> float:
+        return self.value
+
+    def sleep(self, seconds: float) -> None:
+        self.sleeps.append(seconds)
+        self.value += seconds
+
+
+class FakeResponse:
+    def __init__(
+        self,
+        status_code: int,
+        body: Any,
+        *,
+        headers: dict[str, str] | None = None,
+    ) -> None:
+        self.status_code = status_code
+        self._body = body
+        self.headers = headers or {}
+
+    def json(self) -> Any:
+        return deepcopy(self._body)
+
+
+class SequenceClient:
+    def __init__(self, responses: list[Any], clock: FakeClock) -> None:
+        self.responses = list(responses)
+        self.clock = clock
+        self.request_times: list[float] = []
+
+    def request(
+        self,
+        method: str,
+        url: str,
+        *,
+        params: dict[str, Any] | None = None,
+    ) -> Any:
+        del method, url, params
+        self.request_times.append(self.clock.monotonic())
+        response = self.responses.pop(0)
+        if isinstance(response, Exception):
+            raise response
+        return response
+
+
+class OpenPhoneAnalyticsTests(unittest.TestCase):
     def setUp(self) -> None:
         self.engine = create_engine("sqlite:///:memory:", future=True)
         Base.metadata.create_all(self.engine)
@@ -116,118 +202,358 @@ class PipedriveAnalyticsTests(unittest.TestCase):
             future=True,
         )
         self.db = self.Session()
+        self.sleep_patch = patch(
+            "app.pipedrive_analytics.time_module.sleep",
+            return_value=None,
+        )
+        self.sleep_patch.start()
 
     def tearDown(self) -> None:
+        self.sleep_patch.stop()
         self.db.close()
         self.engine.dispose()
 
-    def test_refresh_paginates_by_cursor_and_stops_at_calendar_cutoff(self) -> None:
+    def test_refresh_paginates_discovers_pairs_deduplicates_and_minimizes(self) -> None:
         now = datetime(2026, 7, 30, 8, 0, tzinfo=EASTERN)
-        client = FakePipedriveAnalyticsClient(
-            deal_pages={
+        participant_one = "+12025550101"
+        participant_two = "+12025550102"
+        first_call = call(
+            "AC-1",
+            datetime(2026, 7, 28, 18, 0, tzinfo=EASTERN),
+        )
+        short_call = call(
+            "AC-2",
+            datetime(2026, 7, 28, 19, 0, tzinfo=EASTERN),
+            duration=89,
+        )
+        incoming_call = call(
+            "AC-3",
+            datetime(2026, 7, 28, 20, 0, tzinfo=EASTERN),
+            direction="incoming",
+        )
+        client = FakeOpenPhoneAnalyticsClient(
+            user_pages={
                 None: {
-                    "success": True,
                     "data": [
-                        deal(datetime(2026, 7, 30, 11, 0, tzinfo=ZoneInfo("UTC"))),
-                        deal(datetime(2026, 7, 15, 16, 0, tzinfo=ZoneInfo("UTC"))),
+                        {
+                            "id": "US-lea",
+                            "firstName": "Lea",
+                            "lastName": "Skoumbakis",
+                        }
                     ],
-                    "additional_data": {"next_cursor": "page-2"},
+                    "nextPageToken": "users-2",
                 },
-                "page-2": {
-                    "success": True,
+                "users-2": {
                     "data": [
-                        # The 30-calendar-day window starts at local midnight
-                        # July 1, which is 04:00 UTC during daylight time.
-                        deal(datetime(2026, 7, 1, 4, 0, tzinfo=ZoneInfo("UTC"))),
-                        deal(datetime(2026, 7, 1, 3, 59, tzinfo=ZoneInfo("UTC"))),
-                        deal(datetime(2026, 6, 30, 20, 0, tzinfo=ZoneInfo("UTC"))),
+                        {
+                            "id": "US-john",
+                            "firstName": "John",
+                            "lastName": "Yoon",
+                        }
                     ],
-                    # A sorted feed must not request this after hitting cutoff.
-                    "additional_data": {"next_cursor": "page-3"},
+                    "nextPageToken": None,
                 },
-            }
+            },
+            conversation_pages={
+                None: {
+                    "data": [
+                        conversation("PN-sales", participant_one, participant_two),
+                        conversation("PN-sales", participant_one),
+                    ],
+                    "nextPageToken": "conversations-2",
+                },
+                "conversations-2": {
+                    "data": [conversation("PN-sales", participant_two)],
+                    "nextPageToken": None,
+                },
+            },
+            call_pages={
+                ("PN-sales", participant_one, None): {
+                    "data": [first_call, short_call],
+                    "nextPageToken": "calls-2",
+                },
+                ("PN-sales", participant_one, "calls-2"): {
+                    "data": [first_call],
+                    "nextPageToken": None,
+                },
+                ("PN-sales", participant_two, None): {
+                    "data": [first_call, incoming_call],
+                    "nextPageToken": None,
+                },
+            },
         )
 
         payload = refresh_pipedrive_analytics(
             self.db,
             client=client,
             now=now,
-            api_token="test-token",
-            base_url="https://api.pipedrive.com/v1",
+            api_token="mock-only-token",
+            base_url="https://api.openphone.com/v1",
         )
         snapshot = self.db.scalar(select(PipedriveAnalyticsSnapshot))
 
         self.assertIsNotNone(snapshot)
-        self.assertEqual(snapshot.source_count, 3)
-        self.assertEqual(payload["report"]["window_start"], "2026-07-01")
-        self.assertEqual(payload["report"]["window_end"], "2026-07-30")
-        self.assertEqual(payload["kpis"]["total_deals"]["value"], 3)
-        deal_calls = [
-            call for call in client.calls if call["path"] == "/api/v2/deals"
-        ]
-        self.assertEqual(len(deal_calls), 2)
-        self.assertNotIn("cursor", deal_calls[0]["params"])
-        self.assertEqual(deal_calls[1]["params"]["cursor"], "page-2")
-        self.assertEqual(deal_calls[0]["params"]["sort_by"], "add_time")
-        self.assertEqual(deal_calls[0]["params"]["sort_direction"], "desc")
+        self.assertEqual(payload["report"]["source_count"], 2)
         self.assertEqual(
-            deal_calls[0]["params"]["include_fields"],
-            ",".join(DEAL_INCLUDE_FIELDS),
+            payload["kpis"]["total_calls"],
+            {"value": 2, "display": "2", "connected": 1},
         )
-        self.assertNotIn("title", snapshot.payload_json)
-        self.assertNotIn("person_name", snapshot.payload_json)
+        self.assertEqual(
+            payload["kpis"]["connect_rate"],
+            {"value": 50.0, "display": "50%"},
+        )
+        self.assertEqual(snapshot.source_count, 2)
 
-    def test_build_payload_aggregates_kpis_leaderboard_and_chart_shapes(self) -> None:
+        users_requests = [
+            request for request in client.calls if request["path"] == "/v1/users"
+        ]
+        self.assertEqual(len(users_requests), 2)
+        self.assertEqual(users_requests[0]["params"]["maxResults"], 50)
+        self.assertEqual(users_requests[1]["params"]["pageToken"], "users-2")
+
+        conversation_requests = [
+            request
+            for request in client.calls
+            if request["path"] == "/v1/conversations"
+        ]
+        self.assertEqual(len(conversation_requests), 2)
+        self.assertEqual(
+            conversation_requests[0]["params"]["updatedAfter"],
+            "2026-06-30T03:59:59.999Z",
+        )
+
+        call_requests = [
+            request for request in client.calls if request["path"] == "/v1/calls"
+        ]
+        self.assertEqual(len(call_requests), 3)
+        self.assertEqual(
+            {
+                (
+                    request["params"]["phoneNumberId"],
+                    request["params"]["participants"][0],
+                )
+                for request in call_requests
+            },
+            {
+                ("PN-sales", participant_one),
+                ("PN-sales", participant_two),
+            },
+        )
+        for request in call_requests:
+            self.assertEqual(
+                request["params"]["createdAfter"],
+                "2026-06-30T03:59:59.999Z",
+            )
+            self.assertEqual(
+                request["params"]["createdBefore"],
+                "2026-07-30T04:00:00.000Z",
+            )
+            self.assertEqual(request["params"]["maxResults"], 100)
+
+        stored = snapshot.payload_json
+        self.assertNotIn(participant_one, stored)
+        self.assertNotIn(participant_two, stored)
+        self.assertNotIn("PN-sales", stored)
+        self.assertNotIn("Must not persist", stored)
+        self.assertNotIn("US-lea", stored)
+        self.assertNotIn("US-john", stored)
+
+    def test_exact_outbound_connected_definition_and_completed_day_bounds(self) -> None:
         now = datetime(2026, 7, 30, 20, 0, tzinfo=EASTERN)
+        raw_calls = [
+            call(
+                "at-start",
+                datetime(2026, 6, 30, 0, 0, tzinfo=EASTERN),
+                duration=90,
+            ),
+            call(
+                "short",
+                datetime(2026, 7, 1, 10, 0, tzinfo=EASTERN),
+                duration=89,
+            ),
+            call(
+                "wrong-status",
+                datetime(2026, 7, 2, 10, 0, tzinfo=EASTERN),
+                status="missed",
+                duration=300,
+            ),
+            call(
+                "last-moment",
+                datetime(2026, 7, 29, 23, 59, 59, tzinfo=EASTERN),
+                duration="90",
+            ),
+            call(
+                "today-excluded",
+                datetime(2026, 7, 30, 0, 0, tzinfo=EASTERN),
+            ),
+            call(
+                "before-start",
+                datetime(2026, 6, 29, 23, 59, 59, tzinfo=EASTERN),
+            ),
+            call(
+                "incoming",
+                datetime(2026, 7, 10, 10, 0, tzinfo=EASTERN),
+                direction="incoming",
+            ),
+        ]
+
+        payload = build_payload(
+            raw_calls,
+            {"US-lea": "Lea Skoumbakis"},
+            now=now,
+        )
+
+        self.assertEqual(payload["report"]["window_start"], "2026-06-30")
+        self.assertEqual(payload["report"]["window_end"], "2026-07-29")
+        self.assertEqual(
+            payload["report"]["window_end_exclusive"],
+            "2026-07-30",
+        )
+        self.assertEqual(payload["kpis"]["total_calls"]["value"], 4)
+        self.assertEqual(payload["kpis"]["total_calls"]["connected"], 2)
+        self.assertEqual(payload["kpis"]["connect_rate"]["value"], 50.0)
+
+    def test_required_call_fields_fail_closed(self) -> None:
+        now = datetime(2026, 7, 30, 10, 0, tzinfo=EASTERN)
+        for field in ("direction", "status", "duration"):
+            malformed = call(
+                f"missing-{field}",
+                datetime(2026, 7, 29, 10, 0, tzinfo=EASTERN),
+            )
+            malformed.pop(field)
+            with self.subTest(field=field):
+                with self.assertRaises(PipedriveAnalyticsError):
+                    build_payload(
+                        [malformed],
+                        {"US-lea": "Lea Skoumbakis"},
+                        now=now,
+                    )
+
+        invalid_direction = call(
+            "invalid-direction",
+            datetime(2026, 7, 29, 10, 0, tzinfo=EASTERN),
+            direction="sideways",
+        )
+        with self.assertRaisesRegex(
+            PipedriveAnalyticsError,
+            "invalid direction",
+        ):
+            build_payload(
+                [invalid_direction],
+                {"US-lea": "Lea Skoumbakis"},
+                now=now,
+            )
+
+    def test_outbound_rep_attribution_prefers_initiated_by(self) -> None:
+        raw_calls = []
+        for index in range(MINIMUM_SAMPLE):
+            raw_call = call(
+                f"initiator-{index}",
+                datetime(2026, 7, 29, 10, index, tzinfo=EASTERN),
+                user_id="US-account-owner",
+            )
+            raw_call["initiatedBy"] = "US-calling-rep"
+            raw_calls.append(raw_call)
+
+        payload = build_payload(
+            raw_calls,
+            {
+                "US-account-owner": "Account Owner",
+                "US-calling-rep": "Calling Rep",
+            },
+            now=datetime(2026, 7, 30, 10, 0, tzinfo=EASTERN),
+        )
+
+        self.assertEqual(payload["kpis"]["top_rep"]["name"], "Calling Rep")
+        self.assertEqual(
+            [row["rep"] for row in payload["leaderboard"]["rows"]],
+            ["Calling Rep"],
+        )
+
+    def test_headline_connect_rate_display_rounds_to_whole_percent(self) -> None:
+        raw_calls = [
+            call(
+                f"rounding-{index}",
+                datetime(2026, 7, 29, 10, index, tzinfo=EASTERN),
+                status="completed" if index == 0 else "missed",
+            )
+            for index in range(8)
+        ]
+
+        payload = build_payload(
+            raw_calls,
+            {"US-lea": "Lea Skoumbakis"},
+            now=datetime(2026, 7, 30, 10, 0, tzinfo=EASTERN),
+        )
+
+        self.assertEqual(payload["kpis"]["connect_rate"]["value"], 12.5)
+        self.assertEqual(payload["kpis"]["connect_rate"]["display"], "13%")
+
+    def test_aggregates_exact_30_28_and_7_day_windows(self) -> None:
+        now = datetime(2026, 7, 30, 10, 0, tzinfo=EASTERN)
         monday = datetime(2026, 7, 27, 18, 0, tzinfo=EASTERN)
         tuesday = datetime(2026, 7, 28, 18, 0, tzinfo=EASTERN)
-        wednesday = datetime(2026, 7, 29, 10, 0, tzinfo=EASTERN)
-        deals = [
-            deal(monday + timedelta(minutes=index), followed_up=index < 8)
-            for index in range(10)
+        calls = [
+            call(
+                f"lea-{index}",
+                monday + timedelta(minutes=index),
+                user_id="US-lea",
+                status="completed" if index < 15 else "missed",
+                duration=120,
+            )
+            for index in range(20)
         ]
-        deals.extend(
-            deal(
+        calls.extend(
+            call(
+                f"john-{index}",
                 tuesday + timedelta(minutes=index),
-                followed_up=True,
+                user_id="US-john",
+                status="completed" if index < 10 else "missed",
+                duration=120,
             )
-            for index in range(5)
+            for index in range(15)
         )
-        deals.extend(
-            deal(
-                wednesday + timedelta(minutes=index),
-                owner_id=2,
-                followed_up=index < 2,
+        calls.append(
+            call(
+                "thirty-only",
+                datetime(2026, 7, 1, 10, 0, tzinfo=EASTERN),
+                user_id="US-john",
+                status="missed",
             )
-            for index in range(10)
         )
-        owner_records = [
-            {"id": 1, "name": "Lea Skoumbakis", "active_flag": True},
-            {"id": 2, "name": "John Yoon", "active_flag": True},
-            {"id": 3, "name": "Former Rep", "active_flag": False},
-        ]
 
-        payload = build_payload(deals, owner_records, now=now)
+        payload = build_payload(
+            calls,
+            {
+                "US-lea": "Lea Skoumbakis",
+                "US-john": "John Yoon",
+            },
+            now=now,
+        )
 
-        self.assertEqual(
-            payload["kpis"]["total_deals"],
-            {"value": 25, "display": "25", "followed_up": 15},
-        )
-        self.assertEqual(
-            payload["kpis"]["coverage"],
-            {"value": 60.0, "display": "60%"},
-        )
+        self.assertEqual(payload["kpis"]["total_calls"]["value"], 36)
+        self.assertEqual(payload["kpis"]["total_calls"]["connected"], 25)
         self.assertEqual(
             payload["kpis"]["best_hour"],
-            {"label": "6pm", "coverage": 86.7, "count": 15},
+            {
+                "label": "6pm",
+                "connect_rate": 71.4,
+                "count": 35,
+                "calls": 35,
+                "hour": 18,
+            },
         )
+        self.assertEqual(payload["kpis"]["best_day"]["label"], "Mon")
+        self.assertEqual(payload["kpis"]["best_day"]["connect_rate"], 75.0)
         self.assertEqual(
-            payload["kpis"]["best_day"],
-            {"label": "Mon", "coverage": 80.0, "count": 10},
-        )
-        self.assertEqual(
-            payload["kpis"]["top_owner"],
-            {"label": "Lea Skoumbakis", "coverage": 86.7, "count": 15},
+            payload["kpis"]["top_rep"],
+            {
+                "label": "Lea Skoumbakis",
+                "connect_rate": 75.0,
+                "count": 20,
+                "calls": 20,
+                "name": "Lea Skoumbakis",
+            },
         )
         self.assertEqual(
             payload["leaderboard"]["days"],
@@ -235,174 +561,350 @@ class PipedriveAnalyticsTests(unittest.TestCase):
                 {"date": "2026-07-27", "label": "Mon 7/27"},
                 {"date": "2026-07-28", "label": "Tue 7/28"},
                 {"date": "2026-07-29", "label": "Wed 7/29"},
-                {"date": "2026-07-30", "label": "Thu 7/30"},
             ],
         )
-        self.assertEqual(
-            [row["owner"] for row in payload["leaderboard"]["rows"]],
-            ["Lea Skoumbakis", "John Yoon"],
-        )
         lea = payload["leaderboard"]["rows"][0]
-        self.assertEqual(lea["period_deals"], 15)
-        self.assertEqual(lea["days"][0]["deals"], 10)
-        self.assertEqual(lea["days"][1]["coverage"], 100.0)
-        self.assertEqual(
-            [entry["label"] for entry in payload["weekday_blended"]],
-            ["Mon", "Tue", "Wed", "Thu", "Fri"],
+        self.assertEqual(lea["rep"], "Lea Skoumbakis")
+        self.assertEqual(lea["period_calls"], 20)
+        self.assertEqual(lea["period_connected"], 15)
+        self.assertEqual(lea["period_connect_rate"], 75.0)
+        self.assertEqual(lea["days"][0]["calls"], 20)
+        self.assertEqual(lea["days"][0]["connected"], 15)
+        self.assertEqual(lea["days"][2]["calls"], 0)
+        self.assertEqual(lea["days"][2]["connect_rate"], 0.0)
+
+        monday_blended = payload["weekday_blended"][0]
+        self.assertEqual(monday_blended["calls"], 20)
+        self.assertEqual(monday_blended["connected"], 15)
+        self.assertEqual(monday_blended["connect_rate"], 75.0)
+        self.assertEqual(monday_blended["avg_calls_per_day"], 5.0)
+        self.assertEqual(payload["hourly"][10]["calls"], 1)
+        old_heatmap_cell = next(
+            cell
+            for cell in payload["heatmap"]
+            if cell["hour"] == 10 and cell["day_label"] == "Wed"
         )
+        self.assertEqual(old_heatmap_cell["calls"], 0)
         self.assertEqual(len(payload["hourly"]), 24)
         self.assertEqual(len(payload["weekdays"]), 7)
         self.assertEqual(len(payload["heatmap"]), 24 * 7)
 
-    def test_if_due_refreshes_after_hour_only_once_and_missing_token_noops(self) -> None:
-        client = FakePipedriveAnalyticsClient(
-            deal_pages={
-                None: {
-                    "success": True,
-                    "data": [
-                        deal(
-                            datetime(2026, 7, 30, 9, 0, tzinfo=EASTERN),
-                            followed_up=True,
-                        )
-                    ],
-                    "additional_data": {"next_cursor": None},
-                }
-            }
+    def test_top_rep_and_leaderboard_period_are_rolling_seven_days(self) -> None:
+        now = datetime(2026, 7, 30, 10, 0, tzinfo=EASTERN)
+        raw_calls = [
+            call(
+                f"old-lea-{index}",
+                datetime(2026, 7, 21, 12, index % 60, tzinfo=EASTERN),
+                user_id="US-lea",
+            )
+            for index in range(30)
+        ]
+        raw_calls.extend(
+            call(
+                f"john-{index}",
+                datetime(2026, 7, 28, 14, index, tzinfo=EASTERN),
+                user_id="US-john",
+                status="completed" if index < 9 else "missed",
+            )
+            for index in range(15)
         )
 
-        before_due = refresh_pipedrive_analytics_if_due(
+        payload = build_payload(
+            raw_calls,
+            {
+                "US-lea": "Lea Skoumbakis",
+                "US-john": "John Yoon",
+            },
+            now=now,
+        )
+
+        self.assertEqual(payload["kpis"]["top_rep"]["name"], "John Yoon")
+        self.assertEqual(payload["kpis"]["top_rep"]["calls"], 15)
+        self.assertEqual(payload["kpis"]["top_rep"]["connect_rate"], 60.0)
+        self.assertEqual(
+            [row["rep"] for row in payload["leaderboard"]["rows"]],
+            ["John Yoon"],
+        )
+        self.assertEqual(
+            payload["leaderboard"]["rows"][0]["period_connect_rate"],
+            60.0,
+        )
+
+    def test_dst_window_uses_local_midnights_and_utc_api_bounds(self) -> None:
+        now = datetime(2026, 3, 10, 8, 0, tzinfo=EASTERN)
+        participant = "+12025550103"
+        client = FakeOpenPhoneAnalyticsClient(
+            conversation_pages={
+                None: {
+                    "data": [conversation("PN-sales", participant)],
+                    "nextPageToken": None,
+                }
+            },
+            call_pages={
+                ("PN-sales", participant, None): {
+                    "data": [],
+                    "nextPageToken": None,
+                }
+            },
+        )
+
+        refresh_pipedrive_analytics(
             self.db,
             client=client,
-            now=datetime(2026, 7, 30, 5, 59, tzinfo=EASTERN),
-            refresh_hour=6,
-            api_token="test-token",
+            now=now,
+            api_token="mock-only-token",
         )
-        self.assertIsNone(before_due)
-        self.assertEqual(client.calls, [])
 
-        first_payload = refresh_pipedrive_analytics_if_due(
+        conversation_request = next(
+            request
+            for request in client.calls
+            if request["path"] == "/v1/conversations"
+        )
+        call_request = next(
+            request for request in client.calls if request["path"] == "/v1/calls"
+        )
+        self.assertEqual(
+            conversation_request["params"]["updatedAfter"],
+            "2026-02-08T04:59:59.999Z",
+        )
+        self.assertEqual(
+            call_request["params"]["createdAfter"],
+            "2026-02-08T04:59:59.999Z",
+        )
+        self.assertEqual(
+            call_request["params"]["createdBefore"],
+            "2026-03-10T04:00:00.000Z",
+        )
+
+    def test_monday_leaderboard_has_no_daily_columns_but_keeps_rolling_rate(self) -> None:
+        now = datetime(2026, 8, 3, 10, 0, tzinfo=EASTERN)
+        raw_calls = [
+            call(
+                f"prior-{index}",
+                datetime(2026, 7, 31, 14, index, tzinfo=EASTERN),
+            )
+            for index in range(15)
+        ]
+
+        payload = build_payload(
+            raw_calls,
+            {"US-lea": "Lea Skoumbakis"},
+            now=now,
+        )
+
+        self.assertEqual(payload["leaderboard"]["days"], [])
+        self.assertEqual(len(payload["leaderboard"]["rows"]), 1)
+        self.assertEqual(payload["leaderboard"]["rows"][0]["days"], [])
+        self.assertEqual(
+            payload["leaderboard"]["rows"][0]["period_connect_rate"],
+            100.0,
+        )
+
+    def test_same_day_legacy_deal_snapshot_is_replaced_by_schema_version(self) -> None:
+        legacy = PipedriveAnalyticsSnapshot(
+            report_date=date(2026, 7, 30),
+            generated_at=datetime(2026, 7, 30, 12, 0, tzinfo=UTC),
+            timezone_name="America/New_York",
+            source_count=99,
+            payload_json='{"report":{"date":"2026-07-30"},"kpis":{"total_deals":99}}',
+        )
+        self.db.add(legacy)
+        self.db.commit()
+        original_id = legacy.id
+        client = FakeOpenPhoneAnalyticsClient()
+
+        payload = refresh_pipedrive_analytics(
             self.db,
             client=client,
             now=datetime(2026, 7, 30, 10, 0, tzinfo=EASTERN),
-            refresh_hour=6,
-            api_token="test-token",
+            api_token="mock-only-token",
         )
-        call_count_after_first = len(client.calls)
-        second = refresh_pipedrive_analytics_if_due(
-            self.db,
-            client=client,
-            now=datetime(2026, 7, 30, 15, 0, tzinfo=EASTERN),
-            refresh_hour=6,
-            api_token="test-token",
-        )
+        refreshed = self.db.scalar(select(PipedriveAnalyticsSnapshot))
 
-        self.assertIsNotNone(first_payload)
-        self.assertIsNone(second)
-        self.assertEqual(len(client.calls), call_count_after_first)
+        self.assertEqual(refreshed.id, original_id)
+        self.assertEqual(
+            payload["report"]["schema_version"],
+            PAYLOAD_SCHEMA_VERSION,
+        )
+        self.assertEqual(refreshed.source_count, 0)
+        self.assertNotIn("total_deals", refreshed.payload_json)
         self.assertEqual(
             self.db.scalar(select(func.count(PipedriveAnalyticsSnapshot.id))),
             1,
         )
 
+    def test_current_snapshot_is_reused_and_latest_ignores_legacy_schema(self) -> None:
+        client = FakeOpenPhoneAnalyticsClient()
+        first = refresh_pipedrive_analytics(
+            self.db,
+            client=client,
+            now=datetime(2026, 7, 30, 10, 0, tzinfo=EASTERN),
+            api_token="mock-only-token",
+        )
+        request_count = len(client.calls)
+        second = refresh_pipedrive_analytics(
+            self.db,
+            client=client,
+            now=datetime(2026, 7, 30, 15, 0, tzinfo=EASTERN),
+            api_token="mock-only-token",
+        )
+
+        self.assertEqual(second, first)
+        self.assertEqual(len(client.calls), request_count)
+        self.assertEqual(get_latest_pipedrive_analytics(self.db), first)
+
+        snapshot = self.db.scalar(select(PipedriveAnalyticsSnapshot))
+        snapshot.payload_json = '{"report":{"date":"2026-07-30"}}'
+        self.db.commit()
+        self.assertIsNone(get_latest_pipedrive_analytics(self.db))
+
+    def test_if_due_respects_token_hour_and_current_schema(self) -> None:
+        client = FakeOpenPhoneAnalyticsClient()
+        before_due = refresh_pipedrive_analytics_if_due(
+            self.db,
+            client=client,
+            now=datetime(2026, 7, 30, 5, 59, tzinfo=EASTERN),
+            refresh_hour=6,
+            api_token="mock-only-token",
+        )
+        self.assertIsNone(before_due)
+        self.assertEqual(client.calls, [])
+
+        first = refresh_pipedrive_analytics_if_due(
+            self.db,
+            client=client,
+            now=datetime(2026, 7, 30, 6, 0, tzinfo=EASTERN),
+            refresh_hour=6,
+            api_token="mock-only-token",
+        )
+        request_count = len(client.calls)
+        second = refresh_pipedrive_analytics_if_due(
+            self.db,
+            client=client,
+            now=datetime(2026, 7, 30, 12, 0, tzinfo=EASTERN),
+            refresh_hour=6,
+            api_token="mock-only-token",
+        )
         missing_token = refresh_pipedrive_analytics_if_due(
             self.db,
             client=client,
-            now=datetime(2026, 7, 31, 10, 0, tzinfo=EASTERN),
+            now=datetime(2026, 7, 31, 12, 0, tzinfo=EASTERN),
             refresh_hour=6,
             api_token="",
         )
-        self.assertIsNone(missing_token)
-        self.assertEqual(len(client.calls), call_count_after_first)
 
-    def test_sparse_buckets_have_null_kpi_labels_and_coverage(self) -> None:
-        now = datetime(2026, 7, 30, 20, 0, tzinfo=EASTERN)
-        sparse_deals = [
-            deal(
-                datetime(2026, 7, 27, 11, index, tzinfo=EASTERN),
-                followed_up=True,
+        self.assertIsNotNone(first)
+        self.assertIsNone(second)
+        self.assertIsNone(missing_token)
+        self.assertEqual(len(client.calls), request_count)
+
+    def test_sparse_buckets_require_fifteen_for_kpis_not_charts(self) -> None:
+        raw_calls = [
+            call(
+                f"sparse-{index}",
+                datetime(2026, 7, 28, 11, index, tzinfo=EASTERN),
             )
-            for index in range(9)
+            for index in range(MINIMUM_SAMPLE - 1)
         ]
 
         payload = build_payload(
-            sparse_deals,
-            {1: "Lea Skoumbakis"},
-            now=now,
-            minimum_sample=10,
+            raw_calls,
+            {"US-lea": "Lea Skoumbakis"},
+            now=datetime(2026, 7, 30, 10, 0, tzinfo=EASTERN),
         )
 
-        for key in ("best_hour", "best_day", "top_owner"):
+        for key in ("best_hour", "best_day", "top_rep"):
             self.assertIsNone(payload["kpis"][key]["label"])
-            self.assertIsNone(payload["kpis"][key]["coverage"])
-            self.assertEqual(payload["kpis"][key]["count"], 0)
-        self.assertEqual(payload["hourly"][11]["coverage"], 100.0)
-        self.assertIsNone(payload["hourly"][0]["coverage"])
-        self.assertIsNone(payload["weekdays"][0]["coverage"])
-        empty_cell = next(
-            cell
-            for cell in payload["heatmap"]
-            if cell["hour"] == 0 and cell["day_index"] == 0
+            self.assertIsNone(payload["kpis"][key]["connect_rate"])
+            self.assertEqual(payload["kpis"][key]["calls"], 0)
+        self.assertEqual(payload["hourly"][11]["connect_rate"], 100.0)
+        self.assertIsNone(payload["hourly"][0]["connect_rate"])
+
+    def test_rate_limit_and_retry_after_are_applied_to_every_attempt(self) -> None:
+        clock = FakeClock()
+        client = SequenceClient(
+            [
+                FakeResponse(
+                    429,
+                    {"message": "slow down"},
+                    headers={"Retry-After": "2"},
+                ),
+                FakeResponse(200, {"data": [], "nextPageToken": None}),
+                FakeResponse(200, {"data": [], "nextPageToken": None}),
+            ],
+            clock,
         )
-        self.assertIsNone(empty_cell["coverage"])
+        api = _OpenPhoneReadApi(
+            api_token="mock-only-token",
+            base_url="https://api.openphone.com",
+            client=client,
+            sleep_fn=clock.sleep,
+            monotonic_fn=clock.monotonic,
+        )
 
-    def test_refresh_reads_positive_window_settings_from_environment(self) -> None:
-        client = FakePipedriveAnalyticsClient()
-        with patch.dict(
-            "os.environ",
-            {
-                "PIPEDRIVE_ANALYTICS_LOOKBACK_DAYS": "14",
-                "PIPEDRIVE_ANALYTICS_MIN_SAMPLE": "3",
-            },
-        ):
-            payload = refresh_pipedrive_analytics(
-                self.db,
-                client=client,
-                now=datetime(2026, 7, 30, 10, 0, tzinfo=EASTERN),
-                api_token="test-token",
-            )
+        api.get("/v1/users")
+        api.get("/v1/conversations")
 
-        self.assertEqual(payload["report"]["lookback_days"], 14)
-        self.assertEqual(payload["report"]["minimum_sample"], 3)
-        self.assertEqual(payload["report"]["window_start"], "2026-07-17")
+        self.assertEqual(len(client.request_times), 3)
+        self.assertGreaterEqual(
+            client.request_times[1] - client.request_times[0],
+            2.0,
+        )
+        self.assertGreaterEqual(
+            client.request_times[2] - client.request_times[1],
+            0.125,
+        )
+        self.assertIn(2.0, clock.sleeps)
 
-    def test_invalid_window_environment_setting_fails_before_fetch(self) -> None:
-        client = FakePipedriveAnalyticsClient()
-        with patch.dict(
-            "os.environ",
-            {"PIPEDRIVE_ANALYTICS_LOOKBACK_DAYS": "0"},
-        ):
-            with self.assertRaisesRegex(
-                PipedriveAnalyticsError,
-                "PIPEDRIVE_ANALYTICS_LOOKBACK_DAYS must be a positive integer",
-            ):
-                refresh_pipedrive_analytics(
-                    self.db,
-                    client=client,
-                    now=datetime(2026, 7, 30, 10, 0, tzinfo=EASTERN),
-                    api_token="test-token",
-                )
+    def test_retry_failure_never_exposes_token(self) -> None:
+        clock = FakeClock()
+        token = "mock-secret-that-must-not-appear"
+        participant = "+12025550199"
+        client = SequenceClient(
+            [
+                RuntimeError(f"{token} participant={participant}")
+                for _ in range(4)
+            ],
+            clock,
+        )
+        api = _OpenPhoneReadApi(
+            api_token=token,
+            base_url="https://api.openphone.com",
+            client=client,
+            sleep_fn=clock.sleep,
+            monotonic_fn=clock.monotonic,
+        )
 
-        self.assertEqual(client.calls, [])
+        with self.assertRaises(PipedriveAnalyticsError) as raised:
+            api.get("/v1/users")
 
-    def test_malformed_deals_response_fails_without_persisting_snapshot(self) -> None:
-        client = FakePipedriveAnalyticsClient(
-            deal_pages={
+        self.assertNotIn(token, str(raised.exception))
+        rendered_traceback = "".join(
+            traceback.format_exception(raised.exception)
+        )
+        self.assertNotIn(token, rendered_traceback)
+        self.assertNotIn(participant, rendered_traceback)
+        self.assertEqual(len(client.request_times), 4)
+
+    def test_malformed_response_fails_without_persisting_snapshot(self) -> None:
+        client = FakeOpenPhoneAnalyticsClient(
+            conversation_pages={
                 None: {
-                    "success": True,
                     "data": {"not": "a list"},
+                    "nextPageToken": None,
                 }
             }
         )
 
         with self.assertRaisesRegex(
             PipedriveAnalyticsError,
-            "deals response is missing a data list",
+            "conversations response is missing a data list",
         ):
             refresh_pipedrive_analytics(
                 self.db,
                 client=client,
                 now=datetime(2026, 7, 30, 10, 0, tzinfo=EASTERN),
-                api_token="test-token",
+                api_token="mock-only-token",
             )
 
         self.assertEqual(

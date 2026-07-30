@@ -10,7 +10,7 @@
   <body>
     <main class="analytics-shell">
       <nav class="analytics-nav" aria-label="Dashboard navigation">
-        <a class="analytics-nav-link is-current" href="/analytics" aria-current="page">Pipedrive analytics</a>
+        <a class="analytics-nav-link is-current" href="/analytics" aria-current="page">Call analytics</a>
         <a class="analytics-nav-link" href="/shows/dashboard">Trade shows</a>
         <a class="analytics-nav-link" href="/workflow">Workflow</a>
         <form action="/logout" method="post">
@@ -20,54 +20,53 @@
 
       {% if analytics %}
       <header class="analytics-header">
-        <h1>Pipedrive Sales Analytics</h1>
+        <h1>OpenPhone Call Analytics</h1>
         <p>
           Report date: {{ analytics.report.date }}
           <span aria-hidden="true">·</span>
-          Followed up = deal has at least one linked activity
+          Connected = completed calls ≥ 90s
           <span aria-hidden="true">·</span>
-          {{ analytics.report.lookback_days }}-day window
+          Outbound only
           <span aria-hidden="true">·</span>
-          {{ analytics.report.timezone }}
+          30-day window unless noted
         </p>
       </header>
 
-      <section class="kpi-grid" aria-label="Pipedrive headline metrics">
+      <section class="kpi-grid" aria-label="OpenPhone call headline metrics">
         <article class="kpi-card">
-          <h2>Total deals (30d)</h2>
-          <strong>{{ analytics.kpis.total_deals.display }}</strong>
-          <p>{{ analytics.kpis.total_deals.followed_up }} followed up</p>
+          <h2>Total calls (30d)</h2>
+          <strong>{{ analytics.kpis.total_calls.display }}</strong>
+          <p>{{ analytics.kpis.total_calls.connected }} connected</p>
         </article>
         <article class="kpi-card">
-          <h2>Follow-up coverage (30d)</h2>
-          <strong>{{ analytics.kpis.coverage.display }}</strong>
-          <p>Deals with a linked activity</p>
+          <h2>Connect rate (30d)</h2>
+          <strong>{{ analytics.kpis.connect_rate.display }}</strong>
         </article>
         <article class="kpi-card">
-          <h2>Best hour to create</h2>
+          <h2>Best hour to call</h2>
           {% if analytics.kpis.best_hour.label %}
-          <strong>{{ analytics.kpis.best_hour.label }} · {{ analytics.kpis.best_hour.coverage|round|int }}%</strong>
-          <p>min {{ analytics.report.minimum_sample }} deals in window</p>
+          <strong>{{ analytics.kpis.best_hour.label }} · {{ analytics.kpis.best_hour.connect_rate|round|int }}%</strong>
+          <p>min {{ analytics.report.minimum_sample }} calls in window</p>
           {% else %}
           <strong>—</strong>
           <p>Not enough volume yet</p>
           {% endif %}
         </article>
         <article class="kpi-card">
-          <h2>Best day to create</h2>
+          <h2>Best day to call</h2>
           {% if analytics.kpis.best_day.label %}
-          <strong>{{ analytics.kpis.best_day.label }} · {{ analytics.kpis.best_day.coverage|round|int }}%</strong>
-          <p>min {{ analytics.report.minimum_sample }} deals in window</p>
+          <strong>{{ analytics.kpis.best_day.label }} · {{ analytics.kpis.best_day.connect_rate|round|int }}%</strong>
+          <p>min {{ analytics.report.minimum_sample }} calls in window</p>
           {% else %}
           <strong>—</strong>
           <p>Not enough volume yet</p>
           {% endif %}
         </article>
         <article class="kpi-card">
-          <h2>Top owner (30d)</h2>
-          {% if analytics.kpis.top_owner.label %}
-          <strong class="kpi-card-owner">{{ analytics.kpis.top_owner.label }} · {{ analytics.kpis.top_owner.coverage|round|int }}%</strong>
-          <p>min {{ analytics.report.minimum_sample }} deals in window</p>
+          <h2>Top rep (7d)</h2>
+          {% if analytics.kpis.top_rep.label %}
+          <strong class="kpi-card-owner">{{ analytics.kpis.top_rep.label }} · {{ analytics.kpis.top_rep.connect_rate|round|int }}%</strong>
+          <p>min {{ analytics.report.minimum_sample }} calls this week</p>
           {% else %}
           <strong>—</strong>
           <p>Not enough volume yet</p>
@@ -76,20 +75,20 @@
       </section>
 
       <section class="analytics-panel leaderboard-panel">
-        <h2>Owner leaderboard — this week by day</h2>
-        <div class="table-scroll" tabindex="0" aria-label="Scrollable owner leaderboard">
+        <h2>Rep leaderboard — this week by day</h2>
+        <div class="table-scroll" tabindex="0" aria-label="Scrollable rep leaderboard">
           <table class="analytics-table">
             <thead>
               <tr>
-                <th rowspan="2" scope="col">Owner</th>
+                <th rowspan="2" scope="col">Rep</th>
                 {% for day in analytics.leaderboard.days %}
                 <th colspan="2" scope="colgroup">{{ day.label }}</th>
                 {% endfor %}
-                <th rowspan="2" scope="col">30d %</th>
+                <th rowspan="2" scope="col">7d %</th>
               </tr>
               <tr>
                 {% for day in analytics.leaderboard.days %}
-                <th scope="col">Deals</th>
+                <th scope="col">Calls</th>
                 <th scope="col">%</th>
                 {% endfor %}
               </tr>
@@ -97,20 +96,20 @@
             <tbody>
               {% for row in analytics.leaderboard.rows %}
               <tr>
-                <th scope="row">{{ row.owner }}</th>
+                <th scope="row">{{ row.rep }}</th>
                 {% for day in row.days %}
-                <td>{{ day.deals }}</td>
-                <td class="rate-cell{% if day.coverage is none %} rate-empty{% elif day.coverage >= 40 %} rate-high{% elif day.coverage >= 20 %} rate-mid{% else %} rate-low{% endif %}">
-                  {{ (day.coverage|round|int ~ "%") if day.coverage is not none else "—" }}
+                <td>{{ day.calls }}</td>
+                <td class="rate-cell{% if day.connect_rate is none %} rate-empty{% elif day.connect_rate >= 40 %} rate-high{% elif day.connect_rate >= 20 %} rate-mid{% else %} rate-low{% endif %}">
+                  {{ (day.connect_rate|round|int ~ "%") if day.connect_rate is not none else "—" }}
                 </td>
                 {% endfor %}
-                <td class="rate-cell{% if row.period_coverage is none %} rate-empty{% elif row.period_coverage >= 40 %} rate-high{% elif row.period_coverage >= 20 %} rate-mid{% else %} rate-low{% endif %}">
-                  {{ (row.period_coverage|round|int ~ "%") if row.period_coverage is not none else "—" }}
+                <td class="rate-cell{% if row.period_connect_rate is none %} rate-empty{% elif row.period_connect_rate >= 40 %} rate-high{% elif row.period_connect_rate >= 20 %} rate-mid{% else %} rate-low{% endif %}">
+                  {{ (row.period_connect_rate|round|int ~ "%") if row.period_connect_rate is not none else "—" }}
                 </td>
               </tr>
               {% else %}
               <tr>
-                <td colspan="{{ 2 + (analytics.leaderboard.days|length * 2) }}">No deals were created in this reporting window.</td>
+                <td colspan="{{ 2 + (analytics.leaderboard.days|length * 2) }}">No outbound calls were recorded in this reporting window.</td>
               </tr>
               {% endfor %}
             </tbody>
@@ -119,58 +118,58 @@
       </section>
 
       <section class="analytics-panel chart-panel">
-        <h2>Follow-up coverage by weekday — blended, last 4 weeks</h2>
+        <h2>Connected % by weekday — blended, last 4 weeks</h2>
         <div class="chart-frame">
           <canvas
             data-analytics-chart="weekday-blended"
             role="img"
-            aria-label="Follow-up coverage and average new deals per day from Monday through Friday"
+            aria-label="Connected percentage and average calls per day from Monday through Friday"
           ></canvas>
         </div>
       </section>
 
       <section class="analytics-panel chart-panel">
-        <h2>Follow-up coverage by hour created (30-day)</h2>
+        <h2>Connection rate by hour of day (30-day)</h2>
         <div class="chart-frame">
           <canvas
             data-analytics-chart="hourly"
             role="img"
-            aria-label="Follow-up coverage by hour the deal was created"
+            aria-label="Connection rate by hour of day"
           ></canvas>
         </div>
       </section>
 
       <section class="analytics-panel chart-panel">
-        <h2>Follow-up coverage by day created (30-day)</h2>
+        <h2>Connection rate by day of week (30-day)</h2>
         <div class="chart-frame chart-frame-compact">
           <canvas
             data-analytics-chart="weekday"
             role="img"
-            aria-label="Follow-up coverage by day the deal was created"
+            aria-label="Connection rate by day of week"
           ></canvas>
         </div>
       </section>
 
       <section class="analytics-panel heatmap-panel">
-        <h2>Follow-up coverage heatmap — hour × day, blended last 4 weeks</h2>
-        <div class="heatmap-scroll" tabindex="0" aria-label="Scrollable follow-up coverage heatmap">
+        <h2>Connection rate heatmap — hour × day, blended last 4 weeks</h2>
+        <div class="heatmap-scroll" tabindex="0" aria-label="Scrollable connection rate heatmap">
           <div class="heatmap-frame">
             <canvas
               data-analytics-chart="heatmap"
               role="img"
-              aria-label="Follow-up coverage by hour and weekday"
+              aria-label="Connection rate by hour and weekday"
             ></canvas>
           </div>
         </div>
-        <div class="heatmap-legend" aria-label="Follow-up coverage legend from zero to one hundred percent">
-          <span>Follow-up coverage:</span>
+        <div class="heatmap-legend" aria-label="Connection rate legend from zero to twenty-five percent and above">
+          <span>Connect rate:</span>
           <i class="legend-swatch legend-low"></i>
           <i class="legend-swatch legend-low-mid"></i>
           <i class="legend-swatch legend-mid"></i>
           <i class="legend-swatch legend-mid-high"></i>
           <i class="legend-swatch legend-high"></i>
-          <span>0% → 100%</span>
-          <span class="legend-note">Gray = no deals</span>
+          <span>0% → 25%+</span>
+          <span class="legend-note">Gray = no calls</span>
         </div>
       </section>
 
@@ -178,20 +177,20 @@
         <p>
           Refreshed {{ analytics.report.generated_at_display or analytics.report.generated_at }}
           <span aria-hidden="true">·</span>
-          {{ analytics.report.source_count }} source deals
+          {{ analytics.report.source_count }} source calls
           <span aria-hidden="true">·</span>
-          Daily read-only Pipedrive snapshot
+          Daily read-only OpenPhone snapshot
         </p>
       </footer>
 
       <script id="pipedrive-analytics-data" type="application/json">{{ analytics|tojson }}</script>
       {% else %}
       <section class="analytics-empty" role="status">
-        <p class="analytics-eyebrow">Pipedrive Sales Analytics</p>
+        <p class="analytics-eyebrow">OpenPhone Call Analytics</p>
         <h1>The first daily snapshot is not ready yet.</h1>
         <p>
           The Render worker will populate this dashboard after its next successful
-          Pipedrive refresh. No sample or fabricated values are shown.
+          OpenPhone refresh. No sample or fabricated values are shown.
         </p>
         <a class="analytics-empty-link" href="/shows/dashboard">Open the trade show dashboard</a>
       </section>

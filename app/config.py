@@ -64,6 +64,8 @@ class Settings:
     trade_show_ingestion_dir: Path
     pipedrive_api_token: str
     pipedrive_base_url: str
+    openphone_api_key: str
+    openphone_base_url: str
     clay_session_cookie: str
     clay_row_status_column: str
     clay_ready_status_value: str
@@ -168,6 +170,8 @@ def get_settings() -> Settings:
         ).expanduser(),
         pipedrive_api_token=os.getenv("PIPEDRIVE_API_TOKEN", ""),
         pipedrive_base_url=os.getenv("PIPEDRIVE_BASE_URL", "https://api.pipedrive.com/v1").rstrip("/"),
+        openphone_api_key=os.getenv("OPENPHONE_API_KEY", "").strip(),
+        openphone_base_url=os.getenv("OPENPHONE_BASE_URL", "https://api.openphone.com").rstrip("/"),
         clay_session_cookie=os.getenv("CLAY_SESSION_COOKIE", ""),
         clay_row_status_column=os.getenv("CLAY_ROW_STATUS_COLUMN", "enriched_status"),
         clay_ready_status_value=os.getenv("CLAY_READY_STATUS_VALUE", "ready"),

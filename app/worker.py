@@ -60,13 +60,13 @@ def run_worker_loop() -> None:
                 analytics = refresh_pipedrive_analytics_if_due(db)
                 if analytics is not None:
                     logger.info(
-                        "Pipedrive analytics snapshot refreshed. report_date=%s source_count=%s",
+                        "OpenPhone call analytics snapshot refreshed. report_date=%s source_count=%s",
                         analytics["report"]["date"],
                         analytics["report"]["source_count"],
                     )
         except Exception:  # noqa: BLE001
             logger.exception(
-                "Pipedrive analytics refresh failed. Other worker jobs will continue."
+                "OpenPhone call analytics refresh failed. Other worker jobs will continue."
             )
 
         time.sleep(poll_seconds)

@@ -14,7 +14,11 @@ os.environ["EXPORT_DIR"] = str(_TMP_ROOT / "exports")
 os.environ["DASHBOARD_USERNAME"] = "analytics-test-operator"
 os.environ["DASHBOARD_PASSWORD"] = "synthetic-analytics-password"
 os.environ["SESSION_SECRET"] = "synthetic-analytics-session-secret"
-os.environ["PIPEDRIVE_API_TOKEN"] = ""
+os.environ["OPENPHONE_API_KEY"] = ""
+
+from app.config import get_settings  # noqa: E402
+
+get_settings.cache_clear()
 
 from fastapi.testclient import TestClient  # noqa: E402
 
@@ -27,9 +31,9 @@ def _synthetic_payload() -> dict[str, object]:
         {
             "day_index": index,
             "label": label,
-            "deals": 12 + index,
-            "followed_up": 8 + index,
-            "coverage": 66.0 + index,
+            "calls": 12 + index,
+            "connected": 2 + index,
+            "connect_rate": 12.0 + index,
         }
         for index, label in enumerate(("Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"))
     ]
@@ -37,9 +41,9 @@ def _synthetic_payload() -> dict[str, object]:
         {
             "hour": hour,
             "label": "12am" if hour == 0 else f"{hour}am",
-            "deals": 2,
-            "followed_up": 1,
-            "coverage": 50.0,
+            "calls": 20,
+            "connected": 3,
+            "connect_rate": 15.0,
         }
         for hour in range(24)
     ]
@@ -49,53 +53,66 @@ def _synthetic_payload() -> dict[str, object]:
             "hour_label": "12am" if hour == 0 else f"{hour}:00",
             "day_index": day,
             "day_label": weekdays[day]["label"],
-            "deals": 2,
-            "followed_up": 1,
-            "coverage": 50.0,
+            "calls": 20,
+            "connected": 3,
+            "connect_rate": 15.0,
         }
         for hour in range(24)
         for day in range(7)
     ]
     return {
         "report": {
+            "schema_version": "openphone-calls-v1",
             "date": "2026-07-30",
             "generated_at": "Jul 30, 2026 at 6:00 AM",
-            "generated_at_display": "Jul 30, 2026 at 6:00 AM",
             "timezone": "America/New_York",
             "lookback_days": 30,
-            "minimum_sample": 10,
+            "minimum_sample": 15,
             "window_start": "2026-06-30",
-            "window_end": "2026-07-30",
-            "definition": "At least one linked activity",
-            "source_count": 241,
+            "window_end": "2026-07-29",
+            "window_end_exclusive": "2026-07-30",
+            "definition": "Outbound completed calls lasting at least 90 seconds",
+            "source_count": 6210,
         },
         "kpis": {
-            "total_deals": {"value": 241, "display": "241", "followed_up": 161},
-            "coverage": {"value": 66.8, "display": "67%"},
-            "best_hour": {"label": "6pm", "coverage": 100.0, "count": 21},
-            "best_day": {"label": "Mon", "coverage": 94.0, "count": 16},
-            "top_owner": {
-                "label": "Synthetic Owner",
-                "coverage": 92.0,
+            "total_calls": {"value": 6210, "display": "6.2K", "connected": 779},
+            "connect_rate": {"value": 12.5, "display": "13%"},
+            "best_hour": {
+                "label": "6pm",
+                "connect_rate": 20.0,
                 "count": 50,
+                "calls": 50,
+            },
+            "best_day": {
+                "label": "Wed",
+                "connect_rate": 13.0,
+                "count": 900,
+                "calls": 900,
+            },
+            "top_rep": {
+                "label": "Synthetic Rep",
+                "name": "Synthetic Rep",
+                "connect_rate": 25.0,
+                "count": 120,
+                "calls": 120,
             },
         },
         "leaderboard": {
             "days": [{"date": "2026-07-27", "label": "Mon 7/27"}],
             "rows": [
                 {
-                    "owner_id": 1,
-                    "owner": "Synthetic Owner",
+                    "rep": "Synthetic Rep",
                     "days": [
                         {
                             "date": "2026-07-27",
-                            "deals": 4,
-                            "followed_up": 3,
-                            "coverage": 75.0,
+                            "calls": 65,
+                            "connected": 14,
+                            "connect_rate": 21.5,
                         }
                     ],
-                    "period_deals": 50,
-                    "period_coverage": 92.0,
+                    "period_calls": 120,
+                    "period_connected": 30,
+                    "period_connect_rate": 25.0,
                 }
             ],
         },
@@ -103,10 +120,10 @@ def _synthetic_payload() -> dict[str, object]:
             {
                 "day_index": index,
                 "label": label,
-                "deals": 20,
-                "followed_up": 14,
-                "coverage": 70.0,
-                "avg_deals_per_day": 5.0,
+                "calls": 320,
+                "connected": 40,
+                "connect_rate": 12.5,
+                "avg_calls_per_day": 80.0,
             }
             for index, label in enumerate(("Mon", "Tue", "Wed", "Thu", "Fri"))
         ],
@@ -159,7 +176,7 @@ class PipedriveAnalyticsRouteTests(unittest.TestCase):
             response = client.get("/analytics")
         self.assertEqual(response.status_code, 200)
         self.assertIn("first daily snapshot is not ready", response.text)
-        self.assertNotIn("Synthetic Owner", response.text)
+        self.assertNotIn("Synthetic Rep", response.text)
 
     def test_authenticated_dashboard_renders_snapshot_and_local_assets(self) -> None:
         client = self._client()
@@ -170,9 +187,21 @@ class PipedriveAnalyticsRouteTests(unittest.TestCase):
         ):
             response = client.get("/analytics")
         self.assertEqual(response.status_code, 200)
-        self.assertIn("Pipedrive Sales Analytics", response.text)
-        self.assertIn("Synthetic Owner", response.text)
-        self.assertIn("241 source deals", response.text)
+        self.assertIn("OpenPhone Call Analytics", response.text)
+        self.assertIn("Connected = completed calls ≥ 90s", response.text)
+        self.assertIn("Outbound only", response.text)
+        self.assertIn("Synthetic Rep", response.text)
+        self.assertIn("6.2K", response.text)
+        self.assertIn("779 connected", response.text)
+        self.assertIn("6210 source calls", response.text)
+        self.assertIn("Rep leaderboard — this week by day", response.text)
+        self.assertIn("Connected % by weekday — blended, last 4 weeks", response.text)
+        self.assertIn("Connection rate by hour of day (30-day)", response.text)
+        self.assertIn("Connection rate by day of week (30-day)", response.text)
+        self.assertIn(
+            "Connection rate heatmap — hour × day, blended last 4 weeks",
+            response.text,
+        )
         self.assertIn("/static/pipedrive-analytics.css", response.text)
         self.assertIn("/static/pipedrive-analytics.js", response.text)
         self.assertNotIn("cdn.", response.text.lower())

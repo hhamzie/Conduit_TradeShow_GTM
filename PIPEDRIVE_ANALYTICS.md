@@ -1,63 +1,81 @@
-# Pipedrive sales analytics
+# OpenPhone call analytics
 
-The authenticated `/analytics` page is the default dashboard. It reads the
-latest bounded snapshot from the application database; web requests never call
-Pipedrive.
+The authenticated `/analytics` page is the default dashboard. It renders the
+latest bounded OpenPhone snapshot from the application database; dashboard web
+requests never call OpenPhone directly. The legacy filename is retained so
+existing deployment references continue to work.
 
-## Metric contract
+## Source and metric contract
 
-- Source population: non-deleted Pipedrive deals created in the rolling
-  30-day window.
-- Followed up: a source deal whose Pipedrive `activities_count` is greater
-  than zero.
-- Follow-up coverage: followed-up deals divided by source deals.
-- Best hour, best weekday, and top owner: the highest follow-up coverage among
-  buckets with at least `PIPEDRIVE_ANALYTICS_MIN_SAMPLE` deals (default 10).
-- Time attribution: deal `add_time`, converted to
-  `PIPEDRIVE_ANALYTICS_TIMEZONE` (default `America/New_York`).
-- Owner attribution: `owner_id` joined to the Pipedrive users endpoint. The
-  snapshot stores owner display names, aggregate counts, and rates only.
+The source is OpenPhone's read-only API: `/v1/users` resolves rep names,
+`/v1/conversations` discovers the phone-number/participant pairs, and
+`/v1/calls` supplies the call facts. All times are converted to
+`OPENPHONE_ANALYTICS_TIMEZONE` (default `America/New_York`) before bucketing.
+The report excludes the partial current day.
 
-This is deliberately not a win-rate dashboard. The account's current won/lost
-history is too sparse for an honest 30-day outcome view.
+- Eligible call: an outbound call in the reporting window.
+- Connected call: an eligible call with completed status and duration of at
+  least 90 seconds.
+- Connect rate: connected calls divided by eligible outbound calls.
+- Total calls and connect rate: rolling 30 complete days.
+- Best hour and best day: the highest 30-day connect rate among buckets with at
+  least `OPENPHONE_ANALYTICS_MIN_SAMPLE` calls (default 15).
+- Top rep: the highest connect rate across the last seven completed local days
+  among reps meeting the same minimum sample.
+- Rep leaderboard: each rep's calls and connect rate from Monday through
+  yesterday in the current report week, plus the rolling seven-completed-day
+  connect rate.
+- Connected percentage by weekday: connect rate blended across the last four
+  complete weeks, paired with average calls per occurrence of that weekday.
+- Hour and weekday profiles: 30-day connect rate for each hour and weekday.
+- Heatmap: connect rate for every hour × weekday bucket blended across the last
+  four complete weeks. Gray means no calls; colors are `<5%` red, `<10%`
+  orange, `<15%` yellow, `<25%` light green, and `≥25%` green.
 
-## Visual map
+No Pipedrive deal or activity proxy is used for these call metrics.
 
-| Section | Question | Visual |
-|---|---|---|
-| Headline cards | How much deal volume was created, how much was followed up, and which time/owner buckets perform best? | Five KPI cards |
-| Owner leaderboard | Who created deals this week and what share received follow-up? | Daily count/rate table with 30-day rate |
-| Weekday blend | Which weekdays combine follow-up coverage and deal volume? | Dual-axis line/area chart |
-| Hour profile | At what creation hours are deals most likely to receive follow-up? | 24-hour bar chart |
-| Weekday profile | On which creation weekdays are deals most likely to receive follow-up? | Seven-day bar chart |
-| Hour × day pattern | Where are high- and low-coverage creation windows concentrated? | 24 × 7 heatmap |
+## Dashboard sections
 
-## Worker
+| Section | Variables shown |
+|---|---|
+| Headline cards | Total calls (30d), connected count, connect rate (30d), best hour, best day, and top rep (7d) |
+| Rep leaderboard | This week's daily calls and connect percentages, plus 7d percentage |
+| Weekday blend | Connected percentage and average calls/day across the last four weeks |
+| Hour profile | Connection rate by hour of day over 30 days |
+| Weekday profile | Connection rate by day of week over 30 days |
+| Hour × day heatmap | Connection rate by hour and weekday across the last four weeks |
 
-`app.worker` calls `refresh_pipedrive_analytics_if_due` in an isolated error
-boundary. The refresh runs at most once per local report date after
-`PIPEDRIVE_ANALYTICS_REFRESH_HOUR` (default 6). It uses read-only `GET`
-requests to:
+## Worker configuration
 
-- `/api/v2/deals`, cursor-paginated and sorted by newest `add_time`;
-- `/v1/users`, for owner display names.
+The Render worker refreshes the snapshot at most once per local report date
+after `OPENPHONE_ANALYTICS_REFRESH_HOUR` (default 6).
 
 Required worker environment:
 
 ```text
-PIPEDRIVE_API_TOKEN
+OPENPHONE_API_KEY
 DATABASE_URL
 ```
 
 Optional worker environment:
 
 ```text
-PIPEDRIVE_BASE_URL=https://api.pipedrive.com/v1
-PIPEDRIVE_ANALYTICS_TIMEZONE=America/New_York
-PIPEDRIVE_ANALYTICS_REFRESH_HOUR=6
-PIPEDRIVE_ANALYTICS_LOOKBACK_DAYS=30
-PIPEDRIVE_ANALYTICS_MIN_SAMPLE=10
+OPENPHONE_BASE_URL=https://api.openphone.com
+OPENPHONE_ANALYTICS_TIMEZONE=America/New_York
+OPENPHONE_ANALYTICS_REFRESH_HOUR=6
+OPENPHONE_ANALYTICS_LOOKBACK_DAYS=30
+OPENPHONE_ANALYTICS_MIN_SAMPLE=15
 ```
 
-Keep `PIPEDRIVE_API_TOKEN` on the worker only. The web service needs the shared
-`DATABASE_URL` but does not need Pipedrive credentials.
+Keep `OPENPHONE_API_KEY` on the worker only. Do not put it in browser code,
+committed files, URLs, snapshots, or logs. The web service needs the shared
+`DATABASE_URL`, but it does not need OpenPhone credentials.
+
+## Privacy boundary
+
+The worker requests only the conversation, call, and user metadata needed to
+aggregate this report. Conversation participants and phone-number IDs are used
+in memory to retrieve calls, then discarded. The stored snapshot contains
+aggregate call counts/rates and rep display names. It does not store phone
+numbers, contact names, call recordings, transcripts, voicemail audio, or
+message content. The browser receives only the bounded aggregate snapshot.

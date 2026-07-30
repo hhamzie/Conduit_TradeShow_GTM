@@ -14,13 +14,13 @@ logger = logging.getLogger(__name__)
 
 
 def main() -> None:
-    """Create today's Pipedrive analytics snapshot, or reuse it if it exists."""
+    """Create today's OpenPhone call analytics snapshot, or reuse it if it exists."""
 
     init_db()
     with SessionLocal() as db:
         payload = refresh_pipedrive_analytics(db)
     logger.info(
-        "Pipedrive analytics snapshot ready. report_date=%s source_count=%s",
+        "OpenPhone call analytics snapshot ready. report_date=%s source_count=%s",
         payload["report"]["date"],
         payload["report"]["source_count"],
     )

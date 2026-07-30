@@ -23,7 +23,7 @@ def pipedrive_analytics_dashboard(
         "pipedrive_analytics.html",
         template_context(
             request,
-            title="Pipedrive Sales Analytics",
+            title="OpenPhone Call Analytics",
             current_page="pipedrive_analytics",
             analytics=payload,
         ),

@@ -43,7 +43,7 @@
   }
 
   function rateText(value) {
-    return value === null || value === undefined ? "No deals" : `${Math.round(value)}%`;
+    return value === null || value === undefined ? "No calls" : `${Math.round(value)}%`;
   }
 
   function hourLabel(hour) {
@@ -152,14 +152,14 @@
     const { context, width, height } = setupCanvas(canvas);
     const bounds = { left: 56, top: 52, right: width - 54, bottom: height - 34 };
     const rightMaximum = niceMaximum(
-      Math.max(0, ...rows.map((row) => Number(row.avg_deals_per_day) || 0)),
+      Math.max(0, ...rows.map((row) => Number(row.avg_calls_per_day) || 0)),
     );
     drawAxes(context, bounds, { rows: 10, rightMaximum });
     drawLegend(
       context,
       [
-        { label: "Follow-up %", color: palette.green, fill: "rgba(22, 165, 29, 0.14)" },
-        { label: "Avg deals/day", color: palette.blue, fill: "rgba(61, 140, 232, 0.14)" },
+        { label: "Connected %", color: palette.green, fill: "rgba(22, 165, 29, 0.14)" },
+        { label: "Avg calls/day", color: palette.blue, fill: "rgba(61, 140, 232, 0.14)" },
       ],
       width / 2,
       22,
@@ -175,11 +175,11 @@
     context.textBaseline = "top";
     rows.forEach((row, index) => {
       const x = pointPosition(index, rows.length, bounds.left, bounds.right);
-      const coverage = Number(row.coverage) || 0;
-      const volume = Number(row.avg_deals_per_day) || 0;
+      const connectRate = Number(row.connect_rate) || 0;
+      const volume = Number(row.avg_calls_per_day) || 0;
       coveragePoints.push({
         x,
-        y: bounds.bottom - (coverage / 100) * (bounds.bottom - bounds.top),
+        y: bounds.bottom - (connectRate / 100) * (bounds.bottom - bounds.top),
       });
       volumePoints.push({
         x,
@@ -191,7 +191,7 @@
         y: bounds.top,
         width: 44,
         height: bounds.bottom - bounds.top,
-        text: `${row.label}: ${rateText(row.coverage)} followed up · ${volume.toFixed(1)} avg deals/day · ${row.deals} deals`,
+        text: `${row.label}: ${rateText(row.connect_rate)} connected · ${volume.toFixed(1)} avg calls/day · ${row.connected} of ${row.calls} calls connected`,
       });
     });
     context.restore();
@@ -215,10 +215,10 @@
     context.textBaseline = "top";
     rows.forEach((row, index) => {
       const x = bounds.left + slot * (index + 0.5);
-      const coverage = row.coverage === null || row.coverage === undefined
+      const connectRate = row.connect_rate === null || row.connect_rate === undefined
         ? 0
-        : Number(row.coverage);
-      const y = bounds.bottom - (coverage / 100) * (bounds.bottom - bounds.top);
+        : Number(row.connect_rate);
+      const y = bounds.bottom - (connectRate / 100) * (bounds.bottom - bounds.top);
       context.fillStyle = color;
       context.fillRect(x - barWidth / 2, y, barWidth, bounds.bottom - y);
       context.fillStyle = palette.muted;
@@ -228,7 +228,7 @@
         y: bounds.top,
         width: slot,
         height: bounds.bottom - bounds.top,
-        text: `${labelForRow(row)}: ${rateText(row.coverage)} followed up · ${row.deals} deals`,
+        text: `${labelForRow(row)}: ${rateText(row.connect_rate)} connected · ${row.connected} of ${row.calls} calls connected`,
       });
     });
     context.restore();
@@ -237,10 +237,10 @@
 
   function heatColor(value) {
     if (value === null || value === undefined) return palette.empty;
-    if (value < 20) return "#972b25";
-    if (value < 40) return "#9c632d";
-    if (value < 60) return "#a4a43c";
-    if (value < 80) return "#70a239";
+    if (value < 5) return "#972b25";
+    if (value < 10) return "#9c632d";
+    if (value < 15) return "#a4a43c";
+    if (value < 25) return "#70a239";
     return "#4fa237";
   }
 
@@ -284,17 +284,18 @@
         const cell = byKey.get(`${hour}:${day}`) || {
           hour,
           day_index: day,
-          deals: 0,
-          coverage: null,
+          calls: 0,
+          connected: 0,
+          connect_rate: null,
         };
-        context.fillStyle = heatColor(cell.coverage);
+        context.fillStyle = heatColor(cell.connect_rate);
         context.fillRect(x, y, cellWidth, cellHeight);
         hits.push({
           x,
           y,
           width: cellWidth,
           height: cellHeight,
-          text: `${weekdayLabels[day]} ${hourLabel(hour)}: ${rateText(cell.coverage)} followed up · ${cell.deals} deals`,
+          text: `${weekdayLabels[day]} ${hourLabel(hour)}: ${rateText(cell.connect_rate)} connected · ${cell.connected} of ${cell.calls} calls connected`,
         });
       }
     }
